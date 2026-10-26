@@ -246,17 +246,30 @@ impl SgLocator {
 
     /// True when the resolved binary is a real file or may live on the PATH.
     pub fn binary_available(&self) -> bool {
-        self.binary.is_file()
+        let is_candidate = self.binary.is_file()
             || self
                 .binary
                 .parent()
                 .map(|p| p.as_os_str().is_empty())
-                .unwrap_or(true)
+                .unwrap_or(true);
+        is_candidate
+            && std::process::Command::new(&self.binary)
+                .arg("--version")
+                .output()
+                .is_ok_and(|output| {
+                    output.status.success()
+                        && is_ast_grep_version(&String::from_utf8_lossy(&output.stdout))
+                })
     }
 
     fn config_path(&self) -> Option<PathBuf> {
         self.config_dir.as_ref().map(|d| d.join("sgconfig.yml"))
     }
+}
+
+fn is_ast_grep_version(output: &str) -> bool {
+    let mut parts = output.split_whitespace();
+    parts.next() == Some("ast-grep") && parts.next().is_some()
 }
 
 /// Locates a directory containing `sgconfig.yml` (+ `rules/`)
@@ -565,6 +578,13 @@ pub(crate) async fn scan_sg_content(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identifies_ast_grep_version_output() {
+        assert!(is_ast_grep_version("ast-grep 0.51.0"));
+        assert!(!is_ast_grep_version("Usage: sg group [[-c] command]"));
+        assert!(!is_ast_grep_version("other-tool 0.51.0"));
+    }
 
     #[test]
     fn go_ext_matches_filepath_ext() {
