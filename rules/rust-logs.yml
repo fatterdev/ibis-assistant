@@ -1,0 +1,17 @@
+id: rust-logs
+language: rust
+rule:
+  any:
+    - pattern: info!($$$ARGS)
+    - pattern: warn!($$$ARGS)
+    - pattern: error!($$$ARGS)
+    - pattern: debug!($$$ARGS)
+    - pattern: trace!($$$ARGS)
+    - pattern: log::info!($$$ARGS)
+    - pattern: log::warn!($$$ARGS)
+    - pattern: log::error!($$$ARGS)
+    - pattern: log::debug!($$$ARGS)
+    - pattern: log::trace!($$$ARGS)
+    - pattern: tracing::info!($$$ARGS)
+    - pattern: tracing::warn!($$$ARGS)
+    - pattern: tracing::error!($$$ARGS)

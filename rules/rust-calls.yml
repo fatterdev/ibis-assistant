@@ -1,0 +1,4 @@
+id: rust-calls
+language: rust
+rule:
+  pattern: $F($$$ARGS)

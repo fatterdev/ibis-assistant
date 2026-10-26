@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ibis-assistant": {
+      "command": "node",
+      "args": ["C:/work/ibis-assistant/ide-host/bin/ibis-mcp-host.mjs"],
+      "env": {
+        "RUNTIME_MODE": "plugin",
+        "IBIS_MCP_URL": ""
+      }
+    }
+  }
+}

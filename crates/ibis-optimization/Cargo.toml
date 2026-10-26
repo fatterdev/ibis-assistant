@@ -1,0 +1,18 @@
+[package]
+name = "ibis-optimization"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+ibis-ai.workspace = true
+ibis-db.workspace = true
+ibis-search.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+surrealdb = { version = "3.3.4", features = ["protocol-ws"] }
+tokio.workspace = true
+tracing.workspace = true

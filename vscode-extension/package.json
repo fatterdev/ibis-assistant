@@ -1,0 +1,59 @@
+{
+  "name": "ibis-assistant",
+  "displayName": "Ibis Assistant",
+  "description": "Living project memory over MCP. Spawns or attaches to the Ibis Assistant Go runtime (Cursor remains the primary IDE packaging).",
+  "version": "1.0.0",
+  "publisher": "terenzif",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ibis.openSettings",
+        "title": "Ibis: Open Settings"
+      },
+      {
+        "command": "ibis.status",
+        "title": "Ibis: Status"
+      },
+      {
+        "command": "ibis.remember",
+        "title": "Ibis: Remember"
+      },
+      {
+        "command": "ibis.setWorkingState",
+        "title": "Ibis: Set working state"
+      }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "ibis-assistant",
+        "label": "Ibis Assistant"
+      }
+    ]
+  },
+  "scripts": {
+    "package": "npx --yes @vscode/vsce package"
+  },
+  "dependencies": {
+    "@ibis-assistant/ide-host": "file:../ide-host"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "3.3.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/terenzif/ibis-assistant.git",
+    "directory": "vscode-extension"
+  }
+}

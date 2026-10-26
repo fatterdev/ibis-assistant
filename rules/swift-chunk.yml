@@ -1,0 +1,6 @@
+id: swift-chunk
+language: swift
+rule:
+  any:
+    - kind: function_declaration
+    - kind: class_declaration

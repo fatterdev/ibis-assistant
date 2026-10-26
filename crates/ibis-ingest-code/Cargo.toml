@@ -1,0 +1,28 @@
+[package]
+name = "ibis-ingest-code"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+flate2 = "1"
+ibis-ai = { version = "0.1.0", path = "../ibis-ai" }
+ibis-core = { version = "0.1.0", path = "../ibis-core" }
+ibis-db = { version = "0.1.0", path = "../ibis-db" }
+ibis-git = { version = "0.1.0", path = "../ibis-git" }
+regex.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+surrealdb = { version = "3.3.4", features = ["protocol-ws"] }
+tar = "0.4"
+tempfile.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+zip = { version = "2", default-features = false, features = ["deflate"] }

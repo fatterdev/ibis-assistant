@@ -1,0 +1,6 @@
+id: java-chunk
+language: java
+rule:
+  any:
+    - kind: method_declaration
+    - kind: class_declaration

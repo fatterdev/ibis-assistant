@@ -1,0 +1,6 @@
+id: cpp-chunk
+language: cpp
+rule:
+  any:
+    - kind: function_definition
+    - kind: class_specifier

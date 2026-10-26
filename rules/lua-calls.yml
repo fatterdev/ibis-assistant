@@ -1,0 +1,4 @@
+id: lua-calls
+language: lua
+rule:
+  pattern: $F($$$ARGS)

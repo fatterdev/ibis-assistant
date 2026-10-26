@@ -1,0 +1,27 @@
+[package]
+name = "ibis-search"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ibis-ai = { version = "0.1.0", path = "../ibis-ai" }
+ibis-core = { version = "0.1.0", path = "../ibis-core" }
+ibis-db = { version = "0.1.0", path = "../ibis-db" }
+ibis-git = { version = "0.1.0", path = "../ibis-git" }
+async-trait.workspace = true
+chrono.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+futures.workspace = true
+tempfile.workspace = true

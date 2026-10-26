@@ -1,0 +1,42 @@
+[package]
+name = "ibis-ingest-logs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ibis-ai = { version = "0.1.0", path = "../ibis-ai" }
+ibis-core = { version = "0.1.0", path = "../ibis-core" }
+ibis-db = { version = "0.1.0", path = "../ibis-db" }
+ibis-git = { version = "0.1.0", path = "../ibis-git" }
+
+async-trait.workspace = true
+base64.workspace = true
+chrono.workspace = true
+notify.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+surrealdb.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+
+# Remote polling (D1): FTP + SFTP clients; SMB dropped → UNC/native mounts.
+suppaftp.workspace = true
+russh.workspace = true
+russh-sftp.workspace = true
+
+# SMTP notifier TLS paths (ssl_tls / starttls).
+tokio-rustls.workspace = true
+rustls.workspace = true
+rustls-pki-types.workspace = true
+webpki-roots.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+uuid.workspace = true

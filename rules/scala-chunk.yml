@@ -1,0 +1,8 @@
+id: scala-chunk
+language: scala
+rule:
+  any:
+    - kind: function_definition
+    - kind: class_definition
+    - kind: object_definition
+    - kind: trait_definition

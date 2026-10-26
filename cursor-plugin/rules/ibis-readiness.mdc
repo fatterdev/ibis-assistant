@@ -1,0 +1,15 @@
+---
+description: Before Ibis ask/logs/tickets fail, check readiness via STATUS, settings, and ticket capabilities
+alwaysApply: false
+---
+
+# Ibis readiness
+
+When the user asks about Ibis Assistant, or tools like `ask_project`, `analyze_logs`, or ticket_* fail for missing AI/providers:
+
+1. Prefer command **Ibis: Status** or read plugin `STATUS.md`.
+2. Call `settings_get` / `settings_open_ui` for AI keys (ephemeral Settings URL is valid in plugin mode).
+3. Call `ticket_get_capabilities` before trusting ticket workflows.
+4. Empty Cursor window: capability checks are OK; full ingest/ask needs an opened git folder and `init_project`.
+5. Do not assume two IDE plugins share one process — default is one stdio child each; shared runtime uses personal HTTP + `IBIS_MCP_URL`.
+6. Durable capture: **Ibis: Remember** (`memory_add` decision/fix/rule) and **Ibis: Set working state** (`set_working_state`). Prefer `load_session_context` once for current team truth; use `ask_project`/`why_changed` for commit-meaning history.

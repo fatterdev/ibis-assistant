@@ -1,0 +1,30 @@
+{
+  "name": "@ibis-assistant/ide-host",
+  "version": "1.0.0",
+  "description": "Thin IDE host for Ibis Assistant: spawn plugin stdio or attach to a shared personal HTTP MCP runtime",
+  "type": "module",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "bin": {
+    "ibis-mcp-host": "bin/ibis-mcp-host.mjs"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./lm-bridge": "./src/lm-bridge.js",
+    "./lm-rpc": "./src/lm-rpc.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/terenzif/ibis-assistant.git",
+    "directory": "ide-host"
+  }
+}

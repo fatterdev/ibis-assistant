@@ -1,0 +1,5 @@
+id: ai-generated-erb-script-chunk
+language: html
+rule:
+  any:
+    - kind: script_element

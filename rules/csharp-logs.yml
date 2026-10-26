@@ -1,0 +1,9 @@
+id: csharp-logs
+language: csharp
+rule:
+  any:
+    - pattern: $LOGGER.LogInformation($FORMAT)
+    - pattern: $LOGGER.LogWarning($FORMAT)
+    - pattern: $LOGGER.LogError($FORMAT)
+    - pattern: $LOGGER.LogDebug($FORMAT)
+    - pattern: $LOGGER.LogCritical($FORMAT)

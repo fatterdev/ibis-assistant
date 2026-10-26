@@ -1,0 +1,6 @@
+id: ai-go-zap-logs
+language: go
+rule:
+  any:
+    - pattern: $LOGGER.Infow($FORMAT, $$$ARGS)
+    - pattern: $LOGGER.Errorw($FORMAT, $$$ARGS)

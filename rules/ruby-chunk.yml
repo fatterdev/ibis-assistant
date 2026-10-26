@@ -1,0 +1,7 @@
+id: ruby-chunk
+language: ruby
+rule:
+  any:
+    - kind: method
+    - kind: class
+    - kind: module

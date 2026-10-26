@@ -1,0 +1,16 @@
+/target
+/dist
+/config.json
+/config/ticketing_config.json
+testrun/
+rules_quarantine/
+*.log
+surreal
+surreal.exe
+sg
+sg.exe
+ollama*.exe
+OllamaSetup.exe
+
+# Local-only agent instructions (never commit)
+AGENTS.md

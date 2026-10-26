@@ -1,0 +1,4 @@
+id: swift-calls
+language: swift
+rule:
+  pattern: $F($$$ARGS)

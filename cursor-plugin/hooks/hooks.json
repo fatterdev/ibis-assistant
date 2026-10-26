@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "prompt",
+        "prompt": "Ibis Assistant plugin is available. Temporal contract: load_session_context ONCE for durable current team truth (working state, rules, fixes, decisions); ask_project for hybrid HEAD code + commit_chunk change meaning + current memory; why_changed for focused why/when forensics. Do not call memory_* on every turn. Use capture_observation sparingly for genuinely new reusable findings. Prefer Ibis: Status / STATUS.md for setup — not settings_get / ticket_get_capabilities unless diagnosing missing AI keys or ticketing."
+      }
+    ],
+    "stop": [
+      {
+        "type": "prompt",
+        "prompt": "Before finishing, assess whether this session produced a genuinely new, reusable lesson, correction, constraint, or surprising finding. If and only if it did, and it was not already captured, call capture_observation once with a concise standalone observation. Call load_session_context only when needed to avoid a duplicate or stale capture, and at most once per session. Otherwise finish without calling memory tools.",
+        "loop_limit": 1
+      }
+    ]
+  }
+}

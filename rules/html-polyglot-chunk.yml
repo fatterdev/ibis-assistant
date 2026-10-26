@@ -1,0 +1,14 @@
+# Bootstrap HTML-host chunks for template/polyglot files mapped via languageGlobs.
+# AI may add ai-generated-*-chunk.yml for stack-specific patterns.
+id: html-polyglot-chunk
+language: html
+rule:
+  any:
+    - kind: script_element
+    - kind: style_element
+    - kind: element
+      has:
+        kind: start_tag
+        has:
+          kind: tag_name
+          regex: "^(form|template|component)"

@@ -1,0 +1,4 @@
+id: php-calls
+language: php
+rule:
+  pattern: $F($$$ARGS)
