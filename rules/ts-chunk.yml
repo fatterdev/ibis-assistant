@@ -1,0 +1,8 @@
+id: ts-chunk
+language: typescript
+rule:
+  any:
+    - kind: function_declaration
+    - kind: method_definition
+    - kind: class_declaration
+    - kind: interface_declaration

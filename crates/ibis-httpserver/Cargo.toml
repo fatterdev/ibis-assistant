@@ -1,0 +1,30 @@
+[package]
+name = "ibis-httpserver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+ibis-core.workspace = true
+ibis-db.workspace = true
+ibis-ai.workspace = true
+ibis-ingest-logs.workspace = true
+async-trait.workspace = true
+rmcp = { version = "3.7.0", features = ["server", "client", "macros", "schemars", "transport-async-rw", "transport-streamable-http-server", "transport-streamable-http-server-session", "transport-worker", "transport-streamable-http-client", "transport-streamable-http-client-reqwest"] }
+axum.workspace = true
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["server-auto", "service", "tokio"] }
+http-body = "1"
+bytes = "1"
+http-body-util = "0.1"
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tokio-util = "0.7"
+tower = { version = "0.5", features = ["util"] }
+tracing.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true

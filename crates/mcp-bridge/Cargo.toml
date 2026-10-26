@@ -1,0 +1,15 @@
+[package]
+name = "mcp-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+tokio = { workspace = true, features = ["full"] }
+reqwest = { workspace = true, features = ["stream"] }
+futures.workspace = true
+
+[dev-dependencies]
+axum.workspace = true

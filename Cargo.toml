@@ -1,0 +1,91 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ibis-core",
+    "crates/ibis-logger",
+    "crates/ibis-git",
+    "crates/ibis-db",
+    "crates/ibis-ai",
+    "crates/ibis-ingest-git",
+    "crates/ibis-ingest-code",
+    "crates/ibis-ingest-logs",
+    "crates/ibis-ingest-dynamic",
+    "crates/ibis-ingest-redmine",
+    "crates/ibis-search",
+    "crates/ibis-ticketing",
+    "crates/ibis-repopr",
+    "crates/ibis-optimization",
+    "crates/ibis-settings",
+    "crates/ibis-wizard",
+    "crates/ibis-cli",
+    "crates/ibis-httpserver",
+    "crates/ibis-server",
+    "crates/mcp-bridge",
+    "crates/xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["fatterdev <dev@fatter.dev>"]
+repository = "https://github.com/fatterdev/ibis-assistant"
+
+[workspace.dependencies]
+ibis-core = { path = "crates/ibis-core" }
+ibis-logger = { path = "crates/ibis-logger" }
+ibis-git = { path = "crates/ibis-git" }
+ibis-db = { path = "crates/ibis-db" }
+ibis-ai = { path = "crates/ibis-ai" }
+ibis-ingest-git = { path = "crates/ibis-ingest-git" }
+ibis-ingest-code = { path = "crates/ibis-ingest-code" }
+ibis-ingest-logs = { path = "crates/ibis-ingest-logs" }
+ibis-ingest-dynamic = { path = "crates/ibis-ingest-dynamic" }
+ibis-ingest-redmine = { path = "crates/ibis-ingest-redmine" }
+ibis-search = { path = "crates/ibis-search" }
+ibis-ticketing = { path = "crates/ibis-ticketing" }
+ibis-repopr = { path = "crates/ibis-repopr" }
+ibis-optimization = { path = "crates/ibis-optimization" }
+ibis-settings = { path = "crates/ibis-settings" }
+ibis-wizard = { path = "crates/ibis-wizard" }
+ibis-cli = { path = "crates/ibis-cli" }
+ibis-httpserver = { path = "crates/ibis-httpserver" }
+ibis-server = { path = "crates/ibis-server" }
+
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+notify = "8"
+surrealdb = { version = "3.3.4", features = ["protocol-ws"] }
+thiserror = "2"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+regex = "1"
+futures = "0.3"
+async-trait = "0.1"
+tempfile = "3"
+walkdir = "2"
+# Settings SPA static-asset embedding (D13: go:embed equivalent)
+include_dir = "0.7"
+base64 = "0.22"
+# Remote log polling (D1: FTP/SFTP clients kept, SMB dropped → UNC/native mounts)
+suppaftp = { version = "12", default-features = false, features = ["tokio"] }
+russh = { version = "0.65", default-features = false, features = ["ring", "rsa"] }
+russh-sftp = "3"
+# SMTP TLS notifier (ssl_tls / starttls)
+tokio-rustls = "0.26"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pki-types = "1"
+webpki-roots = "0.26"
+
+[profile.release]
+lto = "thin"
+strip = true

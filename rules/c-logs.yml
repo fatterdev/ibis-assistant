@@ -1,0 +1,12 @@
+id: c-logs
+language: c
+rule:
+  any:
+    - pattern: printf($FORMAT)
+    - pattern: printf($FORMAT, $$$ARGS)
+    - pattern: fprintf($STREAM, $FORMAT)
+    - pattern: fprintf($STREAM, $FORMAT, $$$ARGS)
+    - pattern: puts($MSG)
+    - pattern: perror($MSG)
+    - pattern: syslog($LEVEL, $FORMAT)
+    - pattern: syslog($LEVEL, $FORMAT, $$$ARGS)

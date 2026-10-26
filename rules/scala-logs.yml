@@ -1,0 +1,9 @@
+id: scala-logs
+language: scala
+rule:
+  any:
+    - pattern: $LOGGER.info($MSG)
+    - pattern: $LOGGER.debug($MSG)
+    - pattern: $LOGGER.warn($MSG)
+    - pattern: $LOGGER.error($MSG)
+    - pattern: println($MSG)

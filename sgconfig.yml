@@ -1,0 +1,18 @@
+ruleDirs:
+  - rules
+# Bootstrap: map common template/framework extensions to HTML so embedded
+# <script>/<style> regions are language-injected. AI rule synth may add more
+# languageGlobs at runtime via EnsureLanguageGlob for any unfamiliar extension.
+languageGlobs:
+  html:
+    - "*.vue"
+    - "*.svelte"
+    - "*.astro"
+    - "*.jsp"
+    - "*.jspx"
+    - "*.erb"
+    - "*.ejs"
+    - "*.hbs"
+    - "*.njk"
+    - "*.liquid"
+    - "*.twig"

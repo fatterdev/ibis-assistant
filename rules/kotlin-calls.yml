@@ -1,0 +1,4 @@
+id: kotlin-calls
+language: kotlin
+rule:
+  pattern: $F($$$ARGS)

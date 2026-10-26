@@ -1,0 +1,10 @@
+id: php-logs
+language: php
+rule:
+  any:
+    - pattern: error_log($MSG)
+    - pattern: $LOGGER->info($MSG)
+    - pattern: $LOGGER->debug($MSG)
+    - pattern: $LOGGER->warning($MSG)
+    - pattern: $LOGGER->error($MSG)
+    - pattern: syslog($LEVEL, $MSG)

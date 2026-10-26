@@ -1,0 +1,5 @@
+# Disabled: SCSS/CSS AST lacks reliable call_expression fields for ast-grep.
+id: scss-calls
+language: css
+rule:
+  pattern: __ibis_disabled_scss_calls__

@@ -1,0 +1,7 @@
+id: ruby-calls
+language: ruby
+rule:
+  kind: call
+  has:
+    field: method
+    kind: identifier

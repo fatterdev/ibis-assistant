@@ -1,0 +1,13 @@
+id: kotlin-logs
+language: kotlin
+rule:
+  any:
+    - pattern: Log.v($TAG, $MSG)
+    - pattern: Log.d($TAG, $MSG)
+    - pattern: Log.i($TAG, $MSG)
+    - pattern: Log.w($TAG, $MSG)
+    - pattern: Log.e($TAG, $MSG)
+    - pattern: $LOGGER.info($MSG)
+    - pattern: $LOGGER.debug($MSG)
+    - pattern: $LOGGER.warn($MSG)
+    - pattern: $LOGGER.error($MSG)

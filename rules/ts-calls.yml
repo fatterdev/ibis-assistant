@@ -1,0 +1,7 @@
+id: ts-calls
+language: typescript
+rule:
+  kind: call_expression
+  has:
+    field: function
+    kind: identifier

@@ -1,0 +1,9 @@
+id: java-logs
+language: java
+rule:
+  any:
+    - pattern: $LOGGER.info($FORMAT)
+    - pattern: $LOGGER.debug($FORMAT)
+    - pattern: $LOGGER.warn($FORMAT)
+    - pattern: $LOGGER.error($FORMAT)
+    - pattern: $LOGGER.trace($FORMAT)

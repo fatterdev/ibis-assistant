@@ -1,0 +1,7 @@
+id: go-calls
+language: go
+rule:
+  kind: call_expression
+  has:
+    field: function
+    kind: identifier

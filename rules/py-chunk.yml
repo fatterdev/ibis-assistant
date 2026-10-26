@@ -1,0 +1,6 @@
+id: py-chunk
+language: python
+rule:
+  any:
+    - kind: function_definition
+    - kind: class_definition

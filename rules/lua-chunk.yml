@@ -1,0 +1,6 @@
+id: lua-chunk
+language: lua
+rule:
+  any:
+    - kind: function_declaration
+    - kind: function_definition

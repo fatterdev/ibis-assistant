@@ -1,0 +1,9 @@
+id: py-logs
+language: python
+rule:
+  any:
+    - pattern: $LOGGER.info($FORMAT)
+    - pattern: $LOGGER.debug($FORMAT)
+    - pattern: $LOGGER.warning($FORMAT)
+    - pattern: $LOGGER.error($FORMAT)
+    - pattern: $LOGGER.critical($FORMAT)

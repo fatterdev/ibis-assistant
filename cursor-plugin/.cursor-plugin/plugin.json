@@ -1,0 +1,39 @@
+{
+  "name": "ibis-assistant",
+  "displayName": "Ibis Assistant",
+  "version": "1.0.0",
+  "description": "Living project memory over MCP. Spawns the Ibis Assistant Go binary on stdio against the opened folder. Includes Settings, Remember, working state, readiness status, and hybrid AI.",
+  "author": {
+    "name": "fatterdev",
+    "email": "dev@fatter.dev"
+  },
+  "homepage": "https://github.com/fatterdev/ibis-assistant",
+  "repository": "https://github.com/fatterdev/ibis-assistant",
+  "license": "Apache-2.0",
+  "logo": "assets/logo.png",
+  "keywords": [
+    "ibis",
+    "mcp",
+    "git",
+    "logs",
+    "knowledge-graph",
+    "memory",
+    "remember",
+    "working-state",
+    "settings",
+    "ollama"
+  ],
+  "category": "developer-tools",
+  "tags": [
+    "mcp",
+    "code-intelligence",
+    "logs",
+    "project-memory",
+    "ai-settings"
+  ],
+  "mcpServers": "./mcp.json",
+  "commands": "./commands",
+  "rules": "./rules",
+  "skills": "./skills",
+  "hooks": "./hooks"
+}

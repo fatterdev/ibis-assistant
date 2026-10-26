@@ -1,0 +1,7 @@
+id: cpp-logs
+language: cpp
+rule:
+  any:
+    - pattern: printf($FORMAT, $$$ARGS)
+    - pattern: $LOGGER.info($FORMAT)
+    - pattern: $LOGGER.error($FORMAT)

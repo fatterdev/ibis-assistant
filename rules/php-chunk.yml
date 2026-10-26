@@ -1,0 +1,7 @@
+id: php-chunk
+language: php
+rule:
+  any:
+    - kind: function_definition
+    - kind: method_declaration
+    - kind: class_declaration
