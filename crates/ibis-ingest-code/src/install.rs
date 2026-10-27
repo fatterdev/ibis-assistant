@@ -102,7 +102,14 @@ pub async fn local_version(bin: &Path) -> Result<String, CodeIngestError> {
 /// Fetches the latest ast-grep release from the GitHub API.
 pub async fn latest_release() -> Result<GitHubRelease, CodeIngestError> {
     let client = reqwest::Client::builder().timeout(API_TIMEOUT).build()?;
-    let response = client.get(RELEASES_API).send().await?;
+    let mut request = client
+        .get(RELEASES_API)
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "ibis-assistant");
+    if let Some(token) = github_api_token() {
+        request = request.bearer_auth(token);
+    }
+    let response = request.send().await?;
     if !response.status().is_success() {
         return Err(CodeIngestError::other(format!(
             "github api returned status: {}",
@@ -110,6 +117,17 @@ pub async fn latest_release() -> Result<GitHubRelease, CodeIngestError> {
         )));
     }
     Ok(response.json::<GitHubRelease>().await?)
+}
+
+fn github_api_token() -> Option<String> {
+    for key in ["GITHUB_TOKEN", "GH_TOKEN"] {
+        if let Ok(token) = std::env::var(key) {
+            if !token.is_empty() {
+                return Some(token);
+            }
+        }
+    }
+    None
 }
 
 /// Maps the Rust OS token to the ast-grep asset naming convention
