@@ -244,19 +244,41 @@ impl SgLocator {
         }
     }
 
-    /// True when the resolved binary is a real file or may live on the PATH.
+    /// True when the resolved binary is a real file or may live on the PATH —
+    /// either way it must pass an ast-grep `--version` probe. Guards the PATH
+    /// fallback against lookalikes (Linux images ship shadow-utils' `sg`,
+    /// which would otherwise be mistaken for the sandbox binary).
     pub fn binary_available(&self) -> bool {
-        self.binary.is_file()
+        let resolvable = self.binary.is_file()
             || self
                 .binary
                 .parent()
                 .map(|p| p.as_os_str().is_empty())
-                .unwrap_or(true)
+                .unwrap_or(true);
+        resolvable && is_ast_grep_binary(&self.binary)
     }
 
     fn config_path(&self) -> Option<PathBuf> {
         self.config_dir.as_ref().map(|d| d.join("sgconfig.yml"))
     }
+}
+
+/// True when `bin` (a path or bare PATH name) responds to `--version` with
+/// the ast-grep banner (`ast-grep 0.51.0`). Distinguishes the real ast-grep
+/// CLI from shadow-utils' `sg` that Linux images ship on PATH.
+fn is_ast_grep_binary(bin: &Path) -> bool {
+    std::process::Command::new(bin)
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map(|out| {
+            out.status.success()
+                && String::from_utf8_lossy(&out.stdout)
+                    .split_whitespace()
+                    .next()
+                    .is_some_and(|field| field.eq_ignore_ascii_case("ast-grep"))
+        })
+        .unwrap_or(false)
 }
 
 /// Locates a directory containing `sgconfig.yml` (+ `rules/`)
