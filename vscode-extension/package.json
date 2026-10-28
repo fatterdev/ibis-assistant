@@ -1,15 +1,38 @@
 {
   "name": "ibis-assistant",
   "displayName": "Ibis Assistant",
-  "description": "Living project memory over MCP. Spawns or attaches to the Ibis Assistant Go runtime (Cursor remains the primary IDE packaging).",
+  "description": "Living project memory over MCP for VS Code. Spawns an isolated Ibis Assistant (Rust) stdio child or attaches to a shared personal runtime for graph, logs, tickets, and typed memory.",
   "version": "1.0.0",
-  "publisher": "terenzif",
+  "publisher": "fatterdev",
   "license": "MIT",
+  "icon": "assets/icon.png",
+  "galleryBanner": {
+    "color": "#075351",
+    "theme": "dark"
+  },
   "engines": {
-    "vscode": "^1.90.0"
+    "vscode": "^1.101.0"
   },
   "categories": [
+    "AI",
     "Other"
+  ],
+  "keywords": [
+    "ibis",
+    "mcp",
+    "memory",
+    "knowledge graph",
+    "git",
+    "logs",
+    "ai",
+    "ollama",
+    "project memory",
+    "code intelligence",
+    "surreal",
+    "assistant"
+  ],
+  "extensionKind": [
+    "workspace"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -20,6 +43,14 @@
       {
         "command": "ibis.openSettings",
         "title": "Ibis: Open Settings"
+      },
+      {
+        "command": "ibis.openExtensionSettings",
+        "title": "Ibis: Open Extension Settings (VS Code)"
+      },
+      {
+        "command": "ibis.showOutput",
+        "title": "Ibis: Show Output"
       },
       {
         "command": "ibis.status",
@@ -39,21 +70,257 @@
         "id": "ibis-assistant",
         "label": "Ibis Assistant"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Ibis Assistant",
+      "properties": {
+        "ibis.runtime.mode": {
+          "type": "string",
+          "enum": [
+            "spawn",
+            "attach"
+          ],
+          "enumDescriptions": [
+            "Spawn an isolated `ibis-assistant -mode stdio -runtime-mode plugin` child (one per IDE, plugin data dir).",
+            "Attach to an already running shared runtime over Streamable HTTP (`#ibis.runtime.mcpUrl#`)."
+          ],
+          "default": "spawn",
+          "scope": "machine-overridable",
+          "order": 1,
+          "markdownDescription": "How the extension reaches Ibis MCP. `attach` is equivalent to setting the `IBIS_MCP_URL` environment variable and is the recommended way to share one personal daemon between Cursor and VS Code. The `IBIS_MCP_URL` environment variable is only honored while this setting is left at its default."
+        },
+        "ibis.runtime.mcpUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:3030/mcp",
+          "scope": "machine-overridable",
+          "order": 2,
+          "markdownDescription": "Streamable HTTP MCP endpoint used when `#ibis.runtime.mode#` is `attach` (equivalent of the `IBIS_MCP_URL` environment variable). Start the daemon with `ibis-assistant run`."
+        },
+        "ibis.runtime.binaryPath": {
+          "type": "string",
+          "default": "ibis-assistant",
+          "scope": "machine-overridable",
+          "order": 3,
+          "markdownDescription": "Command name or absolute path of the Ibis Assistant binary used when spawning (equivalent of the `IBIS_BIN` environment variable)."
+        },
+        "ibis.runtime.dataDir": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "order": 4,
+          "markdownDescription": "Override the plugin data directory (equivalent of the `IBIS_DATA_DIR` environment variable). Leave empty to use `%LOCALAPPDATA%\\ibis-assistant\\plugin` on Windows or the platform default."
+        },
+        "ibis.runtime.runtimeMode": {
+          "type": "string",
+          "enum": [
+            "plugin",
+            "personal",
+            "server"
+          ],
+          "default": "plugin",
+          "scope": "machine-overridable",
+          "order": 5,
+          "markdownDescription": "Value passed to `-runtime-mode` for a spawned child. Keep `plugin` for IDE-owned stdio children; `personal`/`server` are advanced runtime deployments."
+        },
+        "ibis.runtime.extraArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine-overridable",
+          "order": 6,
+          "markdownDescription": "Extra CLI arguments appended after `-mode stdio -runtime-mode <mode>` when spawning the child."
+        },
+        "ibis.runtime.workspaceOverride": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "order": 7,
+          "markdownDescription": "Explicit opened-folder path exported as `IBIS_WORKSPACE` (equivalent of the `IBIS_WORKSPACE` environment variable). Leave empty to auto-detect the first VS Code workspace folder."
+        },
+        "ibis.runtime.autoAttach": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine-overridable",
+          "order": 8,
+          "markdownDescription": "When spawning would be used, first probe `#ibis.runtime.autoAttachProbeUrls#` and attach to a reachable personal runtime instead of starting an isolated child."
+        },
+        "ibis.runtime.autoAttachProbeUrls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "http://127.0.0.1:3030/mcp",
+            "http://127.0.0.1:3031/mcp"
+          ],
+          "scope": "machine-overridable",
+          "order": 9,
+          "markdownDescription": "Loopback Streamable HTTP MCP endpoints probed in order when `#ibis.runtime.autoAttach#` is enabled."
+        },
+        "ibis.mcp.registerProvider": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine-overridable",
+          "order": 20,
+          "markdownDescription": "Register the Ibis Assistant MCP server-definition provider so VS Code agent mode can start the server automatically. Requires a window reload when changed."
+        },
+        "ibis.lmBridge.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine-overridable",
+          "order": 21,
+          "markdownDescription": "Start the IDE language-model bridge on `127.0.0.1` so the runtime can use VS Code-provided models (runtime setting `ai.reasoning.use_ide_provided_models`). Requires a window reload when changed."
+        },
+        "ibis.lmBridge.port": {
+          "type": "number",
+          "default": 39201,
+          "minimum": 1024,
+          "maximum": 65535,
+          "scope": "machine-overridable",
+          "order": 22,
+          "markdownDescription": "Loopback port of the IDE LM bridge (equivalent of the `IBIS_LM_BRIDGE_PORT` environment variable). Requires a window reload when changed."
+        },
+        "ibis.lmBridge.url": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "order": 23,
+          "markdownDescription": "Explicit bridge URL exported as `IBIS_LM_BRIDGE_URL` to the runtime (equivalent of the same environment variable). Leave empty to derive `http://127.0.0.1:<port>` from `#ibis.lmBridge.port#`."
+        },
+        "ibis.lmBridge.modelFamily": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "order": 24,
+          "markdownDescription": "Optional `vscode.lm` model family filter (e.g. `gpt-4o`, `claude-3.5-sonnet`). Leave empty to use the first available IDE-provided model."
+        },
+        "ibis.settings.url": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "order": 30,
+          "markdownDescription": "Explicit Ibis Settings UI URL opened by **Ibis: Open Settings** (equivalent of the `IBIS_SETTINGS_URL` environment variable). Leave empty to probe `#ibis.settings.probeUrls#` and fall back to the MCP `settings_open_ui` tool."
+        },
+        "ibis.settings.probeUrls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "http://127.0.0.1:3030/settings/",
+            "http://127.0.0.1:3031/settings/"
+          ],
+          "scope": "machine-overridable",
+          "order": 31,
+          "markdownDescription": "Personal Settings UI endpoints probed in order by **Ibis: Open Settings** before falling back to the ephemeral loopback Settings URL from MCP `settings_open_ui`."
+        },
+        "ibis.settings.probeTimeoutMs": {
+          "type": "number",
+          "default": 800,
+          "minimum": 100,
+          "maximum": 10000,
+          "scope": "machine-overridable",
+          "order": 32,
+          "markdownDescription": "Per-endpoint timeout (milliseconds) when probing personal HTTP settings and auto-attach URLs."
+        },
+        "ibis.memory.defaultKind": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "decision",
+            "fix",
+            "rule",
+            "constraint",
+            "gotcha",
+            "design",
+            "fact"
+          ],
+          "enumDescriptions": [
+            "Always show the kind quick pick in **Ibis: Remember**.",
+            "A choice the team should keep.",
+            "What resolved a failure.",
+            "A durable constraint or convention.",
+            "A hard boundary the project must respect.",
+            "A trap future agents should avoid.",
+            "A design rationale worth keeping.",
+            "A verifiable statement about the project."
+          ],
+          "default": "ask",
+          "scope": "resource",
+          "order": 40,
+          "markdownDescription": "Typed memory kind used by **Ibis: Remember**. `ask` keeps the interactive quick pick; any other value skips it and writes directly."
+        },
+        "ibis.memory.defaultVisibility": {
+          "type": "string",
+          "enum": [
+            "team",
+            "personal"
+          ],
+          "enumDescriptions": [
+            "Sharing-first default: any client that can reach the runtime sees it.",
+            "Visible only to the resolved owner actor."
+          ],
+          "default": "team",
+          "scope": "resource",
+          "order": 41,
+          "markdownDescription": "`visibility` passed to MCP `memory_add` by **Ibis: Remember**."
+        },
+        "ibis.workingState.useWorkspaceProject": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "order": 42,
+          "markdownDescription": "Send the first workspace folder name as `project_name` when **Ibis: Set working state** calls MCP `set_working_state`."
+        },
+        "ibis.status.outputMode": {
+          "type": "string",
+          "enum": [
+            "toast",
+            "output",
+            "both"
+          ],
+          "enumDescriptions": [
+            "Show **Ibis: Status** as a notification window.",
+            "Write **Ibis: Status** and diagnostics to the Ibis Assistant output channel.",
+            "Both notification and output channel."
+          ],
+          "default": "toast",
+          "scope": "window",
+          "order": 50,
+          "markdownDescription": "Where **Ibis: Status** reports backend, shared-runtime, and LM-bridge details."
+        },
+        "ibis.debug.verboseLogging": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "order": 51,
+          "markdownDescription": "Log verbose activation and backend-resolution details to the Ibis Assistant output channel."
+        }
+      }
+    }
   },
   "scripts": {
-    "package": "npx --yes @vscode/vsce package"
+    "sync:ide-host": "node scripts/sync-ide-host.mjs",
+    "vscode:prepublish": "node scripts/sync-ide-host.mjs",
+    "package": "npx --yes @vscode/vsce package --no-dependencies"
   },
   "dependencies": {
     "@ibis-assistant/ide-host": "file:../ide-host"
   },
   "devDependencies": {
-    "@types/vscode": "^1.90.0",
+    "@types/vscode": "^1.101.0",
     "@vscode/vsce": "3.3.2"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/terenzif/ibis-assistant.git",
+    "url": "https://github.com/fatterdev/ibis-assistant.git",
     "directory": "vscode-extension"
-  }
+  },
+  "homepage": "https://github.com/fatterdev/ibis-assistant#readme",
+  "bugs": {
+    "url": "https://github.com/fatterdev/ibis-assistant/issues"
+  },
+  "qna": "https://github.com/fatterdev/ibis-assistant/issues"
 }

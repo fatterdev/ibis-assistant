@@ -4,11 +4,11 @@
   "version": "1.0.0",
   "description": "Living project memory over MCP. Spawns the Ibis Assistant Go binary on stdio against the opened folder. Includes Settings, Remember, working state, readiness status, and hybrid AI.",
   "author": {
-    "name": "terenzif",
-    "email": "terenzif@users.noreply.github.com"
+    "name": "fatterdev",
+    "email": "14909639+fatterdev@users.noreply.github.com"
   },
-  "homepage": "https://github.com/terenzif/ibis-assistant",
-  "repository": "https://github.com/terenzif/ibis-assistant",
+  "homepage": "https://github.com/fatterdev/ibis-assistant",
+  "repository": "https://github.com/fatterdev/ibis-assistant",
   "license": "MIT",
   "logo": "assets/logo.png",
   "keywords": [
