@@ -49,7 +49,7 @@ We compared **Recallium**, **mem0**, **RepoMemory**, **agentmemory**, **Unibase/
 
 **Download one binary. Autoconfigure as far as the machine allows. Run.**
 
-1. [Releases](https://github.com/terenzif/ibis-assistant/releases) → put `ibis-assistant` on `PATH` (no Rust toolchain required for normal use).
+1. [Releases](https://github.com/fatterdev/ibis-assistant/releases) → put `ibis-assistant` on `PATH` (no Rust toolchain required for normal use).
 2. First launch with no `config.json` → interactive **`config fast`** (probe GPU/CPU, pick hybrid/local/cloud, write keys and paths). Use **`config full`** when you also want DB/SMTP/ticketing/timeouts in the same wizard.
 3. **On demand:** SurrealDB, Ollama (embeddings + local chat), and the `sg` sidecar install or start when enabled — you should not hand-assemble a compose file for the happy path.
 4. Same settings surface everywhere:
@@ -77,7 +77,7 @@ ibis-assistant memory add --project MyApp --kind decision --title "MCP transport
 ```
 
 ```bash
-git clone https://github.com/terenzif/ibis-assistant.git
+git clone https://github.com/fatterdev/ibis-assistant.git
 cd ibis-assistant
 cargo xtask dist          # dist/ibis-assistant.exe + mcp-bridge + rules + sgconfig
 ```

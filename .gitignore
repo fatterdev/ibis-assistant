@@ -4,6 +4,7 @@
 /config/ticketing_config.json
 testrun/
 rules_quarantine/
+node_modules
 *.log
 surreal
 surreal.exe
@@ -11,6 +12,9 @@ sg
 sg.exe
 ollama*.exe
 OllamaSetup.exe
+ibis-assistant-*.vsix
+vscode-extension/vendor/
 
 # Local-only agent instructions (never commit)
 AGENTS.md
+.cursor/

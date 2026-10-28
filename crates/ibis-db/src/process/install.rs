@@ -92,11 +92,14 @@ pub async fn local_version(bin: &Path) -> Result<String, ProcessError> {
 /// Fetches the latest SurrealDB release from the GitHub API.
 pub async fn latest_release() -> Result<GitHubRelease, ProcessError> {
     let client = reqwest::Client::builder().timeout(API_TIMEOUT).build()?;
-    let response = client
+    let mut request = client
         .get(RELEASES_API)
         .header("Accept", "application/vnd.github+json")
-        .send()
-        .await?;
+        .header("User-Agent", "ibis-assistant");
+    if let Some(token) = github_api_token() {
+        request = request.bearer_auth(token);
+    }
+    let response = request.send().await?;
     if !response.status().is_success() {
         return Err(ProcessError::Other(format!(
             "github api returned status: {}",
@@ -104,6 +107,17 @@ pub async fn latest_release() -> Result<GitHubRelease, ProcessError> {
         )));
     }
     Ok(response.json::<GitHubRelease>().await?)
+}
+
+fn github_api_token() -> Option<String> {
+    for key in ["GITHUB_TOKEN", "GH_TOKEN"] {
+        if let Ok(token) = std::env::var(key) {
+            if !token.is_empty() {
+                return Some(token);
+            }
+        }
+    }
+    None
 }
 
 /// Selects the release asset matching this OS/arch with a supported archive
@@ -292,8 +306,23 @@ fn replace_binary(src: &Path, dest: &Path) -> Result<(), ProcessError> {
         let _ = std::fs::remove_file(&backup); // ignore error
         std::fs::rename(dest, &backup).map_err(|e| ProcessError::ReplaceBinary(e.to_string()))?;
     }
-    std::fs::rename(src, dest)
-        .map_err(|e| ProcessError::Other(format!("failed to move new binary into place: {e}")))
+    match std::fs::rename(src, dest) {
+        Ok(()) => Ok(()),
+        Err(rename_err) => {
+            // Cross-device rename fails on Windows (os error 17: "The system
+            // cannot move the file to a different disk drive"); fall back to
+            // copy + remove (the caller also cleans the temp file up).
+            match std::fs::copy(src, dest) {
+                Ok(_) => {
+                    let _ = std::fs::remove_file(src);
+                    Ok(())
+                }
+                Err(copy_err) => Err(ProcessError::Other(format!(
+                    "failed to move new binary into place: rename: {rename_err}; copy: {copy_err}"
+                ))),
+            }
+        }
+    }
 }
 
 fn dest_with_suffix(dest: &Path, suffix: &str) -> PathBuf {
@@ -416,5 +445,28 @@ mod tests {
             dest_with_suffix(dest, ".old"),
             Path::new("C:\\tools\\surreal.exe.old")
         );
+    }
+
+    #[test]
+    fn replace_binary_installs_and_backs_up_existing() {
+        let dir = std::env::temp_dir().join(format!("ibis_replace_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("src.exe");
+        let dest = dir.join("dest.exe");
+
+        std::fs::write(&src, b"new").unwrap();
+        replace_binary(&src, &dest).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"new");
+        assert!(!src.exists());
+
+        std::fs::write(&src, b"newer").unwrap();
+        replace_binary(&src, &dest).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"newer");
+        assert_eq!(
+            std::fs::read(dest_with_suffix(&dest, ".old")).unwrap(),
+            b"new"
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

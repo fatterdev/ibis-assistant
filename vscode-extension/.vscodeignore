@@ -1,3 +1,9 @@
-{
-  "recommendations": []
-}
+# Development-only files; icon assets/, vendor/, extension.js, README.md are shipped.
+.vscode/**
+.vscodeignore
+node_modules/**
+scripts/**
+package-lock.json
+*.vsix
+*.map
+*.ts

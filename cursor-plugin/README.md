@@ -41,7 +41,7 @@ Memory operator guide: [docs/memory_layer.md](../docs/memory_layer.md). Prefer `
 
 2. Enable this plugin from the repo copy, or from the local Cursor plugins folder:
 
-   - Canonical source: `cursor-plugin/` in [ibis-assistant](https://github.com/terenzif/ibis-assistant)
+   - Canonical source: `cursor-plugin/` in [ibis-assistant](https://github.com/fatterdev/ibis-assistant)
    - Local install: `~/.cursor/plugins/local/ibis-assistant/` (copied from `cursor-plugin/`)
 
 3. Reload Cursor. The MCP server `ibis-assistant` starts with:

@@ -7,7 +7,7 @@
 |---------|------|
 | Display / docs | Ibis Assistant |
 | Executable | `ibis-assistant` / `ibis-assistant.exe` |
-| GitHub | `https://github.com/terenzif/ibis-assistant` |
+| GitHub | `https://github.com/fatterdev/ibis-assistant` |
 | Future IDE plugin | Ibis Assistant for Cursor (stdio child of the same binary) |
 
 **Runtimes** (`runtime_mode` in config; not the MCP listener `mode`):
@@ -28,7 +28,7 @@ The MCP process is an implementation detail (“the MCP server”), not a separa
 
 ## Remotes
 
-- **origin:** `terenzif/ibis-assistant` (canonical)
+- **origin:** `fatterdev/ibis-assistant` (canonical)
 
 ## Local workspace folder
 

@@ -20,8 +20,9 @@
 //! builds the bin before running this integration test), with a
 //! `target/debug` fallback — same property (the gate drives the freshly
 //! built real binary), no nested-cargo deadlock. Sidecar binaries are
-//! seeded beside the exe with `DB_AUTO_UPDATE=false` so the embedded
-//! SurrealDB/ast-grep ensure-checks never touch the network.
+//! seeded beside the exe (PATH / spike cache, else the same GitHub install
+//! path the product uses at startup) with `DB_AUTO_UPDATE=false` so the
+//! child takes the local-binary fast path after the seed.
 
 use std::io::{BufRead, BufReader, Write as _};
 use std::path::{Path, PathBuf};
@@ -47,20 +48,33 @@ fn assistant_exe() -> PathBuf {
         .nth(2)
         .expect("manifest sits at <root>/crates/ibis-server")
         .to_path_buf();
-    let candidate = workspace_root
-        .join("target")
-        .join("debug")
-        .join("ibis-assistant.exe");
+    let bin_name = if cfg!(windows) {
+        "ibis-assistant.exe"
+    } else {
+        "ibis-assistant"
+    };
+    let candidate = workspace_root.join("target").join("debug").join(bin_name);
     assert!(
         candidate.exists(),
-        "ibis-assistant.exe not built — run `cargo build -p ibis-server` (or use cargo test)"
+        "{bin_name} not built — run `cargo build -p ibis-server` (or use cargo test)"
     );
     candidate
 }
 
-/// First PATH hit for a bare binary name (`where.exe <name>`).
+fn sidecar_bin_name(stem: &str) -> String {
+    if cfg!(windows) {
+        format!("{stem}.exe")
+    } else {
+        stem.to_string()
+    }
+}
+
+/// First PATH hit for a bare binary name.
 fn locate_on_path(name: &str) -> Option<PathBuf> {
+    #[cfg(windows)]
     let out = Command::new("where.exe").arg(name).output().ok()?;
+    #[cfg(not(windows))]
+    let out = Command::new("which").arg(name).output().ok()?;
     if !out.status.success() {
         return None;
     }
@@ -72,43 +86,82 @@ fn locate_on_path(name: &str) -> Option<PathBuf> {
         .next()
 }
 
-/// The legacy spike sidecar binary (documented in as the sidecar
-/// source); used only as a fallback candidate for seeding.
+/// The legacy spike sidecar binary; used only as a fallback candidate for seeding.
 fn spike_surreal() -> Option<PathBuf> {
-    std::env::var("TEMP").ok().map(|t| {
-        PathBuf::from(t)
-            .join("opencode")
-            .join("spike")
-            .join("surreal.exe")
-    })
+    let temp = std::env::var_os("TEMP").or_else(|| std::env::var_os("TMPDIR"))?;
+    let path = PathBuf::from(temp)
+        .join("opencode")
+        .join("spike")
+        .join(sidecar_bin_name("surreal"));
+    path.is_file().then_some(path)
+}
+
+fn block_on_download<F, T, E>(label: &str, fut: F) -> T
+where
+    F: std::future::Future<Output = Result<T, E>>,
+    E: std::fmt::Display,
+{
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime for sidecar download");
+    match rt.block_on(fut) {
+        Ok(v) => v,
+        Err(err) => panic!("failed to download {label} for e2e seed: {err}"),
+    }
 }
 
 static SEED_LOCK: Mutex<()> = Mutex::new(());
 
-/// Seeds `surreal.exe` / `sg.exe` beside the ibis executable so
+/// Seeds `surreal` / `sg` beside the ibis executable so
 /// `ensure_surreal_db(false)` / `ensure_ast_grep(false)` take the
-/// "local binary found" fast path ( / install.rs force a GitHub
-/// check when the local binary is missing, even with auto-update off).
+/// "local binary found" fast path. Prefers PATH (or the spike cache), then
+/// downloads the same GitHub release assets the product installs at startup —
+/// CI runners have neither binary on PATH.
 fn seed_sidecar_binaries(exe: &Path) {
     let _guard = SEED_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let dir = exe.parent().expect("exe has a parent").to_path_buf();
-    let surreal = dir.join("surreal.exe");
+
+    let surreal = dir.join(sidecar_bin_name("surreal"));
     if !surreal.exists() {
-        let candidates: Vec<PathBuf> = [locate_on_path("surreal"), spike_surreal()]
-            .into_iter()
-            .flatten()
-            .collect();
-        let src = candidates.first().expect(
-            "no surreal.exe found on PATH (the gate seeds the embedded-DB binary beside the exe)",
+        if let Some(src) = locate_on_path("surreal").or_else(spike_surreal) {
+            std::fs::copy(&src, &surreal).unwrap_or_else(|e| {
+                panic!(
+                    "seed {} from {}: {e}",
+                    surreal.display(),
+                    src.display()
+                )
+            });
+        } else {
+            block_on_download("surreal", async {
+                let release = ibis_db::process::install::latest_release().await?;
+                ibis_db::process::install::install_surreal(&release, &surreal).await
+            });
+        }
+        assert!(
+            surreal.is_file(),
+            "surreal sidecar missing after seed: {}",
+            surreal.display()
         );
-        std::fs::copy(src, &surreal).expect("seed surreal.exe beside the ibis exe");
     }
-    let sg = dir.join("sg.exe");
+
+    let sg = dir.join(sidecar_bin_name("sg"));
     if !sg.exists() {
-        let src = locate_on_path("sg").expect(
-            "no sg (ast-grep) found on PATH (the gate seeds the ast-grep binary beside the exe)",
+        if let Some(src) = locate_on_path("sg") {
+            std::fs::copy(&src, &sg).unwrap_or_else(|e| {
+                panic!("seed {} from {}: {e}", sg.display(), src.display())
+            });
+        } else {
+            block_on_download("ast-grep (sg)", async {
+                let release = ibis_ingest_code::install::latest_release().await?;
+                ibis_ingest_code::install::install_ast_grep(&release, &sg).await
+            });
+        }
+        assert!(
+            sg.is_file(),
+            "sg sidecar missing after seed: {}",
+            sg.display()
         );
-        std::fs::copy(&src, &sg).expect("seed sg.exe beside the ibis exe");
     }
 }
 

@@ -47,15 +47,17 @@ export function startLmRpcServer(opts = {}) {
 /**
  * Wire vscode.lm / VS Code Language Model API into the bridge handler.
  * @param {any} vscode
+ * @param {{ family?: string }} [options] Optional model family filter (empty = first available)
  * @returns {Promise<boolean>}
  */
-export async function attachVscodeLm(vscode) {
+export async function attachVscodeLm(vscode, options = {}) {
   const lm = vscode && vscode.lm;
   if (!lm || typeof lm.selectChatModels !== "function") {
     return false;
   }
+  const family = (options.family || "").trim();
   setGenerateContentHandler(async (contents, config) => {
-    const models = await lm.selectChatModels({});
+    const models = await lm.selectChatModels(family ? { family } : {});
     if (!models || models.length === 0) {
       throw new Error("no IDE language models available");
     }
