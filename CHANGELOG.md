@@ -4,6 +4,13 @@ All notable changes to Threski Studio are documented here.
 
 ## [Unreleased]
 
+- **feat(server): mcp prompts (/threski.*)** — `prompts/list` + `prompts/get`
+  with five session-contract prompts (`readiness`, `status`, `why_changed`,
+  `blast_radius`, `remember`): each renders a single user message instructing
+  exactly which Threski tools to call, with the hygiene rules attached.
+  Argument completions (`completion/complete`): static kind/visibility values
+  plus config-backed project names; unknown refs degrade to empty. Capability
+  advertisement: `prompts` + `completions`.
 - **feat(server): read-only tool annotations (readonlyhint, titles)** — every
   one of the 56 MCP tools now declares MCP annotations: a human-readable
   `title` (top-level and inside the annotations) and an explicit

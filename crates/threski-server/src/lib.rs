@@ -14,6 +14,7 @@ pub mod assembly;
 pub mod collision;
 pub mod mcp_server;
 pub mod progress;
+pub mod prompts;
 pub mod registry;
 pub mod state;
 pub mod tools;

@@ -8,6 +8,9 @@
 //! - `WithToolCapabilities(true)` → tools capability
 //! - `WithResourceCapabilities(false, true)` → resources, subscribe=false,
 //!   list_changed=true
+//! - `enable_prompts()` + `enable_completions()` → the F0.3 prompt surface
+//!   (`crate::prompts`: readiness, status, why_changed, blast_radius,
+//!   remember — with argument completions)
 //! - `WithLogging` only when mode ≠ stdio
 //! - instructions recommending Streamable HTTP `POST /mcp` + `threski://guide`
 //! - 1 resource `threski://guide` (listable, not subscribable)
@@ -17,8 +20,10 @@ use std::sync::Arc;
 
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::model::{
-    ListResourcesResult, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
-    Resource, ResourceContents, ServerCapabilities, ServerConfig,
+    CompleteRequestParams, CompleteResult, GetPromptRequestParams, GetPromptResponse,
+    ListPromptsResult, ListResourcesResult, PaginatedRequestParams, PromptMessage,
+    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+    ResourceContents, Role, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
 use rmcp::tool_handler;
@@ -85,6 +90,8 @@ impl ServerHandler for ThreskiServer {
         resources.list_changed = Some(true);
         let mut capabilities = ServerCapabilities::builder()
             .enable_tools()
+            .enable_prompts()
+            .enable_completions()
             .enable_resources_with(resources)
             .build();
         if self.with_logging {
@@ -121,12 +128,47 @@ impl ServerHandler for ThreskiServer {
             ));
         }
         let cfg = self.state.config();
-        let guide =
-            threski_httpserver::discovery::guide_markdown(&cfg, &crate::registry::discovery_tools()());
+        let guide = threski_httpserver::discovery::guide_markdown(
+            &cfg,
+            &crate::registry::discovery_tools()(),
+        );
         Ok(ReadResourceResult::new(vec![
             ResourceContents::text(guide, request.uri).with_mime_type("text/markdown")
         ])
         .into())
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, rmcp::ErrorData> {
+        Ok(ListPromptsResult::with_all_items(
+            crate::prompts::prompt_definitions(),
+        ))
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, rmcp::ErrorData> {
+        let spec = crate::prompts::spec_of(&request.name).ok_or_else(|| {
+            rmcp::ErrorData::invalid_params(format!("unknown prompt {}", request.name), None)
+        })?;
+        let values = crate::prompts::ArgValues::new(request.arguments.as_ref());
+        let message = PromptMessage::new_text(Role::User, (spec.render)(&values));
+        let result =
+            rmcp::model::GetPromptResult::new(vec![message]).with_description(spec.description);
+        Ok(result.into())
+    }
+
+    async fn complete(
+        &self,
+        request: CompleteRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CompleteResult, rmcp::ErrorData> {
+        Ok(crate::prompts::complete_with_state(&request, &self.state))
     }
 
     async fn on_initialized(&self, context: rmcp::service::NotificationContext<RoleServer>) {
