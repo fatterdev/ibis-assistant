@@ -1,0 +1,7 @@
+id: js-chunk
+language: javascript
+rule:
+  any:
+    - kind: function_declaration
+    - kind: method_definition
+    - kind: class_declaration

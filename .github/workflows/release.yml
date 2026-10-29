@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-24.04, target: aarch64-unknown-linux-gnu }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: windows-latest, target: aarch64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p ibis-server -p mcp-bridge --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist/release
+          cp target/${{ matrix.target }}/release/ibis-assistant* dist/release/ || true
+          cp target/${{ matrix.target }}/release/mcp-bridge* dist/release/ || true
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ibis-assistant-${{ matrix.target }}
+          path: dist/release
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v6
+        with:
+          path: artifacts
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p release
+          for d in artifacts/*; do
+            name=$(basename "$d")
+            f=$(find "$d" -name 'ibis-assistant*' -type f | head -n1)
+            if [ -n "$f" ]; then
+              ext="${f##*.}"
+              if [ "$ext" = "exe" ]; then
+                cp "$f" "release/ibis-assistant-${name/ibis-assistant-/}.exe"
+              else
+                cp "$f" "release/ibis-assistant-${name/ibis-assistant-/}"
+              fi
+            fi
+            b=$(find "$d" -name 'mcp-bridge*' -type f | head -n1)
+            if [ -n "$b" ] && [[ "$name" == *linux* ]]; then
+              cp "$b" "release/mcp-bridge-linux-amd64"
+            fi
+          done
+          zip -r release/ibis-assistant-cursor-plugin.zip cursor-plugin/
+          (cd release && sha256sum * > ../SHA256SUMS.txt && mv ../SHA256SUMS.txt ./)
+      - name: Attest release artifacts (provenance)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release/*
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            release/*

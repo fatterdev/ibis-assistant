@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "threski": {
+      "command": "threski",
+      "args": ["-mode", "stdio", "-runtime-mode", "plugin"],
+      "env": {
+        "RUNTIME_MODE": "plugin"
+      }
+    }
+  }
+}

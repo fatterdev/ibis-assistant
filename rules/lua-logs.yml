@@ -1,0 +1,10 @@
+id: lua-logs
+language: lua
+rule:
+  any:
+    - pattern: print($MSG)
+    - pattern: $LOGGER:info($MSG)
+    - pattern: $LOGGER:debug($MSG)
+    - pattern: $LOGGER:warn($MSG)
+    - pattern: $LOGGER:error($MSG)
+    - pattern: ngx.log($LEVEL, $MSG)

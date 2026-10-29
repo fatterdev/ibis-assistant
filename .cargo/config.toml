@@ -1,0 +1,7 @@
+[alias]
+xtask = "run --package xtask --release --"
+build-threski = "build --release -p threski-server"
+build-mcp = "build --release -p mcp-bridge"
+dist = "run --package xtask --release -- dist"
+test-all = "test --workspace"
+lint = "run --package xtask --release -- lint"

@@ -1,0 +1,19 @@
+[package]
+name = "threski-optimization"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+threski-ai.workspace = true
+threski-db.workspace = true
+threski-search.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+surrealdb = { version = "3.3.4", features = ["protocol-ws"] }
+tokio.workspace = true
+tracing.workspace = true

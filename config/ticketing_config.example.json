@@ -1,0 +1,115 @@
+{
+  "default_provider": "redmine",
+  "project_provider_map": {
+    "core": "redmine",
+    "mobile": "jira",
+    "platform": "azure_devops"
+  },
+  "providers": {
+    "redmine": {
+      "base_url": "https://redmine.example.com",
+      "api_key": ""
+    },
+    "jira": {
+      "base_url": "https://your-company.atlassian.net",
+      "email": "jira-bot@example.com",
+      "api_token": "JIRA_API_TOKEN"
+    },
+    "azure_devops": {
+      "organization_url": "https://dev.azure.com/your-org",
+      "project": "Platform",
+      "repository": "platform-repo",
+      "pat": ""
+    }
+  },
+  "workflow": {
+    "actions": {
+      "resolve": {
+        "per_provider": {
+          "redmine": {
+            "*": "3"
+          },
+          "jira": {
+            "*": "Resolved"
+          },
+          "azure_devops": {
+            "*": "Resolved"
+          }
+        }
+      },
+      "close": {
+        "per_provider": {
+          "redmine": {
+            "*": "5"
+          },
+          "jira": {
+            "*": "Done"
+          },
+          "azure_devops": {
+            "*": "Closed"
+          }
+        }
+      },
+      "reopen": {
+        "per_provider": {
+          "redmine": {
+            "*": "2"
+          },
+          "jira": {
+            "*": "To Do"
+          },
+          "azure_devops": {
+            "*": "Active"
+          }
+        }
+      }
+    }
+  },
+  "reference_patterns": {
+    "*": [
+      "jira::([A-Z][A-Z0-9]+-\\d+)",
+      "azure_devops::([A-Z][A-Z0-9]+#\\d+)"
+    ],
+    "platform": [
+      "azure_devops::AB#(\\d+)"
+    ]
+  },
+  "default_create_type": {
+    "redmine": {
+      "*": "1"
+    },
+    "jira": {
+      "*": "Task"
+    },
+    "azure_devops": {
+      "*": "Task"
+    }
+  },
+  "pr": {
+    "default_target_branch": "main",
+    "project_target_branch": {
+      "platform": "main",
+      "core": "develop"
+    }
+  },
+  "header_hints": {
+    "redmine": [
+      "X-Redmine-API-Key"
+    ],
+    "jira": [
+      "X-Jira-Email",
+      "X-Jira-API-Token"
+    ],
+    "azure_devops": [
+      "X-Azure-DevOps-PAT",
+      "X-Azure-DevOps-Org",
+      "X-Azure-DevOps-Project",
+      "X-Azure-DevOps-Repo"
+    ]
+  },
+  "client_env_hints": {
+    "TICKETING_PROVIDER": "redmine|jira|azure_devops",
+    "TICKETING_PROJECT_KEY": "Default project key used by client prompts and tool wrappers",
+    "AZDO_TARGET_BRANCH": "Optional default target branch for repo_pr_create"
+  }
+}

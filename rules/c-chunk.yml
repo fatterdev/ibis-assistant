@@ -1,0 +1,6 @@
+id: c-chunk
+language: c
+rule:
+  any:
+    - kind: function_definition
+    - kind: struct_specifier

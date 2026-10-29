@@ -1,0 +1,326 @@
+{
+  "name": "threski-studio",
+  "displayName": "Threski Studio",
+  "description": "Living project memory over MCP for VS Code. Spawns an isolated Threski Studio (Rust) stdio child or attaches to a shared personal runtime for graph, logs, tickets, and typed memory.",
+  "version": "1.0.0",
+  "publisher": "fatterdev",
+  "license": "Apache-2.0",
+  "icon": "assets/icon.png",
+  "galleryBanner": {
+    "color": "#075351",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.101.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "threski",
+    "mcp",
+    "memory",
+    "knowledge graph",
+    "git",
+    "logs",
+    "ai",
+    "ollama",
+    "project memory",
+    "code intelligence",
+    "surreal",
+    "assistant"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "threskiStudio.openSettings",
+        "title": "Threski Studio: Open Settings"
+      },
+      {
+        "command": "threskiStudio.openExtensionSettings",
+        "title": "Threski Studio: Open Extension Settings (VS Code)"
+      },
+      {
+        "command": "threskiStudio.showOutput",
+        "title": "Threski Studio: Show Output"
+      },
+      {
+        "command": "threskiStudio.status",
+        "title": "Threski Studio: Status"
+      },
+      {
+        "command": "threskiStudio.remember",
+        "title": "Threski Studio: Remember"
+      },
+      {
+        "command": "threskiStudio.setWorkingState",
+        "title": "Threski Studio: Set working state"
+      }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "threski",
+        "label": "Threski Studio"
+      }
+    ],
+    "configuration": {
+      "title": "Threski Studio",
+      "properties": {
+        "threskiStudio.runtime.mode": {
+          "type": "string",
+          "enum": [
+            "spawn",
+            "attach"
+          ],
+          "enumDescriptions": [
+            "Spawn an isolated `threski -mode stdio -runtime-mode plugin` child (one per IDE, plugin data dir).",
+            "Attach to an already running shared runtime over Streamable HTTP (`#threskiStudio.runtime.mcpUrl#`)."
+          ],
+          "default": "spawn",
+          "scope": "machine-overridable",
+          "order": 1,
+          "markdownDescription": "How the extension reaches Threski MCP. `attach` is equivalent to setting the `THRESKI_MCP_URL` environment variable and is the recommended way to share one personal daemon between Cursor and VS Code. The `THRESKI_MCP_URL` environment variable is only honored while this setting is left at its default."
+        },
+        "threskiStudio.runtime.mcpUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:3030/mcp",
+          "scope": "machine-overridable",
+          "order": 2,
+          "markdownDescription": "Streamable HTTP MCP endpoint used when `#threskiStudio.runtime.mode#` is `attach` (equivalent of the `THRESKI_MCP_URL` environment variable). Start the daemon with `threski run`."
+        },
+        "threskiStudio.runtime.binaryPath": {
+          "type": "string",
+          "default": "threski",
+          "scope": "machine-overridable",
+          "order": 3,
+          "markdownDescription": "Command name or absolute path of the Threski Studio binary used when spawning (equivalent of the `THRESKI_BIN` environment variable)."
+        },
+        "threskiStudio.runtime.dataDir": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "order": 4,
+          "markdownDescription": "Override the plugin data directory (equivalent of the `THRESKI_DATA_DIR` environment variable). Leave empty to use `%LOCALAPPDATA%\\threski\\plugin` on Windows or the platform default."
+        },
+        "threskiStudio.runtime.runtimeMode": {
+          "type": "string",
+          "enum": [
+            "plugin",
+            "personal",
+            "server"
+          ],
+          "default": "plugin",
+          "scope": "machine-overridable",
+          "order": 5,
+          "markdownDescription": "Value passed to `-runtime-mode` for a spawned child. Keep `plugin` for IDE-owned stdio children; `personal`/`server` are advanced runtime deployments."
+        },
+        "threskiStudio.runtime.extraArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine-overridable",
+          "order": 6,
+          "markdownDescription": "Extra CLI arguments appended after `-mode stdio -runtime-mode <mode>` when spawning the child."
+        },
+        "threskiStudio.runtime.workspaceOverride": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "order": 7,
+          "markdownDescription": "Explicit opened-folder path exported as `THRESKI_WORKSPACE` (equivalent of the `THRESKI_WORKSPACE` environment variable). Leave empty to auto-detect the first VS Code workspace folder."
+        },
+        "threskiStudio.runtime.autoAttach": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine-overridable",
+          "order": 8,
+          "markdownDescription": "When spawning would be used, first probe `#threskiStudio.runtime.autoAttachProbeUrls#` and attach to a reachable personal runtime instead of starting an isolated child."
+        },
+        "threskiStudio.runtime.autoAttachProbeUrls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "http://127.0.0.1:3030/mcp",
+            "http://127.0.0.1:3031/mcp"
+          ],
+          "scope": "machine-overridable",
+          "order": 9,
+          "markdownDescription": "Loopback Streamable HTTP MCP endpoints probed in order when `#threskiStudio.runtime.autoAttach#` is enabled."
+        },
+        "threskiStudio.mcp.registerProvider": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine-overridable",
+          "order": 20,
+          "markdownDescription": "Register the Threski Studio MCP server-definition provider so VS Code agent mode can start the server automatically. Requires a window reload when changed."
+        },
+        "threskiStudio.lmBridge.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine-overridable",
+          "order": 21,
+          "markdownDescription": "Start the IDE language-model bridge on `127.0.0.1` so the runtime can use VS Code-provided models (runtime setting `ai.reasoning.use_ide_provided_models`). Requires a window reload when changed."
+        },
+        "threskiStudio.lmBridge.port": {
+          "type": "number",
+          "default": 39201,
+          "minimum": 1024,
+          "maximum": 65535,
+          "scope": "machine-overridable",
+          "order": 22,
+          "markdownDescription": "Loopback port of the IDE LM bridge (equivalent of the `THRESKI_LM_BRIDGE_PORT` environment variable). Requires a window reload when changed."
+        },
+        "threskiStudio.lmBridge.url": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "order": 23,
+          "markdownDescription": "Explicit bridge URL exported as `THRESKI_LM_BRIDGE_URL` to the runtime (equivalent of the same environment variable). Leave empty to derive `http://127.0.0.1:<port>` from `#threskiStudio.lmBridge.port#`."
+        },
+        "threskiStudio.lmBridge.modelFamily": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "order": 24,
+          "markdownDescription": "Optional `vscode.lm` model family filter (e.g. `gpt-4o`, `claude-3.5-sonnet`). Leave empty to use the first available IDE-provided model."
+        },
+        "threskiStudio.settings.url": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "order": 30,
+          "markdownDescription": "Explicit Threski Settings UI URL opened by **Threski Studio: Open Settings** (equivalent of the `THRESKI_SETTINGS_URL` environment variable). Leave empty to probe `#threskiStudio.settings.probeUrls#` and fall back to the MCP `settings_open_ui` tool."
+        },
+        "threskiStudio.settings.probeUrls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "http://127.0.0.1:3030/settings/",
+            "http://127.0.0.1:3031/settings/"
+          ],
+          "scope": "machine-overridable",
+          "order": 31,
+          "markdownDescription": "Personal Settings UI endpoints probed in order by **Threski Studio: Open Settings** before falling back to the ephemeral loopback Settings URL from MCP `settings_open_ui`."
+        },
+        "threskiStudio.settings.probeTimeoutMs": {
+          "type": "number",
+          "default": 800,
+          "minimum": 100,
+          "maximum": 10000,
+          "scope": "machine-overridable",
+          "order": 32,
+          "markdownDescription": "Per-endpoint timeout (milliseconds) when probing personal HTTP settings and auto-attach URLs."
+        },
+        "threskiStudio.memory.defaultKind": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "decision",
+            "fix",
+            "rule",
+            "constraint",
+            "gotcha",
+            "design",
+            "fact"
+          ],
+          "enumDescriptions": [
+            "Always show the kind quick pick in **Threski Studio: Remember**.",
+            "A choice the team should keep.",
+            "What resolved a failure.",
+            "A durable constraint or convention.",
+            "A hard boundary the project must respect.",
+            "A trap future agents should avoid.",
+            "A design rationale worth keeping.",
+            "A verifiable statement about the project."
+          ],
+          "default": "ask",
+          "scope": "resource",
+          "order": 40,
+          "markdownDescription": "Typed memory kind used by **Threski Studio: Remember**. `ask` keeps the interactive quick pick; any other value skips it and writes directly."
+        },
+        "threskiStudio.memory.defaultVisibility": {
+          "type": "string",
+          "enum": [
+            "team",
+            "personal"
+          ],
+          "enumDescriptions": [
+            "Sharing-first default: any client that can reach the runtime sees it.",
+            "Visible only to the resolved owner actor."
+          ],
+          "default": "team",
+          "scope": "resource",
+          "order": 41,
+          "markdownDescription": "`visibility` passed to MCP `memory_add` by **Threski Studio: Remember**."
+        },
+        "threskiStudio.workingState.useWorkspaceProject": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "order": 42,
+          "markdownDescription": "Send the first workspace folder name as `project_name` when **Threski Studio: Set working state** calls MCP `set_working_state`."
+        },
+        "threskiStudio.status.outputMode": {
+          "type": "string",
+          "enum": [
+            "toast",
+            "output",
+            "both"
+          ],
+          "enumDescriptions": [
+            "Show **Threski Studio: Status** as a notification window.",
+            "Write **Threski Studio: Status** and diagnostics to the Threski Studio output channel.",
+            "Both notification and output channel."
+          ],
+          "default": "toast",
+          "scope": "window",
+          "order": 50,
+          "markdownDescription": "Where **Threski Studio: Status** reports backend, shared-runtime, and LM-bridge details."
+        },
+        "threskiStudio.debug.verboseLogging": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "order": 51,
+          "markdownDescription": "Log verbose activation and backend-resolution details to the Threski Studio output channel."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "sync:ide-host": "node scripts/sync-ide-host.mjs",
+    "vscode:prepublish": "node scripts/sync-ide-host.mjs",
+    "package": "npx --yes @vscode/vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "@threski/ide-host": "file:../ide-host"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.101.0",
+    "@vscode/vsce": "3.3.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fatterdev/threski-studio.git",
+    "directory": "vscode-extension"
+  },
+  "homepage": "https://github.com/fatterdev/threski-studio#readme",
+  "bugs": {
+    "url": "https://github.com/fatterdev/threski-studio/issues"
+  },
+  "qna": "https://github.com/fatterdev/threski-studio/issues"
+}

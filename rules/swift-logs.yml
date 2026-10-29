@@ -1,0 +1,11 @@
+id: swift-logs
+language: swift
+rule:
+  any:
+    - pattern: print($MSG)
+    - pattern: os_log($MSG)
+    - pattern: $LOGGER.log($MSG)
+    - pattern: $LOGGER.info($MSG)
+    - pattern: $LOGGER.debug($MSG)
+    - pattern: $LOGGER.warning($MSG)
+    - pattern: $LOGGER.error($MSG)

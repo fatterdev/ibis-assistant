@@ -1,0 +1,89 @@
+{
+  "port": 3030,
+  "runtime_mode": "personal",
+  "mode": "sse",
+  "db_url": "ws://127.0.0.1:8000/rpc",
+  "db_namespace": "threski",
+  "db_database": "analysis",
+  "db_user": "root",
+  "db_password": "root",
+  "db_data_path": "./db",
+  "db_auto_update": true,
+  "ai": {
+    "embedding": {
+      "provider": "ollama",
+      "model": "nomic-embed-text",
+      "url": "http://127.0.0.1:11434",
+      "auto_start": true,
+      "auto_update": true
+    },
+    "reasoning": {
+      "provider": "hybrid",
+      "model": "auto",
+      "context_only_fallback": true,
+      "clouds": {
+        "gemini": {
+          "keys": [
+            {
+              "key": "",
+              "rpm": 15,
+              "tpm": 30000,
+              "rpd": 1500,
+              "owner": "default"
+            }
+          ]
+        },
+        "openai_compat": {
+          "base_url": "https://api.openai.com/v1",
+          "api_key": "",
+          "model": "gpt-4.1"
+        },
+        "claude": {
+          "api_key": "",
+          "model": "claude-sonnet-4"
+        }
+      },
+      "routing": {
+        "mode": "auto",
+        "local_provider": "ollama",
+        "cloud_provider": "auto",
+        "cloud_fallback_order": ["gemini", "openai_compat", "claude"],
+        "use_cloud_when_no_gpu": true,
+        "local_timeout_ms": 120000
+      },
+      "model_overrides": {
+        "S": "granite4.1:3b",
+        "M": "qwen2.5-coder:7b",
+        "L": "gemma4:12b",
+        "XL": "muse-glimmer"
+      }
+    }
+  },
+  "redmine_url": "",
+  "redmine_key": "",
+  "discovery_root": "./repos",
+  "logs_root": "./logs",
+  "smtp": {
+    "enabled": false,
+    "host": "",
+    "port": 587,
+    "user": "",
+    "password": "",
+    "from": "",
+    "to": ""
+  },
+  "auto_scan": false,
+  "git_repos": [],
+  "projects": [],
+  "git_tokens": {
+    "default": ""
+  },
+  "log_file": "./server.log",
+  "log_level": "INFO",
+  "memory": {
+    "projection_enabled": false
+  },
+  "world_state": {
+    "code_cache_disabled": false
+  }
+}

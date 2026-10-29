@@ -1,0 +1,9 @@
+id: js-logs
+language: javascript
+rule:
+  any:
+    - pattern: $LOGGER.log($FORMAT)
+    - pattern: $LOGGER.info($FORMAT)
+    - pattern: $LOGGER.warn($FORMAT)
+    - pattern: $LOGGER.error($FORMAT)
+    - pattern: $LOGGER.debug($FORMAT)

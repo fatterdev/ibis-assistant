@@ -1,0 +1,1625 @@
+{
+  "tools": [
+    {
+      "description": "Analyze the blast radius of changing a specific function or symbol.",
+      "input_schema": {
+        "properties": {
+          "file_path": {
+            "description": "Relative path to the file containing the symbol",
+            "type": "string"
+          },
+          "repo_name": {
+            "description": "Name of the repository",
+            "type": "string"
+          },
+          "symbol_name": {
+            "description": "Name of the function or symbol",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "analyze_blast_radius"
+    },
+    {
+      "description": "Analyze log entries/text synchronously and return detected errors or anomalies.",
+      "input_schema": {
+        "properties": {
+          "log_file": {
+            "description": "Optional log file name",
+            "type": "string"
+          },
+          "log_text": {
+            "description": "Raw log text content to analyze (entries separated by newlines)",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Name of the project",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "analyze_logs"
+    },
+    {
+      "description": "Layer 3 world slice at ref R: claims that HOLDAt(m,R) and/or code bytes at R — what was true at a specific commit, not just at HEAD. Requires git context; unanchored claims are excluded (strict); personal claims visible to their owner only. Code projection is the honest hybrid: HEAD embeddings restricted to paths in tree(R) with bodies replaced by git show bytes (no per-commit embedding corpus). Every hit carries as_of_ref and source_kind.",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback when X-Threski-Actor header is absent",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Target project/repo scope (required)",
+            "type": "string"
+          },
+          "projection": {
+            "description": "claims (default) | code | both",
+            "type": "string"
+          },
+          "ref": {
+            "description": "Full commit OID, branch, tag, or HEAD (required)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "as_of_project"
+    },
+    {
+      "description": "Hybrid agentic Q&A over HEAD file_chunk (current code), commit_chunk (change meaning), current team memory, and reasoning. Prefer why_changed for focused change forensics; prefer load_session_context/memory_search for durable team truth. Layer 3: pass at_ref (+ project_name) for the world slice at a commit — claims filtered by HOLDAt (status-current ignored at historical refs), changelog hits restricted to commits reachable from that ref, code bytes at ref via git show (HEAD-embedding hits outside tree(ref) are dropped). Claim store: without SurrealDB the at_ref slice degrades to git-native channels (claims from .threski/claims/ at the ref — stubs title-only — and exact-path code) and the reply flags degraded:true.",
+      "input_schema": {
+        "properties": {
+          "at_ref": {
+            "description": "Optional full commit OID (or branch/tag) for the as_of world slice; skips HEAD agentic synthesis and returns structured HOLDAt-filtered hits",
+            "type": "string"
+          },
+          "branch_or_commit": {
+            "description": "Optional current branch or commit to provide topological context to the AI",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Required with at_ref: project scope for claim filtering and repo resolution",
+            "type": "string"
+          },
+          "query": {
+            "description": "The question (e.g., 'Why was login changed?')",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ask_project"
+    },
+    {
+      "description": "Cheap, un-classified capture of a raw observation (kind=observation). Use sparingly for genuinely new, reusable findings; a later consolidation pass classifies these.",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Target project/repo scope",
+            "type": "string"
+          },
+          "session_id": {
+            "description": "Optional session identifier grouping observations",
+            "type": "string"
+          },
+          "source": {
+            "description": "agent|tool|user (default agent)",
+            "type": "string"
+          },
+          "text": {
+            "description": "Raw observation text (required)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "capture_observation"
+    },
+    {
+      "description": "Find potential dead code (functions with no callers) in a repository.",
+      "input_schema": {
+        "properties": {
+          "repo_name": {
+            "description": "Name of the repository to scan",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "find_dead_code"
+    },
+    {
+      "description": "List current team rules/conventions, optionally filtered by query/tags.",
+      "input_schema": {
+        "properties": {
+          "limit": {
+            "description": "Optional max results (default 50)",
+            "type": "number"
+          },
+          "project_name": {
+            "description": "Target project/repo scope",
+            "type": "string"
+          },
+          "query": {
+            "description": "Optional semantic filter; empty returns all current rules by recency",
+            "type": "string"
+          },
+          "tags": {
+            "description": "Optional comma-separated tag filter",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "get_rules"
+    },
+    {
+      "description": "Fetch the caller's current task/working state for a project+branch.",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback",
+            "type": "string"
+          },
+          "branch": {
+            "description": "Optional branch",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Target project/repo scope",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "get_working_state"
+    },
+    {
+      "description": "Configure persistent Git credentials on the server for a specific domain or repository URL.",
+      "input_schema": {
+        "properties": {
+          "auth_type": {
+            "description": "Authentication type: token, basic, or ssh",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Git provider name: github, gitlab, azure_devops, or generic",
+            "type": "string"
+          },
+          "ssh_private_key": {
+            "description": "SSH Private Key (optional, for ssh auth)",
+            "type": "string"
+          },
+          "target": {
+            "description": "Domain (e.g. github.com) or repository URL",
+            "type": "string"
+          },
+          "token": {
+            "description": "PAT, Token, or Password (required for token/basic)",
+            "type": "string"
+          },
+          "username": {
+            "description": "Username (optional, for basic auth)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "git_configure_credentials"
+    },
+    {
+      "description": "Trigger codebase vectorization (Delta RAG). If no path provided, scans all repos.",
+      "input_schema": {
+        "properties": {
+          "path": {
+            "description": "Optional specific repo path",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ingest_code"
+    },
+    {
+      "description": "Ingest a design document/note as kind=design memory with optional derived_from provenance. Pass content text and/or a local file path.",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback",
+            "type": "string"
+          },
+          "content": {
+            "description": "Design note body (optional when path is set)",
+            "type": "string"
+          },
+          "path": {
+            "description": "Optional local markdown/design file to read when content is empty",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Target project/repo scope",
+            "type": "string"
+          },
+          "source_refs": {
+            "description": "Optional comma-separated record IDs for derived_from edges",
+            "type": "string"
+          },
+          "tags": {
+            "description": "Optional comma-separated tags",
+            "type": "string"
+          },
+          "title": {
+            "description": "Optional title (defaults from filename when path is set)",
+            "type": "string"
+          },
+          "visibility": {
+            "description": "team (default) | personal",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ingest_design_note"
+    },
+    {
+      "description": "Initialize a repository session. Checks out the specific branch/commit and triggers ingestion if necessary.",
+      "input_schema": {
+        "properties": {
+          "branch": {
+            "description": "Target branch",
+            "type": "string"
+          },
+          "commit": {
+            "description": "Target commit hash (optional, takes precedence)",
+            "type": "string"
+          },
+          "origin_url": {
+            "description": "Git origin URL",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Name of the project",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "init_project"
+    },
+    {
+      "description": "Layer 3: structured delta of truths between two refs — claims added/removed via the ± HOLDAt symmetric difference (supersessions appear as old-removed + new-added, never phantom content_changed) plus the git path diff. Churn-capped: oversized results are truncated and flagged, never dumped unbounded.",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback when X-Threski-Actor header is absent",
+            "type": "string"
+          },
+          "diff_mode": {
+            "description": "explicit (default: from_ref as given) | since_divergence (from_ref implicit: merge base of from_ref and to_ref — what changed on to's line since the branches diverged)",
+            "type": "string"
+          },
+          "from_ref": {
+            "description": "Base ref (full OID, branch, tag, or HEAD) (required)",
+            "type": "string"
+          },
+          "max_claims": {
+            "description": "Optional soft cap on total added+removed claims (default 200); overflow sets truncated=true",
+            "type": "number"
+          },
+          "project_name": {
+            "description": "Target project/repo scope (required)",
+            "type": "string"
+          },
+          "to_ref": {
+            "description": "Target ref (required)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "knowledge_diff"
+    },
+    {
+      "description": "Single aggregator for session start: working state + current (non-expired) rules + recent failures + top current team memories/decisions + active workstreams. Call ONCE per session for durable truth; use ask_project/why_changed for code and commit meaning.",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback",
+            "type": "string"
+          },
+          "branch": {
+            "description": "Optional branch",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Target project/repo scope",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "load_session_context"
+    },
+    {
+      "description": "Create a typed, temporally-aware memory (decision/fix/constraint/rule/gotcha/design/fact/observation/reasoning). Defaults to visibility=team. Pass source_hash (source_file content hash) and/or source_refs to source_file:* so git-driven RefreshStaleMemories can invalidate after HEAD ingest. Layer 3: pass introduced_in (full commit OID) or a commit:* source_ref to git-bind the claim; file-anchored claims follow anchor_mode (require_clean refuses dirty paths, worktree marks provenance.dirty, promote_on_commit binds on later commit).",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback when X-Threski-Actor header is absent",
+            "type": "string"
+          },
+          "anchor_mode": {
+            "description": "Optional dirty-tree policy for file-anchored claims: require_clean | worktree (default) | promote_on_commit (flagged in provenance; promotion lands with the as_of phases)",
+            "type": "string"
+          },
+          "branch": {
+            "description": "Optional git branch this memory applies to",
+            "type": "string"
+          },
+          "confidence": {
+            "description": "0.0-1.0 (default 0.7)",
+            "type": "number"
+          },
+          "content": {
+            "description": "Full memory text (required)",
+            "type": "string"
+          },
+          "embedding": {
+            "description": "Optional precomputed JSON float array embedding",
+            "type": "string"
+          },
+          "introduced_in": {
+            "description": "Optional full commit OID this claim was introduced in (Layer 3 git binding; commit:* source_refs bind too)",
+            "type": "string"
+          },
+          "kind": {
+            "description": "decision|fix|constraint|rule|gotcha|design|fact|working_state|observation|reasoning (default fact)",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Target project/repo scope",
+            "type": "string"
+          },
+          "source_hash": {
+            "description": "Optional provenance hash of linked source_file content (auto-resolved from source_file refs when omitted)",
+            "type": "string"
+          },
+          "source_path": {
+            "description": "Optional canonical source path for path-based staleness (auto-resolved from source_file refs when omitted)",
+            "type": "string"
+          },
+          "source_refs": {
+            "description": "Optional comma-separated record IDs this memory is derived_from",
+            "type": "string"
+          },
+          "status": {
+            "description": "current|superseded|archived|stale (default current)",
+            "type": "string"
+          },
+          "supersedes": {
+            "description": "Optional memory record ID this one replaces",
+            "type": "string"
+          },
+          "tags": {
+            "description": "Optional comma-separated tags",
+            "type": "string"
+          },
+          "title": {
+            "description": "Optional short title",
+            "type": "string"
+          },
+          "valid_from": {
+            "description": "Optional RFC3339 timestamp (default now)",
+            "type": "string"
+          },
+          "valid_until": {
+            "description": "Optional RFC3339 expiry",
+            "type": "string"
+          },
+          "visibility": {
+            "description": "team (default) | personal",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "memory_add"
+    },
+    {
+      "description": "Claim store addendum §5: render existing durable claims (decision/rule/fix, visibility per personal-claims policy) into .threski/claims/ and create ONE commit (chore(claims): bootstrap git claim store (N claims)). Idempotent: claims already in the tree are skipped; zero new files produce no commit. Pre-bootstrap honesty: git-owned claims get I(m) = bootstrap commit; earlier wall-clock history stays Surreal-only.",
+      "input_schema": {
+        "properties": {
+          "dry_run": {
+            "description": "Report the planned files without writing or committing",
+            "type": "boolean"
+          },
+          "project_name": {
+            "description": "Target project/repo scope (optional when unambiguous)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "memory_bootstrap_git_store"
+    },
+    {
+      "description": "Trigger the local-first sleeptime pass that distills observations into typed memories, merges duplicates, and decays noise.",
+      "input_schema": {
+        "properties": {
+          "max_items": {
+            "description": "Maximum observations to process (default 20)",
+            "type": "number"
+          },
+          "project_name": {
+            "description": "Target project/repo scope",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "memory_consolidate"
+    },
+    {
+      "description": "Soft-delete (archive) or hard-delete a memory. Hard delete requires owner == actor.",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback",
+            "type": "string"
+          },
+          "hard": {
+            "description": "true = permanently delete; default false (archive)",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Memory record ID (required)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "memory_delete"
+    },
+    {
+      "description": "Expand one memory with its supersession lineage, derived_from sources, and workstream.",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback",
+            "type": "string"
+          },
+          "depth": {
+            "description": "Optional traversal depth (default 1)",
+            "type": "number"
+          },
+          "id": {
+            "description": "Memory record ID (required)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "memory_expand"
+    },
+    {
+      "description": "Export memories as JSON or markdown from this runtime's SurrealDB. Defaults to visibility=team so other owners' personal rows are never exported. Pass visibility=personal|all with a trusted actor (loopback/stdio) to include your own personal memories. Use with memory_import to transfer between plugin-isolated (%LOCALAPPDATA%\\threski\\plugin), personal (127.0.0.1 daemon), and server runtimes. SurrealDB stays the source of truth; markdown also backs optional .threski/memory projection.",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity for personal|all exports (trusted on loopback/stdio only)",
+            "type": "string"
+          },
+          "format": {
+            "description": "json (default) | markdown",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Optional kind filter",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Target project/repo scope",
+            "type": "string"
+          },
+          "status": {
+            "description": "Optional status filter (default current)",
+            "type": "string"
+          },
+          "visibility": {
+            "description": "team (default) | personal | all",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "memory_export"
+    },
+    {
+      "description": "Return the full supersedes lineage for a memory, ordered oldest to newest.",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback",
+            "type": "string"
+          },
+          "depth": {
+            "description": "Optional supersession traversal depth (default 1, max 5)",
+            "type": "number"
+          },
+          "id": {
+            "description": "Any memory record ID or subject phrase in the lineage (required)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "memory_history"
+    },
+    {
+      "description": "Import a JSON array of memories (typically from memory_export) into this runtime. Covers plugin-isolated ↔ personal ↔ server transfers. on_conflict=skip (default, match by provenance.source_hash or content) or supersede.",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback",
+            "type": "string"
+          },
+          "items_json": {
+            "description": "JSON array of memory objects (required)",
+            "type": "string"
+          },
+          "on_conflict": {
+            "description": "skip (default) | supersede",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Target project/repo scope",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "memory_import"
+    },
+    {
+      "description": "Cluster typed memories by kind/tags (optional embedding similarity + local-first AI labels) for a lightweight project insight view.",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Optional comma-separated kind filter",
+            "type": "string"
+          },
+          "label_with_ai": {
+            "description": "Ask local-first AI (bulk_local) for short cluster labels",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "Max memories to cluster (default 200)",
+            "type": "number"
+          },
+          "project_name": {
+            "description": "Target project/repo scope",
+            "type": "string"
+          },
+          "status": {
+            "description": "Optional status filter (default current)",
+            "type": "string"
+          },
+          "use_embeddings": {
+            "description": "Split same kind/tag buckets by stored embedding similarity",
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "memory_insights"
+    },
+    {
+      "description": "Claim store addendum §6: rebuild refs/notes/threski-claims from the Surreal claim index — one `claim=<id>` pointer note per historical commit anchored to a git-owned claim (introduced_in/invalidated_at). Notes are cross-links enriching commit meaning: pointers only, never claim storage, never required for correctness, rebuildable from the DB. Idempotent reconcile: missing notes added, mismatched rewritten, stale notes removed; anchors absent from the object database are skipped and counted.",
+      "input_schema": {
+        "properties": {
+          "dry_run": {
+            "description": "Report the planned note writes without changing the notes ref",
+            "type": "boolean"
+          },
+          "project_name": {
+            "description": "Target project/repo scope (optional when unambiguous)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "memory_rebuild_git_notes"
+    },
+    {
+      "description": "Semantic search over typed memories, filtered by kind/status/visibility/tags.",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Optional comma-separated kind filter",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Optional max results (default 10)",
+            "type": "number"
+          },
+          "project_name": {
+            "description": "Target project/repo scope",
+            "type": "string"
+          },
+          "query": {
+            "description": "Semantic query text (required)",
+            "type": "string"
+          },
+          "status": {
+            "description": "Optional status filter (default current)",
+            "type": "string"
+          },
+          "tags": {
+            "description": "Optional comma-separated tag filter (ANY match)",
+            "type": "string"
+          },
+          "visibility": {
+            "description": "team|personal|all (default all: team + caller's own personal)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "memory_search"
+    },
+    {
+      "description": "Promote a memory's visibility to team. Only the owner may share their own memory; demoting back to personal is not supported.",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback; must match owner",
+            "type": "string"
+          },
+          "id": {
+            "description": "Memory record ID (required)",
+            "type": "string"
+          },
+          "visibility": {
+            "description": "Must be 'team' (required)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "memory_share"
+    },
+    {
+      "description": "Patch fields on an existing memory. Does not create a supersedes edge; use memory_add(supersedes=...) to replace a memory.",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback",
+            "type": "string"
+          },
+          "confidence": {
+            "description": "Optional new confidence",
+            "type": "number"
+          },
+          "content": {
+            "description": "Optional new content",
+            "type": "string"
+          },
+          "id": {
+            "description": "Memory record ID (required)",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Optional new kind",
+            "type": "string"
+          },
+          "status": {
+            "description": "Optional new status",
+            "type": "string"
+          },
+          "tags": {
+            "description": "Optional comma-separated replacement tags",
+            "type": "string"
+          },
+          "title": {
+            "description": "Optional new title",
+            "type": "string"
+          },
+          "valid_until": {
+            "description": "Optional RFC3339 expiry",
+            "type": "string"
+          },
+          "visibility": {
+            "description": "Optional new visibility",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "memory_update"
+    },
+    {
+      "description": "Trigger the RAFT self-optimization loop to improve knowledge graph weights.",
+      "input_schema": {
+        "properties": {
+          "iterations": {
+            "description": "Number of chunks to process (default 10)",
+            "type": "number"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "optimize_knowledge"
+    },
+    {
+      "description": "Inject collaborative memory/context for the project. Optional embeddings array can be provided to skip server-side AI embedding generation.",
+      "input_schema": {
+        "properties": {
+          "embedding": {
+            "description": "Optional pre-computed vector embedding (JSON array of floats)",
+            "type": "string"
+          },
+          "memory_text": {
+            "description": "The textual content of the memory/insight",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Name of the project",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "provide_collaborative_memory"
+    },
+    {
+      "description": "List recently captured fix/gotcha memories (plus related log error types) so the agent avoids repeating an already-solved mistake.",
+      "input_schema": {
+        "properties": {
+          "kind": {
+            "description": "Optional comma-separated kind filter (default fix,gotcha)",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Optional max results (default 10)",
+            "type": "number"
+          },
+          "project_name": {
+            "description": "Target project/repo scope",
+            "type": "string"
+          },
+          "since": {
+            "description": "Duration like 7d/30d (default 30d)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "recent_failures"
+    },
+    {
+      "description": "Complete/merge an existing pull request.",
+      "input_schema": {
+        "properties": {
+          "delete_source_branch": {
+            "description": "Optional true/false",
+            "type": "string"
+          },
+          "pr_id": {
+            "description": "Pull request id",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Optional project name",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Optional provider override: azure_devops",
+            "type": "string"
+          },
+          "repository": {
+            "description": "Optional repository id/name",
+            "type": "string"
+          },
+          "squash": {
+            "description": "Optional true/false",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "repo_pr_complete"
+    },
+    {
+      "description": "Create a pull request using configured SCM provider (Azure DevOps in v1).",
+      "input_schema": {
+        "properties": {
+          "auto_complete": {
+            "description": "Optional true/false to request auto-complete",
+            "type": "string"
+          },
+          "description": {
+            "description": "Optional PR description (auto-generated if omitted)",
+            "type": "string"
+          },
+          "origin_url": {
+            "description": "Optional repository origin URL (fallback to session)",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Optional project name (fallback to init_project session)",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Optional provider override: azure_devops",
+            "type": "string"
+          },
+          "repository": {
+            "description": "Optional repository id/name (fallback derive from origin_url/session)",
+            "type": "string"
+          },
+          "reviewer_ids": {
+            "description": "Optional comma-separated reviewer ids",
+            "type": "string"
+          },
+          "source_branch": {
+            "description": "Source branch (fallback to current init_project branch)",
+            "type": "string"
+          },
+          "target_branch": {
+            "description": "Optional target branch (fallback project/default config)",
+            "type": "string"
+          },
+          "ticket_ids": {
+            "description": "Optional comma-separated ticket ids/keys",
+            "type": "string"
+          },
+          "title": {
+            "description": "Optional PR title (auto-generated if omitted)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "repo_pr_create"
+    },
+    {
+      "description": "Save a semantic deduction/outcome for the project and reinforce the paths that led to it. Replaces reinforce_path.",
+      "input_schema": {
+        "properties": {
+          "outcome_text": {
+            "description": "The deduced reasoning outcome or solution",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Name of the project",
+            "type": "string"
+          },
+          "question": {
+            "description": "The original question or problem statement",
+            "type": "string"
+          },
+          "useful_sources": {
+            "description": "Comma-separated list of source IDs (commits, issues, files) that were helpful in reaching the outcome",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "save_reasoning_outcome"
+    },
+    {
+      "description": "Upsert the caller's current task/working state for a project+branch (kind=working_state, personal).",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback",
+            "type": "string"
+          },
+          "branch": {
+            "description": "Optional branch",
+            "type": "string"
+          },
+          "content": {
+            "description": "Current task, open files, next steps (required)",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Target project/repo scope",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "set_working_state"
+    },
+    {
+      "description": "Apply AI settings choices (keys written to config.json). Prefer settings UI when possible.",
+      "input_schema": {
+        "properties": {
+          "ai_mode": {
+            "description": "hybrid|ollama|gemini|openai_compat|claude|cursor|none",
+            "type": "string"
+          },
+          "always_smallest_local": {
+            "description": "Force granite4.1:3b",
+            "type": "boolean"
+          },
+          "claude_key": {
+            "description": "Optional Claude API key",
+            "type": "string"
+          },
+          "gemini_key": {
+            "description": "Optional Gemini API key to store",
+            "type": "string"
+          },
+          "openai_key": {
+            "description": "Optional OpenAI-compatible API key",
+            "type": "string"
+          },
+          "use_cloud_when_no_gpu": {
+            "description": "On CPU-only PCs, use cloud for hard questions",
+            "type": "boolean"
+          },
+          "use_ide_provided_models": {
+            "description": "Use Cursor/VS Code LM bridge when available",
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "settings_apply"
+    },
+    {
+      "description": "Get AI/settings recommendations and masked current config (probe + hybrid routing).",
+      "input_schema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "settings_get"
+    },
+    {
+      "description": "Return the local Settings UI URL (same page as personal HTTP /settings). Open it in a browser. In plugin mode starts an ephemeral 127.0.0.1 listener with a one-shot token when personal HTTP is not reachable.",
+      "input_schema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "settings_open_ui"
+    },
+    {
+      "description": "Store a durable team rule/convention (kind=rule, visibility=team).",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback",
+            "type": "string"
+          },
+          "branch": {
+            "description": "Optional branch this rule applies to",
+            "type": "string"
+          },
+          "content": {
+            "description": "Rule text (required)",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Target project/repo scope",
+            "type": "string"
+          },
+          "tags": {
+            "description": "Optional comma-separated tags",
+            "type": "string"
+          },
+          "title": {
+            "description": "Rule title (required)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "store_rule"
+    },
+    {
+      "description": "Apply a local unpushed unified diff to the project workspace after init_project returned requires_patch, then re-index the patched tree.",
+      "input_schema": {
+        "properties": {
+          "commit": {
+            "description": "Optional local commit hash for session tracking after patch",
+            "type": "string"
+          },
+          "patch": {
+            "description": "Unified diff text (git format) to apply with git apply",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Name of the project (same as init_project)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "sync_local_patch"
+    },
+    {
+      "description": "Add a comment to a ticket/work-item.",
+      "input_schema": {
+        "properties": {
+          "comment": {
+            "description": "Comment text",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ticket/work-item ID or key",
+            "type": "string"
+          },
+          "project_key": {
+            "description": "Optional project key",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Optional provider override",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ticket_add_comment"
+    },
+    {
+      "description": "Assign a ticket/work-item to a user.",
+      "input_schema": {
+        "properties": {
+          "assignee": {
+            "description": "Assignee identifier",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ticket/work-item ID or key",
+            "type": "string"
+          },
+          "project_key": {
+            "description": "Optional project key",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Optional provider override",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ticket_assign"
+    },
+    {
+      "description": "Create a new ticket/work-item on the selected provider.",
+      "input_schema": {
+        "properties": {
+          "assignee": {
+            "description": "Optional assignee",
+            "type": "string"
+          },
+          "description": {
+            "description": "Optional description",
+            "type": "string"
+          },
+          "priority": {
+            "description": "Optional priority",
+            "type": "string"
+          },
+          "project_key": {
+            "description": "Project key or identifier",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Optional provider override: redmine|jira|azure_devops",
+            "type": "string"
+          },
+          "provider_fields_json": {
+            "description": "Optional provider-specific JSON fields",
+            "type": "string"
+          },
+          "title": {
+            "description": "Ticket title/summary",
+            "type": "string"
+          },
+          "type": {
+            "description": "Optional issue/work-item type",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ticket_create"
+    },
+    {
+      "description": "Get a ticket/work-item by ID or external key.",
+      "input_schema": {
+        "properties": {
+          "id": {
+            "description": "Ticket/work-item ID or key",
+            "type": "string"
+          },
+          "project_key": {
+            "description": "Optional project key for routing",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Optional provider override: redmine|jira|azure_devops",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ticket_get"
+    },
+    {
+      "description": "Return ticketing capabilities, configured providers, header hints, and client env hints.",
+      "input_schema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "ticket_get_capabilities"
+    },
+    {
+      "description": "List projects available in the selected ticketing provider.",
+      "input_schema": {
+        "properties": {
+          "provider": {
+            "description": "Optional provider override",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ticket_list_projects"
+    },
+    {
+      "description": "List statuses/states for a provider/project and optional issue type.",
+      "input_schema": {
+        "properties": {
+          "issue_type": {
+            "description": "Optional issue/work-item type",
+            "type": "string"
+          },
+          "project_key": {
+            "description": "Optional project key",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Optional provider override",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ticket_list_statuses"
+    },
+    {
+      "description": "Move a ticket/work-item to closed state using provider/project workflow mapping.",
+      "input_schema": {
+        "properties": {
+          "id": {
+            "description": "Ticket/work-item ID or key",
+            "type": "string"
+          },
+          "issue_type": {
+            "description": "Optional issue/work-item type",
+            "type": "string"
+          },
+          "notes": {
+            "description": "Optional comment to append after transition",
+            "type": "string"
+          },
+          "project_key": {
+            "description": "Optional project key",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Optional provider override",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ticket_mark_closed"
+    },
+    {
+      "description": "Move a ticket/work-item to resolved state using provider/project workflow mapping.",
+      "input_schema": {
+        "properties": {
+          "id": {
+            "description": "Ticket/work-item ID or key",
+            "type": "string"
+          },
+          "issue_type": {
+            "description": "Optional issue/work-item type",
+            "type": "string"
+          },
+          "notes": {
+            "description": "Optional comment to append after transition",
+            "type": "string"
+          },
+          "project_key": {
+            "description": "Optional project key",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Optional provider override",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ticket_mark_resolved"
+    },
+    {
+      "description": "Reopen a ticket/work-item using provider/project workflow mapping.",
+      "input_schema": {
+        "properties": {
+          "id": {
+            "description": "Ticket/work-item ID or key",
+            "type": "string"
+          },
+          "issue_type": {
+            "description": "Optional issue/work-item type",
+            "type": "string"
+          },
+          "notes": {
+            "description": "Optional comment to append after transition",
+            "type": "string"
+          },
+          "project_key": {
+            "description": "Optional project key",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Optional provider override",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ticket_reopen"
+    },
+    {
+      "description": "Search issues/work items across configured ticketing providers.",
+      "input_schema": {
+        "properties": {
+          "assignee": {
+            "description": "Optional assignee filter",
+            "type": "string"
+          },
+          "author": {
+            "description": "Optional author filter",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Optional max results (default 20)",
+            "type": "number"
+          },
+          "offset": {
+            "description": "Optional pagination offset",
+            "type": "number"
+          },
+          "priority": {
+            "description": "Optional priority filter",
+            "type": "string"
+          },
+          "project_key": {
+            "description": "Optional project key for routing/filtering",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Optional provider override: redmine|jira|azure_devops",
+            "type": "string"
+          },
+          "query": {
+            "description": "Optional search query",
+            "type": "string"
+          },
+          "sort": {
+            "description": "Optional sort expression",
+            "type": "string"
+          },
+          "status": {
+            "description": "Optional status filter",
+            "type": "string"
+          },
+          "type": {
+            "description": "Optional issue/work-item type filter",
+            "type": "string"
+          },
+          "updated_from": {
+            "description": "Optional lower bound date",
+            "type": "string"
+          },
+          "updated_to": {
+            "description": "Optional upper bound date",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ticket_search"
+    },
+    {
+      "description": "Search issues/work items assigned to the current user.",
+      "input_schema": {
+        "properties": {
+          "limit": {
+            "description": "Optional max results (default 20)",
+            "type": "number"
+          },
+          "offset": {
+            "description": "Optional pagination offset",
+            "type": "number"
+          },
+          "priority": {
+            "description": "Optional priority filter",
+            "type": "string"
+          },
+          "project_key": {
+            "description": "Optional project key",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Optional provider override: redmine|jira|azure_devops",
+            "type": "string"
+          },
+          "query": {
+            "description": "Optional search query",
+            "type": "string"
+          },
+          "sort": {
+            "description": "Optional sort expression",
+            "type": "string"
+          },
+          "status": {
+            "description": "Optional status filter",
+            "type": "string"
+          },
+          "type": {
+            "description": "Optional issue/work-item type filter",
+            "type": "string"
+          },
+          "updated_from": {
+            "description": "Optional lower bound date",
+            "type": "string"
+          },
+          "updated_to": {
+            "description": "Optional upper bound date",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ticket_search_my"
+    },
+    {
+      "description": "Search users in ticketing provider for assignment/filtering.",
+      "input_schema": {
+        "properties": {
+          "limit": {
+            "description": "Optional max results (default 20)",
+            "type": "number"
+          },
+          "project_key": {
+            "description": "Optional project key",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Optional provider override",
+            "type": "string"
+          },
+          "query": {
+            "description": "User search query",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ticket_search_users"
+    },
+    {
+      "description": "Transition a ticket/work-item to a specific state/status.",
+      "input_schema": {
+        "properties": {
+          "id": {
+            "description": "Ticket/work-item ID or key",
+            "type": "string"
+          },
+          "project_key": {
+            "description": "Optional project key",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Optional provider override",
+            "type": "string"
+          },
+          "transition": {
+            "description": "Target transition/status id or name",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ticket_transition"
+    },
+    {
+      "description": "Update an existing ticket/work-item.",
+      "input_schema": {
+        "properties": {
+          "assignee": {
+            "description": "Optional assignee",
+            "type": "string"
+          },
+          "fixed_version": {
+            "description": "Optional fixed/target version",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ticket/work-item ID or key",
+            "type": "string"
+          },
+          "notes": {
+            "description": "Optional notes/comment",
+            "type": "string"
+          },
+          "priority": {
+            "description": "Optional priority",
+            "type": "string"
+          },
+          "project_key": {
+            "description": "Optional project key for routing",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Optional provider override: redmine|jira|azure_devops",
+            "type": "string"
+          },
+          "provider_fields_json": {
+            "description": "Optional provider-specific JSON fields",
+            "type": "string"
+          },
+          "status": {
+            "description": "Optional status",
+            "type": "string"
+          },
+          "type": {
+            "description": "Optional issue/work-item type",
+            "type": "string"
+          },
+          "workflow_action": {
+            "description": "Optional semantic action: resolve|close|reopen",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ticket_update"
+    },
+    {
+      "description": "Update project status after local commits/pushes to trigger incremental ingestion.",
+      "input_schema": {
+        "properties": {
+          "branch": {
+            "description": "Current branch",
+            "type": "string"
+          },
+          "commit": {
+            "description": "Current commit hash",
+            "type": "string"
+          },
+          "origin_url": {
+            "description": "Git origin URL",
+            "type": "string"
+          },
+          "project_name": {
+            "description": "Name of the project",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "update_project_status"
+    },
+    {
+      "description": "Explain why a file/symbol/issue changed using memory provenance, the commit/issue graph, and commit_chunk meaning excerpts (message+patch). Prefer this for why/when questions. Exactly one of file_path, symbol_name, issue_id is expected.",
+      "input_schema": {
+        "properties": {
+          "file_path": {
+            "description": "Optional file path subject",
+            "type": "string"
+          },
+          "issue_id": {
+            "description": "Optional issue ID subject",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Optional max memories returned (default 5)",
+            "type": "number"
+          },
+          "project_name": {
+            "description": "Target project/repo scope",
+            "type": "string"
+          },
+          "symbol_name": {
+            "description": "Optional symbol name subject",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "why_changed"
+    }
+  ]
+}

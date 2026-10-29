@@ -1,0 +1,7 @@
+# Disabled: CSS AST does not expose call_expression/function fields
+# the way JS/Go do; keeping an empty skip rule breaks `sg scan`.
+# Placeholder so ruleDirs stays complete without failing the whole scan.
+id: css-calls
+language: css
+rule:
+  pattern: __threski_disabled_css_calls__

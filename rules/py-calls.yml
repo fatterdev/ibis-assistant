@@ -1,0 +1,7 @@
+id: py-calls
+language: python
+rule:
+  kind: call
+  has:
+    field: function
+    kind: identifier

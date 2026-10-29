@@ -1,0 +1,30 @@
+{
+  "name": "@threski/ide-host",
+  "version": "1.0.0",
+  "description": "Thin IDE host for Threski Studio: spawn plugin stdio or attach to a shared personal HTTP MCP runtime",
+  "type": "module",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "bin": {
+    "threski-mcp-host": "bin/threski-mcp-host.mjs"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./lm-bridge": "./src/lm-bridge.js",
+    "./lm-rpc": "./src/lm-rpc.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fatterdev/threski-studio.git",
+    "directory": "ide-host"
+  }
+}

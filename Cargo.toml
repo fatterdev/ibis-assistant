@@ -1,0 +1,91 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/threski-core",
+    "crates/threski-logger",
+    "crates/threski-git",
+    "crates/threski-db",
+    "crates/threski-ai",
+    "crates/threski-ingest-git",
+    "crates/threski-ingest-code",
+    "crates/threski-ingest-logs",
+    "crates/threski-ingest-dynamic",
+    "crates/threski-ingest-redmine",
+    "crates/threski-search",
+    "crates/threski-ticketing",
+    "crates/threski-repopr",
+    "crates/threski-optimization",
+    "crates/threski-settings",
+    "crates/threski-wizard",
+    "crates/threski-cli",
+    "crates/threski-httpserver",
+    "crates/threski-server",
+    "crates/mcp-bridge",
+    "crates/xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["fatterdev <dev@fatter.dev>"]
+repository = "https://github.com/fatterdev/threski-studio"
+
+[workspace.dependencies]
+threski-core = { path = "crates/threski-core" }
+threski-logger = { path = "crates/threski-logger" }
+threski-git = { path = "crates/threski-git" }
+threski-db = { path = "crates/threski-db" }
+threski-ai = { path = "crates/threski-ai" }
+threski-ingest-git = { path = "crates/threski-ingest-git" }
+threski-ingest-code = { path = "crates/threski-ingest-code" }
+threski-ingest-logs = { path = "crates/threski-ingest-logs" }
+threski-ingest-dynamic = { path = "crates/threski-ingest-dynamic" }
+threski-ingest-redmine = { path = "crates/threski-ingest-redmine" }
+threski-search = { path = "crates/threski-search" }
+threski-ticketing = { path = "crates/threski-ticketing" }
+threski-repopr = { path = "crates/threski-repopr" }
+threski-optimization = { path = "crates/threski-optimization" }
+threski-settings = { path = "crates/threski-settings" }
+threski-wizard = { path = "crates/threski-wizard" }
+threski-cli = { path = "crates/threski-cli" }
+threski-httpserver = { path = "crates/threski-httpserver" }
+threski-server = { path = "crates/threski-server" }
+
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+notify = "8"
+surrealdb = { version = "3.3.4", features = ["protocol-ws"] }
+thiserror = "2"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+regex = "1"
+futures = "0.3"
+async-trait = "0.1"
+tempfile = "3"
+walkdir = "2"
+# Settings SPA static-asset embedding (D13: go:embed equivalent)
+include_dir = "0.7"
+base64 = "0.22"
+# Remote log polling (D1: FTP/SFTP clients kept, SMB dropped → UNC/native mounts)
+suppaftp = { version = "12", default-features = false, features = ["tokio"] }
+russh = { version = "0.65", default-features = false, features = ["ring", "rsa"] }
+russh-sftp = "3"
+# SMTP TLS notifier (ssl_tls / starttls)
+tokio-rustls = "0.26"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pki-types = "1"
+webpki-roots = "0.26"
+
+[profile.release]
+lto = "thin"
+strip = true

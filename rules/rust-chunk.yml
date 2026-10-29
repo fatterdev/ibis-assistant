@@ -1,0 +1,7 @@
+id: rust-chunk
+language: rust
+rule:
+  any:
+    - kind: function_item
+    - kind: struct_item
+    - kind: enum_item

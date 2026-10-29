@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "threski": {
+      "command": "node",
+      "args": ["C:/work/threski/ide-host/bin/threski-mcp-host.mjs"],
+      "env": {
+        "RUNTIME_MODE": "plugin",
+        "THRESKI_MCP_URL": ""
+      }
+    }
+  }
+}

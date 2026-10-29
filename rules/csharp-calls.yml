@@ -1,0 +1,7 @@
+id: csharp-calls
+language: csharp
+rule:
+  kind: invocation_expression
+  has:
+    field: function
+    kind: identifier

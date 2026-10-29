@@ -1,0 +1,7 @@
+id: go-chunk
+language: go
+rule:
+  any:
+    - kind: function_declaration
+    - kind: method_declaration
+    - kind: type_declaration

@@ -1,0 +1,7 @@
+id: java-calls
+language: java
+rule:
+  kind: method_invocation
+  has:
+    field: name
+    kind: identifier

@@ -1,0 +1,7 @@
+id: cpp-calls
+language: cpp
+rule:
+  kind: call_expression
+  has:
+    field: function
+    kind: identifier

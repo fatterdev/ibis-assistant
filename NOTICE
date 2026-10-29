@@ -1,0 +1,34 @@
+Threski Studio
+Copyright 2026 fatterdev
+
+This product is a living project memory system for real codebases: an MCP
+knowledge graph built from git causality, polyglot ast-grep structure, AI
+rule synthesis, log analysis, ticketing, and typed team memory, persisted in
+a single SurrealDB knowledge graph.
+
+Project home: https://github.com/fatterdev/threski-studio
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes and relies on third-party software and services:
+
+* SurrealDB (https://surrealdb.com) - persistence engine; the SurrealDB
+  binary is auto-provisioned on demand when enabled.
+* ast-grep (https://ast-grep.github.io) - structural code search; the `sg`
+  sidecar binary is auto-provisioned on demand when enabled.
+* Ollama (https://ollama.com) - optional local embeddings and chat runtime,
+  started on demand.
+* Rust ecosystem crates (tokio, axum, serde, and others) - complete list in
+  Cargo.toml / Cargo.lock.
+* Node.js packages shipped with ide-host and vscode-extension - complete
+  list in their package.json / package-lock.json.
+
+All trademarks are the property of their respective owners.
+
+Per the terms of the Apache License, Version 2.0, section 4(d), any
+redistribution of this product, with or without modification, must retain
+the copyright, patent, trademark, and attribution notices contained in this
+NOTICE file. Derivative works must carry this attribution forward.
+
+The Threski Studio name, logo, and visual identity (docs/assets/) are
+excluded from the patent and trademark license grant in section 6 of the
+Apache License, Version 2.0.

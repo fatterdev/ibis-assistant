@@ -1,0 +1,7 @@
+id: js-calls
+language: javascript
+rule:
+  kind: call_expression
+  has:
+    field: function
+    kind: identifier

@@ -1,0 +1,45 @@
+# Threski Studio — plugin STATUS
+
+English readiness notes for agents and humans. **No Cursor MCP login** is required for this package.
+
+## MCP
+
+- Transport: stdio child `threski -mode stdio -runtime-mode plugin`
+- Namespace: `threski` (ready when the Go binary is on `PATH`)
+- Empty Cursor window (no folder): handshake still succeeds by design; SurrealDB/ingest stay off until a workspace is bound
+
+## Data
+
+- Default plugin knowledge dir: `%LOCALAPPDATA%\threski\plugin` (override with `THRESKI_DATA_DIR`)
+- Separate from a personal HTTP daemon (`threski run` on `:3030`)
+- **Do not** run two plugin stdio children against the same SurrealDB. Prefer one personal daemon and `THRESKI_MCP_URL=http://127.0.0.1:3030/mcp` for a shared runtime (see IDE host docs)
+- Memory context: call `load_session_context` at most once for current team truth (working state, rules, fixes, decisions)
+- Change meaning: `ask_project` / `why_changed` surface `commit_chunk` (why/when); do not treat commit hits as HEAD source
+- Capture: use `capture_observation` only for a genuinely new, reusable lesson; the stop hook skips capture when there is nothing durable
+
+## Commands
+
+- **Threski: Status** — readiness summary (STATUS, AI, ticketing, workspace)
+- **Threski: Open Settings** → MCP `settings_open_ui`
+- **Threski: Remember** → MCP `memory_add` with kind `decision` / `fix` / `rule`
+- **Threski: Set working state** → MCP `set_working_state` for the current task/branch
+
+## Settings / AI
+
+- Command **Threski: Open Settings** → MCP `settings_open_ui`
+- Plugin mode opens personal `/settings/` when reachable, else an ephemeral `127.0.0.1` UI with `?token=`
+- Tools: `settings_get`, `settings_apply`, `settings_open_ui`
+- Hybrid AI keys live in the plugin data-dir `config.json`. Context-only fallback when local and cloud fail
+
+## Ticketing
+
+- Call `ticket_get_capabilities` before ticket search/create
+- Providers stay empty until configured (Redmine / Jira / Azure DevOps headers or config)
+- Optional headers: `X-Redmine-API-Key`, `X-Jira-Email` + `X-Jira-API-Token`, `X-Azure-DevOps-PAT`, git token headers
+
+## First-use checklist
+
+1. Go binary `threski` on `PATH`
+2. Open a git repo folder (for full value)
+3. Configure AI keys via Settings (or personal daemon + shared `THRESKI_MCP_URL`)
+4. `init_project` then `ask_project` / log tools as needed
