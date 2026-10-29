@@ -438,9 +438,18 @@ async fn run_server_async(args: Vec<String>) -> i32 {
     };
 
     // 6. AI providers (the embedding half may consult the DB).
-    let ai = state::assemble_ai(&cfg, db_executor.clone(), plugin_unbound)
-        .await
-        .client;
+    // F0.5: the MCP-sampling session registry — tool dispatch attaches the
+    // client peer, the `mcp_sampling` reasoning leg sends
+    // `sampling/createMessage` over it.
+    let sampling_registry = Arc::new(threski_server::sampling::SamplingSessionRegistry::new());
+    let ai = state::assemble_ai(
+        &cfg,
+        db_executor.clone(),
+        plugin_unbound,
+        sampling_registry.clone(),
+    )
+    .await
+    .client;
 
     // Search service + git-bound claim plumbing
     let search = build_search_service(&cfg, db_executor.clone(), &ai);
@@ -491,6 +500,7 @@ async fn run_server_async(args: Vec<String>) -> i32 {
         active_repos,
         db_process: Mutex::new(db_process),
         resource_subs: threski_server::resources::ResourceSubscriptions::default(),
+        sampling: sampling_registry,
     });
 
     // Background workers

@@ -1,6 +1,13 @@
 //! IDE LM bridge provider: calls the ide-host bridge
 //! (`vscode.lm`) over loopback HTTP. Reasoning only — embeddings stay on
 //! Ollama.
+//!
+//! **Deprecated since F0.5** (superseded by MCP sampling): the primary
+//! reasoning via in IDE sessions is now `sampling/createMessage` on the MCP
+//! session (`McpSamplingProvider`). This bridge stays functional and is kept
+//! only as the middle fallback of the `sampling → lm_bridge → ollama` chain,
+//! driven by `THRESKI_LM_BRIDGE_URL`/`THRESKI_LM_BRIDGE_PORT` — do not build
+//! new integrations on it.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -31,6 +38,9 @@ struct BridgeResponse {
 }
 
 /// Calls the IDE host LM bridge over a loopback HTTP JSON RPC.
+///
+/// **Deprecated** (F0.5): MCP sampling is the primary reasoning via; this
+/// provider remains as the chain fallback (`THRESKI_LM_BRIDGE_*`).
 pub struct CursorLMProvider {
     base_url: String,
     http: reqwest::Client,

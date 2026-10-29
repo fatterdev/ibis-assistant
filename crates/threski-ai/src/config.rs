@@ -42,7 +42,8 @@ pub struct EmbeddingConfig {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct ReasoningConfig {
-    /// hybrid | ollama | gemini | openai_compat | claude | cursor | none
+    /// hybrid | ollama | gemini | openai_compat | claude | cursor |
+    /// ide_sampling (MCP sampling, F0.5) | none
     pub provider: String,
     /// `auto` or an explicit model name
     pub model: String,

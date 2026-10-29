@@ -15,8 +15,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
 use threski_ai::{
-    AIProvider, ClaudeProvider, Client, CloudPool, CursorLMProvider, GeminiProvider,
-    OllamaChatProvider, OllamaProvider, OpenAICompatProvider, ReasoningRouter, RouterConfig,
+    AIProvider, ClaudeProvider, Client, CloudPool, CursorLMProvider, FallbackChain, GeminiProvider,
+    McpSamplingProvider, OllamaChatProvider, OllamaProvider, OpenAICompatProvider, ReasoningRouter,
+    RouterConfig, SamplingTransport,
 };
 use threski_core::config::Config;
 use threski_db::executor::{Executor, Vars};
@@ -96,6 +97,9 @@ pub struct AppState {
     /// `subscriptions/listen` subscribers notified with
     /// `notifications/resources/updated` on memory mutations.
     pub resource_subs: crate::resources::ResourceSubscriptions,
+    /// F0.5 MCP sampling: the session-peer registry feeding the
+    /// `mcp_sampling` reasoning provider (tool dispatch attaches the peer).
+    pub sampling: Arc<crate::sampling::SamplingSessionRegistry>,
 }
 
 impl AppState {
@@ -286,10 +290,15 @@ pub struct AiAssembly {
 }
 
 /// Builds the AI client from config (parity with the original provider switches).
+/// `sampling` is the F0.5 MCP-sampling seam (`SamplingSessionRegistry`): the
+/// `ide_sampling`/`mcp_sampling` reasoning provider sends
+/// `sampling/createMessage` through it, with the lm-bridge and local Ollama
+/// steps of the chain as fallbacks.
 pub async fn assemble_ai(
     cfg: &Config,
     db: Option<Arc<dyn Executor>>,
     plugin_unbound: bool,
+    sampling: Arc<dyn SamplingTransport>,
 ) -> AiAssembly {
     let probe = threski_settings::probe(&cfg.ai.embedding.url).await;
     let local_model = threski_settings::resolve_local_model(&cfg.ai.reasoning, &probe);
@@ -348,11 +357,23 @@ pub async fn assemble_ai(
         }
     };
 
-    // 6b. Reasoning provider.
+    // 6b. Reasoning provider. F0.5: in plugin runtime mode the default
+    // (`hybrid` = user-unset) becomes `ide_sampling` — the MCP client (the
+    // IDE) is the primary reasoning via `sampling/createMessage`, with the
+    // deprecated-but-working LM bridge and local Ollama as the chain's
+    // fallbacks.
+    let provider_raw = cfg.ai.reasoning.provider.trim().to_lowercase();
+    let provider = if (provider_raw.is_empty() || provider_raw == "hybrid")
+        && threski_core::config::is_plugin_runtime(&cfg.runtime_mode)
+    {
+        "ide_sampling".to_string()
+    } else {
+        provider_raw
+    };
     let mut local_reasoning: Option<Box<dyn AIProvider>> = None;
     if matches!(
-        cfg.ai.reasoning.provider.to_lowercase().trim(),
-        "hybrid" | "ollama" | ""
+        provider.as_str(),
+        "hybrid" | "ollama" | "" | "ide_sampling" | "mcp_sampling"
     ) {
         if cfg.ai.embedding.provider == "ollama"
             && !plugin_unbound
@@ -446,44 +467,62 @@ pub async fn assemble_ai(
     let cloud_pool = CloudPool::new(&cloud_primary, &order, cloud_providers).await;
 
     // 6b switch: pick the reasoning provider.
-    let reasoning: Option<Arc<dyn AIProvider>> =
-        match cfg.ai.reasoning.provider.to_lowercase().trim() {
-            "gemini" | "openai_compat" | "claude" | "cursor" => {
-                let name = cfg.ai.reasoning.provider.to_lowercase();
-                match direct_pick.get(&name) {
-                    Some(p) => Some(p.clone()),
-                    None => {
-                        tracing::warn!("Reasoning provider {name} selected but not configured");
-                        None
-                    }
+    let reasoning: Option<Arc<dyn AIProvider>> = match provider.as_str() {
+        "gemini" | "openai_compat" | "claude" | "cursor" => {
+            let name = provider.clone();
+            match direct_pick.get(&name) {
+                Some(p) => Some(p.clone()),
+                None => {
+                    tracing::warn!("Reasoning provider {name} selected but not configured");
+                    None
                 }
             }
-            "ollama" => None, // replaced by the local chat provider below
-            "none" => {
-                tracing::info!("Reasoning provider=none (context-only mode)");
-                None
-            }
-            "hybrid" | "" => Some(Arc::new(ReasoningRouter::new(
-                local_reasoning.take(),
-                Some(Box::new(cloud_pool)),
-                RouterConfig {
-                    use_cloud_when_no_gpu: cfg.ai.reasoning.routing.use_cloud_when_no_gpu,
-                    cpu_only: probe.cpu_only,
-                    local_timeout: std::time::Duration::from_millis(
-                        cfg.ai.reasoning.routing.local_timeout_ms.max(0) as u64,
-                    ),
-                    context_only: cfg.ai.reasoning.context_only_fallback,
-                },
-            )) as Arc<dyn AIProvider>),
-            other => {
-                tracing::warn!("Unknown reasoning provider: {other}");
-                None
-            }
-        };
+        }
+        "ollama" => None, // replaced by the local chat provider below
+        "none" => {
+            tracing::info!("Reasoning provider=none (context-only mode)");
+            None
+        }
+        "ide_sampling" | "mcp_sampling" => {
+            // F0.5 chain: sampling → lm_bridge → ollama. The LM bridge is
+            // deprecated but still working (`THRESKI_LM_BRIDGE_*` only as
+            // fallback); Ollama is the final fallback. The bridge reports
+            // non-functional without a reachable host probe, Ollama without
+            // a running daemon — the chain skips them in order.
+            let ollama_leg: Arc<dyn AIProvider> = match local_reasoning.take() {
+                Some(local) => Arc::from(local),
+                None => Arc::new(OllamaChatProvider::new(&local_model, &cfg.ai.embedding.url)),
+            };
+            let steps: Vec<Arc<dyn AIProvider>> = vec![
+                Arc::new(McpSamplingProvider::new(sampling.clone())),
+                Arc::new(CursorLMProvider::new("")),
+                ollama_leg,
+            ];
+            let chain = FallbackChain::new(steps, cfg.ai.reasoning.context_only_fallback);
+            tracing::info!("Reasoning chain: {}", chain.step_names().join(" → "));
+            Some(Arc::new(chain) as Arc<dyn AIProvider>)
+        }
+        "hybrid" | "" => Some(Arc::new(ReasoningRouter::new(
+            local_reasoning.take(),
+            Some(Box::new(cloud_pool)),
+            RouterConfig {
+                use_cloud_when_no_gpu: cfg.ai.reasoning.routing.use_cloud_when_no_gpu,
+                cpu_only: probe.cpu_only,
+                local_timeout: std::time::Duration::from_millis(
+                    cfg.ai.reasoning.routing.local_timeout_ms.max(0) as u64,
+                ),
+                context_only: cfg.ai.reasoning.context_only_fallback,
+            },
+        )) as Arc<dyn AIProvider>),
+        other => {
+            tracing::warn!("Unknown reasoning provider: {other}");
+            None
+        }
+    };
 
     // The ollama case keeps the local chat provider (rebuilt here because the
     // hybrid branch moved the boxed one into the router).
-    let reasoning = match cfg.ai.reasoning.provider.to_lowercase().trim() {
+    let reasoning = match provider.as_str() {
         "ollama" => Some(
             Arc::new(OllamaChatProvider::new(&local_model, &cfg.ai.embedding.url))
                 as Arc<dyn AIProvider>,

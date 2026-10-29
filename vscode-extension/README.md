@@ -120,6 +120,12 @@ The extension contributes the `threski` MCP server-definition provider. On VS Co
 
 ## IDE LM bridge
 
+> **Deprecated since F0.5:** VS Code answers MCP `sampling/createMessage`
+> directly, so the runtime reasons through the MCP session by default
+> (`ai.reasoning.provider=ide_sampling` in plugin mode). The bridge stays
+> functional only as the middle fallback of the `sampling → lm_bridge →
+> ollama` chain.
+
 When enabled, the extension registers a `vscode.lm` handler and listens on `127.0.0.1:<threskiStudio.lmBridge.port>` (`/health`, `/v1/generate`). The runtime reaches it via `THRESKI_LM_BRIDGE_URL` (exported automatically) when `ai.reasoning.use_ide_provided_models` is on. Embeddings remain Ollama `nomic-embed-text`; the context-only fallback still applies when the bridge is down.
 
 ## Runtime uniqueness

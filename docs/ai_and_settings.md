@@ -116,10 +116,18 @@ Legacy `ai.reasoning.keys` / top-level `gemini_keys` migrate into `clouds.gemini
 
 | Value | Behavior |
 |-------|----------|
-| `hybrid` | Local Ollama + cloud pool (default) |
+| `hybrid` | Local Ollama + cloud pool (default outside plugin mode) |
+| `ide_sampling` / `mcp_sampling` | Reasoning via MCP `sampling/createMessage` on the client session, fallback chain `sampling → lm_bridge → ollama` (default in plugin runtime mode) |
 | `ollama` | Local only |
-| `gemini` / `openai_compat` / `claude` | That cloud only |
+| `gemini` / `openai_compat` / `claude` / `cursor` | That provider only |
 | `none` | Context-only (no GenerateContent) |
+
+The `ide_sampling` chain skips legs that are not functional: no attached
+sampling-capable MCP client (background work, clients without the
+`capability.sampling` declaration) moves on to the LM bridge
+(`THRESKI_LM_BRIDGE_URL`, deprecated but still working), then to local
+Ollama. With `context_only_fallback` on, an all-legs-failed request
+degrades to the context-only pack instead of erroring.
 
 ## Code map
 

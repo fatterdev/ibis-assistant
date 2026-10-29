@@ -5,13 +5,18 @@
 **Primary IDE:** Cursor (`cursor-plugin/`)  
 **Secondary IDE:** VS Code (`vscode-extension/`)
 
+> **F0.5 update (2026-10-29):** the IDE-provided-models reasoning primary is
+> now MCP sampling (`sampling/createMessage` over the MCP session); the LM
+> bridge is deprecated and only serves as chain fallback
+> (`sampling → lm_bridge → ollama`, `THRESKI_LM_BRIDGE_*`).
+
 ## Summary
 
 Threski does **not** load Go in-process into Cursor or VS Code (no `c-shared` / FFI). A thin Node **ide-host** optionally sits between the IDE and the Go binary:
 
 - **Default:** each IDE spawns its own `threski -mode stdio -runtime-mode plugin` child.
 - **Shared runtime (optional):** both IDEs attach to one **personal** HTTP daemon via `THRESKI_MCP_URL=http://127.0.0.1:3030/mcp`.
-- **IDE-provided LLM (optional):** Go `cursor` provider calls a loopback LM bridge; the host wires `vscode.lm` / VS Code Language Model API.
+- **IDE-provided LLM:** primary via is now **MCP sampling** (`sampling/createMessage` on the MCP session — F0.5, default `ai.reasoning.provider=ide_sampling` in plugin mode). The loopback LM bridge (`THRESKI_LM_BRIDGE_URL`, default `http://127.0.0.1:39201`) is **deprecated but still working**: it remains only as the middle fallback of the `sampling → lm_bridge → ollama` chain.
 
 ## Architecture
 

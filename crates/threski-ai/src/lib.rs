@@ -1,7 +1,8 @@
 //! threski-ai — AI provider plumbing:
 //! providers (openai-compat, claude, gemini pool, ollama embed/chat, IDE LM
-//! bridge), the hybrid local/cloud router, cloud failover pool, cost tracker,
-//! batch embedding manager and the ollama lifecycle runner.
+//! bridge, MCP sampling), the hybrid local/cloud router, the F0.5 ordered
+//! fallback chain, cloud failover pool, cost tracker, batch embedding
+//! manager and the ollama lifecycle runner.
 //!
 //! The fake-injection boundary for other lanes is [`AIProvider`]; [`Client`]
 //! is the orchestrator consumers hold.
@@ -14,7 +15,9 @@ pub mod config;
 pub mod cost;
 pub mod cursor_lm;
 pub mod error;
+pub mod fallback;
 pub mod gemini;
+pub mod mcp_sampling;
 pub mod ollama;
 pub mod ollama_chat;
 pub mod openai_compat;
@@ -34,9 +37,14 @@ pub use cloud_pool::{normalize_cloud_name, CloudPool};
 pub use cost::{CostStore, CostTracker};
 pub use cursor_lm::{CursorLMProvider, DEFAULT_IDE_BRIDGE_URL};
 pub use error::AiError;
+pub use fallback::FallbackChain;
 pub use gemini::{
     GeminiProvider, UsageStore, DEFAULT_GEMINI_BASE_URL, EMBEDDING_MODEL, GENERATION_MODEL,
     PREFERRED_GENERATION_MODEL,
+};
+pub use mcp_sampling::{
+    McpSamplingProvider, SamplingMessage, SamplingRequest, SamplingResponse, SamplingTransport,
+    DEFAULT_SAMPLING_MAX_TOKENS,
 };
 pub use ollama::OllamaProvider;
 pub use ollama_chat::OllamaChatProvider;

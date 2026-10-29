@@ -10,6 +10,7 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::service::RequestContext;
 use rmcp::RoleServer;
 use serde_json::{json, Value};
+use threski_ai::SamplingTransport;
 
 use crate::args::{bool_arg, get_string_arg, str_arg};
 use crate::progress::{report, ProgressReporter};
@@ -102,6 +103,10 @@ pub async fn dispatch(
     ctx: rmcp::handler::server::tool::ToolCallContext<'_, crate::mcp_server::ThreskiServer>,
 ) -> ToolResult {
     let state = ctx.service.state.clone();
+    // F0.5: the session peer feeds the `mcp_sampling` reasoning leg — the
+    // in-flight request's client answers `sampling/createMessage` for the
+    // reasoning lanes reached from this tool call.
+    state.sampling.attach(&ctx.request_context.peer);
     let progress = if crate::progress::tool_emits_progress(name) {
         ProgressReporter::attach(&ctx.request_context)
     } else {
@@ -797,12 +802,23 @@ async fn settings_get(state: &Arc<AppState>) -> ToolResult {
     let cfg = state.config();
     let probe = threski_settings::probe(&cfg.ai.embedding.url).await;
     let rec = threski_settings::recommend(&cfg, &probe);
+    // F0.5: the effective provider reflects the plugin-mode default
+    // (`ide_sampling`) and the live sampling availability.
+    let provider = {
+        let raw = cfg.ai.reasoning.provider.trim().to_lowercase();
+        if (raw.is_empty() || raw == "hybrid") && cfg.is_plugin() {
+            "ide_sampling".to_string()
+        } else {
+            raw
+        }
+    };
     let out = json!({
         "probe": probe,
         "summary": rec.summary,
         "fields": rec.fields,
         "settings_url": threski_settings::open_url(&cfg.public_base_url()),
-        "provider": cfg.ai.reasoning.provider,
+        "provider": provider,
+        "sampling_available": state.sampling.connected(),
         "cloud_primary": cfg.ai.reasoning.resolve_cloud_primary(),
     });
     json_result(&out)

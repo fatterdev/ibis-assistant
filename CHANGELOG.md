@@ -4,6 +4,24 @@ All notable changes to Threski Studio are documented here.
 
 ## [Unreleased]
 
+- **feat(ai): reasoning via mcp sampling with lm-bridge fallback** — the
+  runtime reasons through the MCP client's own model: the new
+  `mcp_sampling` provider sends `sampling/createMessage` on the current
+  session (`SamplingSessionRegistry` — tool dispatch attaches the client
+  peer, clients that declared the `sampling` capability answer). New
+  `ai.reasoning.provider` values `ide_sampling`/`mcp_sampling` assemble the
+  ordered fallback chain `sampling → lm_bridge → ollama`
+  (`FallbackChain`): legs that are down (no sampling-capable client, dead
+  `THRESKI_LM_BRIDGE_URL`, no Ollama daemon) are skipped, failures fold
+  into one joined error, and `context_only_fallback` still degrades to the
+  context-only pack. In plugin runtime mode `hybrid`/empty now defaults to
+  `ide_sampling` (the IDE is the primary reasoning via); `settings_get`
+  reports the effective provider plus `sampling_available`. The IDE LM
+  bridge is deprecated but kept working as chain fallback. Verify: unit
+  tests for provider mapping and chain ordering, protocol gate over the
+  in-memory duplex (sampling-capable client drives the `ask_project`
+  agentic lane; a client without the capability degrades to the chain
+  error), `cargo test` green.
 - **feat(server): memory, rules and tickets as mcp resources (templates +
   live updates)** — `resources/templates/list` with the three F0.4
   templates (`threski://memory/{kind}/{id}`, `threski://rules/{name}`,

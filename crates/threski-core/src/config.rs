@@ -151,7 +151,10 @@ pub struct EmbeddingConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ReasoningConfig {
-    /// hybrid, ollama, gemini, openai_compat, claude, cursor, none
+    /// hybrid, ollama, gemini, openai_compat, claude, cursor, ide_sampling, none
+    /// (`ide_sampling`/`mcp_sampling` = reasoning via MCP
+    /// `sampling/createMessage` with the lm-bridge → ollama fallback chain;
+    /// the default in plugin runtime mode).
     pub provider: String,
     /// auto or an explicit Ollama/cloud model
     pub model: String,

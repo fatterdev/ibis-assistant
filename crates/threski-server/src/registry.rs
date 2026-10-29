@@ -454,7 +454,7 @@ pub static TOOL_SPECS: &[ToolSpec] = &[
         name: "settings_apply",
         description: "Apply AI settings choices (keys written to config.json). Prefer settings UI when possible.",
         properties: &[
-            p!("ai_mode", "hybrid|ollama|gemini|openai_compat|claude|cursor|none", String),
+            p!("ai_mode", "hybrid|ollama|gemini|openai_compat|claude|cursor|ide_sampling|none (ide_sampling = reasoning via MCP sampling; default in plugin mode)", String),
             p!("gemini_key", "Optional Gemini API key to store", String),
             p!("openai_key", "Optional OpenAI-compatible API key", String),
             p!("claude_key", "Optional Claude API key", String),

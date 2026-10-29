@@ -26,6 +26,7 @@ use serde_json::{json, Value};
 use threski_ai::Client;
 use threski_core::config::{Config, ProjectConfig};
 use threski_server::resources;
+use threski_server::sampling;
 use threski_server::state::AppState;
 use threski_server::{assembly, mcp_server};
 
@@ -66,6 +67,7 @@ async fn test_state(projects: &[String]) -> Arc<AppState> {
         active_repos: vec![],
         db_process: Mutex::new(None),
         resource_subs: resources::ResourceSubscriptions::default(),
+        sampling: Arc::new(sampling::SamplingSessionRegistry::new()),
     })
 }
 

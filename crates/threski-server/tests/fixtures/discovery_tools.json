@@ -985,7 +985,7 @@
       "input_schema": {
         "properties": {
           "ai_mode": {
-            "description": "hybrid|ollama|gemini|openai_compat|claude|cursor|none",
+            "description": "hybrid|ollama|gemini|openai_compat|claude|cursor|ide_sampling|none (ide_sampling = reasoning via MCP sampling; default in plugin mode)",
             "type": "string"
           },
           "always_smallest_local": {
