@@ -191,9 +191,8 @@ async fn prompts_get_renders_the_session_contract_with_arguments() {
             GetPromptRequestParams::new("readiness").with_arguments(
                 json!({ "project_name": "demo-project" })
                     .as_object()
-                    .unwrap()
-                    .clone()
-                    .into(),
+                    .expect("readiness arguments object")
+                    .clone(),
             ),
         )
         .await
@@ -266,9 +265,8 @@ async fn prompts_get_renders_the_session_contract_with_arguments() {
             GetPromptRequestParams::new("why_changed").with_arguments(
                 json!({ "symbol_name": "parse_chunk" })
                     .as_object()
-                    .unwrap()
-                    .clone()
-                    .into(),
+                    .expect("why_changed arguments object")
+                    .clone(),
             ),
         )
         .await
