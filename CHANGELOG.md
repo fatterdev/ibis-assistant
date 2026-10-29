@@ -2,6 +2,15 @@
 
 All notable changes to Threski Studio are documented here.
 
+## [Unreleased]
+
+- **feat(server): read-only tool annotations (readonlyhint, titles)** — every
+  one of the 56 MCP tools now declares MCP annotations: a human-readable
+  `title` (top-level and inside the annotations) and an explicit
+  `readOnlyHint` — `true` for the 22 pure-read tools (never prompt for
+  confirmation), `false` for mutators. Completeness test pins the bijection
+  with the tool registry and the exact read-only set.
+
 ## [0.2.0] — 2026-10-29
 
 ### Rebrand: Ibis Assistant → Threski Studio

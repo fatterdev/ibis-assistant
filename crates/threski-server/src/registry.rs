@@ -13,13 +13,19 @@
 //! FORBIDDEN legacy names (`redmine_search_issues`, `redmine_update_issue`,
 //! …) are asserted absent by the contract test.
 //!
+//! F0.2 tool annotations: [`TOOL_ANNOTATIONS`] is the data table pairing
+//! every registered tool with a human-readable `title` and an explicit
+//! `readOnlyHint` — read-only tools never prompt for confirmation, mutators
+//! always declare themselves. The completeness test pins the bijection with
+//! [`TOOL_SPECS`] and the exact read-only set.
+//!
 //! Handlers live in [`crate::tools`]; the router wires one dynamic route per
 //! spec to [`crate::tools::dispatch`].
 
 use std::sync::{Arc, OnceLock};
 
 use rmcp::handler::server::router::tool::{ToolRoute, ToolRouter};
-use rmcp::model::{JsonObject, Tool};
+use rmcp::model::{JsonObject, Tool, ToolAnnotations};
 use serde_json::{json, Value};
 
 /// One row of the tool table (D3): schema is generated as data so the
@@ -685,6 +691,335 @@ pub fn spec_of(name: &str) -> Option<&'static ToolSpec> {
     TOOL_SPECS.iter().find(|s| s.name == name)
 }
 
+/// One row of the F0.2 annotations table: the MCP hints clients use to
+/// skip confirmations on pure reads and to render friendly names.
+pub struct ToolAnnotation {
+    pub name: &'static str,
+    /// Human-readable title — set both top-level (`Tool::title`) and inside
+    /// the annotations.
+    pub title: &'static str,
+    /// MCP `readOnlyHint`: `true` = never modifies its environment,
+    /// `false` = explicit mutator (destructive defaults apply).
+    pub read_only: bool,
+}
+
+/// The F0.2 annotations table: one row per registered tool, titles and the
+/// explicit `readOnlyHint` split. The read-only set is exactly the pure-read
+/// surface (search/expansion/history/insights, session context, settings
+/// read, ticketing reads, rules read); everything else declares
+/// `readOnlyHint: false`. `tests/tool_contract_test.rs` enforces the
+/// bijection with [`TOOL_SPECS`].
+pub static TOOL_ANNOTATIONS: &[ToolAnnotation] = &[
+    // ---- Project session & ingest (4) — mutators ----
+    ToolAnnotation {
+        name: "init_project",
+        title: "Initialize Project Session",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "update_project_status",
+        title: "Update Project Status",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "sync_local_patch",
+        title: "Sync Local Patch",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "ingest_code",
+        title: "Ingest Code",
+        read_only: false,
+    },
+    // ---- Git credentials (1) — mutator ----
+    ToolAnnotation {
+        name: "git_configure_credentials",
+        title: "Configure Git Credentials",
+        read_only: false,
+    },
+    // ---- Memory / knowledge graph / temporal (26) ----
+    ToolAnnotation {
+        name: "provide_collaborative_memory",
+        title: "Provide Collaborative Memory",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "save_reasoning_outcome",
+        title: "Save Reasoning Outcome",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "memory_add",
+        title: "Add Memory",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "memory_bootstrap_git_store",
+        title: "Bootstrap Git Claim Store",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "memory_rebuild_git_notes",
+        title: "Rebuild Git Claim Notes",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "as_of_project",
+        title: "As-Of Project Slice",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "memory_search",
+        title: "Search Memories",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "memory_expand",
+        title: "Expand Memory",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "memory_update",
+        title: "Update Memory",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "memory_delete",
+        title: "Delete Memory",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "memory_history",
+        title: "Memory History",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "store_rule",
+        title: "Store Team Rule",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "get_rules",
+        title: "Get Team Rules",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "set_working_state",
+        title: "Set Working State",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "get_working_state",
+        title: "Get Working State",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "recent_failures",
+        title: "Recent Failures",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "why_changed",
+        title: "Why Changed",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "load_session_context",
+        title: "Load Session Context",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "capture_observation",
+        title: "Capture Observation",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "memory_consolidate",
+        title: "Consolidate Memories",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "memory_share",
+        title: "Share Memory",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "memory_export",
+        title: "Export Memories",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "memory_import",
+        title: "Import Memories",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "ingest_design_note",
+        title: "Ingest Design Note",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "memory_insights",
+        title: "Memory Insights",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "knowledge_diff",
+        title: "Knowledge Diff",
+        read_only: true,
+    },
+    // ---- Code search & analysis (3) — read-only ----
+    ToolAnnotation {
+        name: "ask_project",
+        title: "Ask Project",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "analyze_blast_radius",
+        title: "Analyze Blast Radius",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "find_dead_code",
+        title: "Find Dead Code",
+        read_only: true,
+    },
+    // ---- Settings (3) ----
+    ToolAnnotation {
+        name: "settings_get",
+        title: "Get Settings",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "settings_apply",
+        title: "Apply Settings",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "settings_open_ui",
+        title: "Open Settings UI",
+        read_only: false,
+    },
+    // ---- Knowledge optimization (1) — mutator ----
+    ToolAnnotation {
+        name: "optimize_knowledge",
+        title: "Optimize Knowledge",
+        read_only: false,
+    },
+    // ---- Ticketing (15) ----
+    ToolAnnotation {
+        name: "ticket_get_capabilities",
+        title: "Ticketing Capabilities",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "ticket_search",
+        title: "Search Tickets",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "ticket_search_my",
+        title: "Search My Tickets",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "ticket_get",
+        title: "Get Ticket",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "ticket_create",
+        title: "Create Ticket",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "ticket_update",
+        title: "Update Ticket",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "ticket_add_comment",
+        title: "Add Ticket Comment",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "ticket_assign",
+        title: "Assign Ticket",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "ticket_transition",
+        title: "Transition Ticket",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "ticket_list_statuses",
+        title: "List Ticket Statuses",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "ticket_search_users",
+        title: "Search Ticket Users",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "ticket_list_projects",
+        title: "List Ticket Projects",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "ticket_mark_resolved",
+        title: "Mark Ticket Resolved",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "ticket_mark_closed",
+        title: "Mark Ticket Closed",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "ticket_reopen",
+        title: "Reopen Ticket",
+        read_only: false,
+    },
+    // ---- Repo PR (2) — mutators ----
+    ToolAnnotation {
+        name: "repo_pr_create",
+        title: "Create Pull Request",
+        read_only: false,
+    },
+    ToolAnnotation {
+        name: "repo_pr_complete",
+        title: "Complete Pull Request",
+        read_only: false,
+    },
+    // ---- Logs (1) — mutator (ingestion-adjacent, emits progress) ----
+    ToolAnnotation {
+        name: "analyze_logs",
+        title: "Analyze Logs",
+        read_only: false,
+    },
+];
+
+/// Looks up the annotation row for a tool name (contract-test surface and
+/// [`annotated_tool`]).
+pub fn annotation_of(name: &str) -> Option<&'static ToolAnnotation> {
+    TOOL_ANNOTATIONS.iter().find(|a| a.name == name)
+}
+
+/// Builds one rmcp [`Tool`] for a spec: reference-shaped schema plus the
+/// F0.2 annotations — the human-readable title (top-level and inside the
+/// annotations) and the explicit `readOnlyHint`.
+pub fn annotated_tool(spec: &ToolSpec) -> Tool {
+    let ann = annotation_of(spec.name)
+        .unwrap_or_else(|| panic!("tool {} missing its F0.2 annotation row", spec.name));
+    let schema: JsonObject =
+        serde_json::from_value(schema_of(spec)).expect("tool schema is a valid JSON object");
+    Tool::new(spec.name, spec.description, schema)
+        .with_title(ann.title)
+        .with_annotations(ToolAnnotations::with_title(ann.title).read_only(ann.read_only))
+}
+
 /// Precomputed schemas keyed by tool name (byte-match verification fixture,
 /// D3; consumed by the contract test).
 #[allow(dead_code)]
@@ -695,12 +1030,12 @@ pub fn schemas() -> &'static std::collections::HashMap<&'static str, Value> {
 
 /// Builds the rmcp [`ToolRouter`] wiring one dynamic route per spec to the
 /// dispatcher (`crate::tools::dispatch`) — D3: the table IS the registry.
+/// Every route carries the F0.2 annotations (title + explicit
+/// `readOnlyHint`).
 pub fn build_tool_router() -> ToolRouter<crate::mcp_server::ThreskiServer> {
     let mut router = ToolRouter::new();
     for spec in TOOL_SPECS {
-        let schema: JsonObject =
-            serde_json::from_value(schema_of(spec)).expect("tool schema is a valid JSON object");
-        let tool = Tool::new(spec.name, spec.description, schema);
+        let tool = annotated_tool(spec);
         router.add_route(ToolRoute::new_dyn(tool, |ctx| {
             Box::pin(async move {
                 let name = ctx.name().to_string();

@@ -4,8 +4,8 @@
 //! `redmine_*` names forbidden. Data-driven against the D3 registry
 //! (name + description + schema) instead of grepping a source file.
 
-use threski_server::registry::{schemas, spec_of, TOOL_SPECS};
-use serde_json::Value;
+use serde_json::{json, Value};
+use threski_server::registry::{schemas, spec_of, TOOL_ANNOTATIONS, TOOL_SPECS};
 
 /// `TestToolContracts_TicketAndPRNamesPresent + the
 /// authoritative list: every one of the 56 tools must be registered.
@@ -250,5 +250,134 @@ fn tool_contracts_progress_tools_pinned() {
             !threski_server::progress::tool_emits_progress(name),
             "{name} must not emit progress"
         );
+    }
+}
+
+/// F0.2 completeness gate: every tool declares its annotations — a bijection
+/// between [`TOOL_SPECS`] and [`TOOL_ANNOTATIONS`], a non-empty title per
+/// row, and the read-only set pinned to exactly the pure-read tools.
+#[test]
+fn tool_annotations_complete_and_pinned() {
+    // Bijection: every spec has exactly one annotation row, every row names
+    // a registered tool.
+    for spec in TOOL_SPECS {
+        let rows: Vec<_> = TOOL_ANNOTATIONS
+            .iter()
+            .filter(|a| a.name == spec.name)
+            .collect();
+        assert_eq!(
+            rows.len(),
+            1,
+            "{} must have exactly one annotation row",
+            spec.name
+        );
+        assert!(
+            !rows[0].title.is_empty(),
+            "{} must carry a title",
+            spec.name
+        );
+    }
+    assert_eq!(
+        TOOL_ANNOTATIONS.len(),
+        TOOL_SPECS.len(),
+        "one annotation row per registered tool"
+    );
+    for ann in TOOL_ANNOTATIONS {
+        assert!(
+            spec_of(ann.name).is_some(),
+            "annotation row for unregistered tool {}",
+            ann.name
+        );
+    }
+
+    // The read-only set is exactly the pure-read surface; everything else
+    // is an explicit mutator (readOnlyHint: false).
+    let read_only: [&str; 22] = [
+        // Code search & analysis
+        "ask_project",
+        "analyze_blast_radius",
+        "find_dead_code",
+        // Memory reads
+        "memory_search",
+        "memory_expand",
+        "memory_history",
+        "memory_insights",
+        "why_changed",
+        "as_of_project",
+        "knowledge_diff",
+        "get_working_state",
+        "load_session_context",
+        "recent_failures",
+        "get_rules",
+        // Settings read
+        "settings_get",
+        // Ticketing reads
+        "ticket_get",
+        "ticket_search",
+        "ticket_search_my",
+        "ticket_list_statuses",
+        "ticket_list_projects",
+        "ticket_search_users",
+        "ticket_get_capabilities",
+    ];
+    for spec in TOOL_SPECS {
+        let ann = TOOL_ANNOTATIONS
+            .iter()
+            .find(|a| a.name == spec.name)
+            .expect("annotation row (bijection asserted above)");
+        assert_eq!(
+            ann.read_only,
+            read_only.contains(&spec.name),
+            "{} must declare readOnlyHint={} (F0.2 read-only split)",
+            spec.name,
+            read_only.contains(&spec.name)
+        );
+    }
+}
+
+/// F0.2 wire gate: the `Tool` objects the registry builds carry the title
+/// (top-level and inside the annotations) and the explicit `readOnlyHint`
+/// serialized camelCase as `readOnlyHint`.
+#[test]
+fn tool_annotations_reach_the_tool_objects() {
+    for spec in TOOL_SPECS {
+        let ann = threski_server::registry::annotation_of(spec.name)
+            .unwrap_or_else(|| panic!("{} annotation row", spec.name));
+        let tool = threski_server::registry::annotated_tool(spec);
+        assert_eq!(
+            tool.title.as_deref(),
+            Some(ann.title),
+            "{} title",
+            spec.name
+        );
+        let annotations = tool.annotations.as_ref().expect("annotations present");
+        assert_eq!(
+            annotations.read_only_hint,
+            Some(ann.read_only),
+            "{} annotations.read_only_hint",
+            spec.name
+        );
+        assert_eq!(
+            annotations.title.as_deref(),
+            Some(ann.title),
+            "{} annotations.title",
+            spec.name
+        );
+
+        // Wire shape: camelCase key, boolean value, title inside annotations.
+        let wire = serde_json::to_value(&tool).expect("tool serializes");
+        assert_eq!(
+            wire["annotations"]["readOnlyHint"],
+            json!(ann.read_only),
+            "{} wire readOnlyHint",
+            spec.name
+        );
+        assert_eq!(
+            wire["annotations"]["title"],
+            json!(ann.title),
+            "{}",
+            spec.name
+        );
+        assert_eq!(wire["title"], json!(ann.title), "{}", spec.name);
     }
 }
