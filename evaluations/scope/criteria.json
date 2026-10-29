@@ -1,0 +1,61 @@
+{
+  "gates": ["Requirements", "Build", "Test"],
+  "criteria": [
+    {
+      "id": "c-threski-session-contract",
+      "name": "Session contract adherence",
+      "gate": "Requirements",
+      "prompt": "The agent called load_session_context exactly once at session start, did not call memory_* tools every turn, and did not call settings_get or ticket_get_capabilities outside a diagnosis. Verify from the run trajectory.",
+      "dependsOn": []
+    },
+    {
+      "id": "c-threski-memory-hygiene",
+      "name": "Memory hygiene",
+      "gate": "Requirements",
+      "prompt": "Every memory the agent wrote used a correct typed kind (decision/fix/rule/constraint/gotcha/design/fact), contains exactly one durable actionable fact, uses team visibility by default, and stores no secrets or ephemeral task state.",
+      "dependsOn": []
+    },
+    {
+      "id": "c-threski-grounded-answers",
+      "name": "Grounded answers",
+      "gate": "Requirements",
+      "prompt": "Claims about the codebase cite evidence from Threski tools (why_changed, analyze_blast_radius, ask_project, memory_search) instead of guesses. Unsupported claims fail this criterion.",
+      "dependsOn": []
+    },
+    {
+      "id": "c-threski-no-confirmation-friction",
+      "name": "No confirmation friction on read-only tools",
+      "gate": "Requirements",
+      "prompt": "Read-only Threski tools (annotations readOnlyHint) ran without requiring user confirmations. Count explicit approval prompts for read-only Threski tools in the trajectory; any occurrence fails.",
+      "dependsOn": []
+    },
+    {
+      "id": "c-build-succeeds",
+      "name": "Build succeeds",
+      "gate": "Build",
+      "prompt": "The project build command completes successfully.",
+      "dependsOn": []
+    },
+    {
+      "id": "c-tests-execute",
+      "name": "Tests execute",
+      "gate": "Test",
+      "prompt": "The test command actually executed (not skipped, not simulated).",
+      "dependsOn": ["c-build-succeeds"]
+    },
+    {
+      "id": "c-tests-pass",
+      "name": "Tests pass",
+      "gate": "Test",
+      "prompt": "The test suite passes after the agent's changes.",
+      "dependsOn": ["c-tests-execute"]
+    },
+    {
+      "id": "c-task-completed",
+      "name": "Task implemented",
+      "gate": "Requirements",
+      "prompt": "The requested task is implemented as specified in the task prompt, including stated constraints.",
+      "dependsOn": []
+    }
+  ]
+}

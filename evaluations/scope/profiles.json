@@ -1,0 +1,61 @@
+{
+  "note": "workerType and API field names must be verified against the live Scope instance at D1 (see README). extensions are accepted only by the VS Code Copilot worker.",
+  "mcpServers": [
+    {
+      "slug": "threski",
+      "label": "Threski",
+      "transport": "stdio",
+      "command": "threski",
+      "args": ["-mode", "stdio", "-runtime-mode", "plugin"],
+      "env": { "RUNTIME_MODE": "plugin" }
+    }
+  ],
+  "skills": [
+    {
+      "slug": "threski-usage",
+      "source": "github/fatterdev/threski-studio/plugin/skills/threski-usage"
+    },
+    {
+      "slug": "threski-readiness",
+      "source": "github/fatterdev/threski-studio/plugin/skills/threski-readiness"
+    },
+    {
+      "slug": "threski-remember",
+      "source": "github/fatterdev/threski-studio/plugin/skills/threski-remember"
+    }
+  ],
+  "profiles": [
+    {
+      "name": "base-no-threski",
+      "workerType": "TODO-verify-worker-type",
+      "model": "TODO-verify-model-id",
+      "mcpServers": [],
+      "skillRevisions": [],
+      "extensions": []
+    },
+    {
+      "name": "threski-mcp",
+      "workerType": "TODO-verify-worker-type",
+      "model": "TODO-verify-model-id",
+      "mcpServers": ["threski"],
+      "skillRevisions": [],
+      "extensions": []
+    },
+    {
+      "name": "threski-studio-full",
+      "workerType": "TODO-verify-worker-type",
+      "model": "TODO-verify-model-id",
+      "mcpServers": ["threski"],
+      "skillRevisions": [
+        "github/fatterdev/threski-studio/plugin/skills/threski-usage",
+        "github/fatterdev/threski-studio/plugin/skills/threski-readiness",
+        "github/fatterdev/threski-studio/plugin/skills/threski-remember"
+      ],
+      "extensions": ["fatterdev.threski-studio"]
+    }
+  ],
+  "workers": [
+    "vscode-copilot",
+    "claude-code"
+  ]
+}

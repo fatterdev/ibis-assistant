@@ -1,0 +1,9 @@
+target/
+dist/
+node_modules/
+.env
+.env.local
+*.log
+*.vsix
+evaluations/scope/.state/
+runtime/
