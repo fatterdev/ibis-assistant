@@ -6,14 +6,19 @@
 //! - name `Threski Studio`, version from D14 (workspace version,
 //!   commit const default "none" — 1.1.0-equivalent identity)
 //! - `WithToolCapabilities(true)` → tools capability
-//! - `WithResourceCapabilities(false, true)` → resources, subscribe=false,
+//! - `WithResourceCapabilities(true, true)` → resources with subscribe=true,
 //!   list_changed=true
 //! - `enable_prompts()` + `enable_completions()` → the F0.3 prompt surface
 //!   (`crate::prompts`: readiness, status, why_changed, blast_radius,
 //!   remember — with argument completions)
 //! - `WithLogging` only when mode ≠ stdio
 //! - instructions recommending Streamable HTTP `POST /mcp` + `threski://guide`
-//! - 1 resource `threski://guide` (listable, not subscribable)
+//! - resources: `threski://guide` (listable) plus the F0.4 templates
+//!   `threski://memory/{kind}/{id}`, `threski://rules/{name}`,
+//!   `threski://ticket/{id}` (`crate::resources` — read dispatch + the
+//!   live-update registry feeding `notifications/resources/updated`; both
+//!   the legacy `resources/subscribe` peers and the 2026-07-28
+//!   `subscriptions/listen` sinks are served)
 //! - the 56-tool registry from [`crate::registry`]
 
 use std::sync::Arc;
@@ -21,11 +26,12 @@ use std::sync::Arc;
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::model::{
     CompleteRequestParams, CompleteResult, GetPromptRequestParams, GetPromptResponse,
-    ListPromptsResult, ListResourcesResult, PaginatedRequestParams, PromptMessage,
-    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
-    ResourceContents, Role, ServerCapabilities, ServerConfig,
+    ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, PaginatedRequestParams,
+    PromptMessage, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+    ResourceContents, Role, ServerCapabilities, ServerConfig, SubscribeRequestParams,
+    SubscriptionFilter, UnsubscribeRequestParams,
 };
-use rmcp::service::RequestContext;
+use rmcp::service::{RequestContext, SubscriptionContext};
 use rmcp::tool_handler;
 use rmcp::RoleServer;
 use rmcp::ServerHandler;
@@ -82,11 +88,11 @@ impl ThreskiServer {
 #[tool_handler(router = self.router)]
 impl ServerHandler for ThreskiServer {
     fn get_info(&self) -> ServerConfig {
-        // WithResourceCapabilities(false, true): subscribe=false,
-        // list_changed=true (ResourcesCapability is non-exhaustive, so the
-        // default instance is mutated in place).
+        // WithResourceCapabilities(true, true): subscribe=true (F0.4 live
+        // updates), list_changed=true (ResourcesCapability is
+        // non-exhaustive, so the default instance is mutated in place).
         let mut resources = rmcp::model::ResourcesCapability::default();
-        resources.subscribe = Some(false);
+        resources.subscribe = Some(true);
         resources.list_changed = Some(true);
         let mut capabilities = ServerCapabilities::builder()
             .enable_tools()
@@ -116,26 +122,111 @@ impl ServerHandler for ThreskiServer {
         })
     }
 
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, rmcp::ErrorData> {
+        Ok(ListResourceTemplatesResult::with_all_items(
+            crate::resources::resource_templates(),
+        ))
+    }
+
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, rmcp::ErrorData> {
-        if request.uri != threski_httpserver::discovery::GUIDE_URI {
+        if request.uri == threski_httpserver::discovery::GUIDE_URI {
+            let cfg = self.state.config();
+            let guide = threski_httpserver::discovery::guide_markdown(
+                &cfg,
+                &crate::registry::discovery_tools()(),
+            );
+            return Ok(ReadResourceResult::new(vec![
+                ResourceContents::text(guide, request.uri).with_mime_type("text/markdown")
+            ])
+            .into());
+        }
+        // F0.4 template reads (memory / rules / ticket); anything else is a
+        // protocol-level bad request.
+        let parsed = crate::resources::parse_uri(&request.uri).ok_or_else(|| {
+            rmcp::ErrorData::invalid_params(format!("unknown resource {}", request.uri), None)
+        })?;
+        let actor = crate::tools::actor_context(&context);
+        let ticket_auth = crate::tools::ticket_auth(&context);
+        let body =
+            crate::resources::read_parsed(&self.state, &actor, &ticket_auth, &parsed).await?;
+        Ok(ReadResourceResult::new(vec![
+            ResourceContents::text(body.content, request.uri).with_mime_type(body.mime_type)
+        ])
+        .into())
+    }
+
+    /// Legacy `resources/subscribe` (protocol ≤ 2025-11-25): the
+    /// connection's peer is registered per URI and receives
+    /// `notifications/resources/updated` from the F0.4 registry.
+    #[allow(deprecated)]
+    async fn subscribe(
+        &self,
+        request: SubscribeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), rmcp::ErrorData> {
+        if crate::resources::parse_uri(&request.uri).is_none()
+            && request.uri != threski_httpserver::discovery::GUIDE_URI
+        {
             return Err(rmcp::ErrorData::invalid_params(
                 format!("unknown resource {}", request.uri),
                 None,
             ));
         }
-        let cfg = self.state.config();
-        let guide = threski_httpserver::discovery::guide_markdown(
-            &cfg,
-            &crate::registry::discovery_tools()(),
-        );
-        Ok(ReadResourceResult::new(vec![
-            ResourceContents::text(guide, request.uri).with_mime_type("text/markdown")
-        ])
-        .into())
+        let conn = crate::resources::peer_connection_id(&context.peer);
+        let notify = crate::resources::peer_notify(context.peer.clone());
+        self.state
+            .resource_subs
+            .subscribe(&request.uri, conn, notify);
+        Ok(())
+    }
+
+    /// Legacy `resources/unsubscribe` — removes this connection's
+    /// registration for the URI.
+    #[allow(deprecated)]
+    async fn unsubscribe(
+        &self,
+        request: UnsubscribeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), rmcp::ErrorData> {
+        let conn = crate::resources::peer_connection_id(&context.peer);
+        self.state.resource_subs.unsubscribe(&request.uri, conn);
+        Ok(())
+    }
+
+    /// 2026-07-28 subscriptions: accept the requested filter (the SDK
+    /// intersects it with the advertised capabilities) and hold the
+    /// subscription's sink in the F0.4 registry until the listen request is
+    /// cancelled.
+    fn accepted_subscription_filter(
+        &self,
+        requested: &SubscriptionFilter,
+    ) -> Option<SubscriptionFilter> {
+        Some(requested.clone())
+    }
+
+    async fn listen(&self, context: SubscriptionContext) -> Result<(), rmcp::ErrorData> {
+        let accepted = context.accepted().clone();
+        let conn = crate::resources::peer_connection_id(&context.request_context().peer);
+        let mut tokens = Vec::new();
+        if let Some(uris) = accepted.resource_subscriptions {
+            for uri in uris {
+                let notify = crate::resources::sink_notify(context.sink().clone());
+                tokens.push(self.state.resource_subs.subscribe(&uri, conn, notify));
+            }
+        }
+        context.cancelled().await;
+        for token in tokens {
+            self.state.resource_subs.unsubscribe_token(token);
+        }
+        Ok(())
     }
 
     async fn list_prompts(

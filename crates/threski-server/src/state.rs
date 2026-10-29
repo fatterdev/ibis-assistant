@@ -92,6 +92,10 @@ pub struct AppState {
     pub active_repos: Vec<String>,
     /// The embedded SurrealDB process handle (stopped on shutdown).
     pub db_process: Mutex<Option<ProcessManager>>,
+    /// F0.4 live-update registry: `resources/subscribe` /
+    /// `subscriptions/listen` subscribers notified with
+    /// `notifications/resources/updated` on memory mutations.
+    pub resource_subs: crate::resources::ResourceSubscriptions,
 }
 
 impl AppState {
@@ -258,7 +262,8 @@ impl AppState {
         }
         let service = self.search();
         if let Err(e) =
-            threski_search::memory::projection::write_memory_projection(&service, &root, &name).await
+            threski_search::memory::projection::write_memory_projection(&service, &root, &name)
+                .await
         {
             tracing::warn!("memory projection failed: {e}");
         }
@@ -373,7 +378,8 @@ pub async fn assemble_ai(
             && cfg.ai.embedding.auto_update
             && !plugin_unbound
         {
-            let _ = threski_ai::ensure_ollama(&cfg.ai.embedding.url, &local_model, false, true).await;
+            let _ =
+                threski_ai::ensure_ollama(&cfg.ai.embedding.url, &local_model, false, true).await;
         }
         local_reasoning = Some(Box::new(OllamaChatProvider::new(
             &local_model,

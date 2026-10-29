@@ -16,6 +16,7 @@ pub mod mcp_server;
 pub mod progress;
 pub mod prompts;
 pub mod registry;
+pub mod resources;
 pub mod state;
 pub mod tools;
 pub mod tools_memory;

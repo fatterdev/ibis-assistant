@@ -490,6 +490,7 @@ async fn run_server_async(args: Vec<String>) -> i32 {
         ingestion,
         active_repos,
         db_process: Mutex::new(db_process),
+        resource_subs: threski_server::resources::ResourceSubscriptions::default(),
     });
 
     // Background workers

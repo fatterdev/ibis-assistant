@@ -69,6 +69,50 @@ fn resolve_project(state: &Arc<AppState>, explicit: &str) -> Result<String, Tool
     }
 }
 
+/// F0.4 — resolves a memory's kind/title for the live-update resource URI
+/// (single indexed lookup; degraded mode without a DB resolves to `None`).
+async fn memory_identity(state: &Arc<AppState>, id: &str) -> Option<(String, String)> {
+    match state
+        .search()
+        .expand_memory(&threski_search::ActorContext::LOCAL, &[id.to_string()], "")
+        .await
+    {
+        Ok(mut rows) => rows.pop().map(|m| (m.kind, m.title)),
+        Err(e) => {
+            tracing::debug!("resources/updated resolve skipped for {id}: {e}");
+            None
+        }
+    }
+}
+
+/// F0.4 — fires `notifications/resources/updated` for one mutated memory:
+/// the exact `threski://memory/{kind}/{id}` URI, plus the
+/// `threski://rules/{name}` twin for rules.
+async fn fire_memory_changed(state: &Arc<AppState>, id: &str, kind: &str, title: &str) {
+    if kind.is_empty() {
+        return;
+    }
+    state
+        .resource_subs
+        .fire(&crate::resources::memory_uri(kind, id))
+        .await;
+    if kind == "rule" && !title.trim().is_empty() {
+        state
+            .resource_subs
+            .fire(&crate::resources::rule_uri(title))
+            .await;
+    }
+}
+
+/// F0.4 — resolves-then-fires for mutations that carry the memory id but
+/// not its kind/title (update/delete/share). Best-effort: never fails the
+/// tool result.
+async fn notify_memory_changed(state: &Arc<AppState>, id: &str) {
+    if let Some((kind, title)) = memory_identity(state, id).await {
+        fire_memory_changed(state, id, &kind, &title).await;
+    }
+}
+
 /// Scenario: provide_collaborative_memory
 async fn provide_collaborative_memory(
     state: &Arc<AppState>,
@@ -220,6 +264,9 @@ async fn memory_add(
         Err(e) => return error_result(format!("memory_add failed: {e}")),
     };
     state.maybe_project_memory(&params.project_name).await;
+    let kind = params.kind.trim();
+    let kind = if kind.is_empty() { "fact" } else { kind };
+    fire_memory_changed(state, &id, kind, &params.title).await;
     text_result(json!({ "id": id, "status": "created" }).to_string())
 }
 
@@ -493,6 +540,7 @@ async fn memory_update(
         return error_result(format!("memory_update failed: {e}"));
     }
     state.maybe_project_memory("").await;
+    notify_memory_changed(state, &id).await;
     text_result(json!({ "id": id, "status": "updated" }).to_string())
 }
 
@@ -507,12 +555,20 @@ async fn memory_delete(
         return error_result("Argument 'id' is required");
     }
     let hard = bool_arg(args, "hard");
+    // Resolve the URI identity before the mutation: a hard delete leaves no
+    // record to look up afterwards.
+    let identity = memory_identity(state, &id).await;
     let service = state.search();
     match service
         .memory_delete(actor, &id, hard, &get_string_arg(args, "actor"))
         .await
     {
-        Ok(status) => text_result(json!({ "id": id, "status": status }).to_string()),
+        Ok(status) => {
+            if let Some((kind, title)) = identity {
+                fire_memory_changed(state, &id, &kind, &title).await;
+            }
+            text_result(json!({ "id": id, "status": status }).to_string())
+        }
         Err(e) => error_result(format!("memory_delete failed: {e}")),
     }
 }
@@ -578,7 +634,10 @@ async fn store_rule(
         )
         .await
     {
-        Ok(id) => text_result(json!({ "id": id, "status": "created" }).to_string()),
+        Ok(id) => {
+            fire_memory_changed(state, &id, "rule", &title).await;
+            text_result(json!({ "id": id, "status": "created" }).to_string())
+        }
         Err(e) => error_result(format!("store_rule failed: {e}")),
     }
 }
@@ -638,7 +697,10 @@ async fn set_working_state(
         )
         .await
     {
-        Ok(id) => text_result(json!({ "id": id, "status": "set" }).to_string()),
+        Ok(id) => {
+            fire_memory_changed(state, &id, "working_state", "").await;
+            text_result(json!({ "id": id, "status": "set" }).to_string())
+        }
         Err(e) => error_result(format!("set_working_state failed: {e}")),
     }
 }
@@ -773,7 +835,10 @@ async fn capture_observation(
         )
         .await
     {
-        Ok(id) => text_result(json!({ "id": id, "status": "captured" }).to_string()),
+        Ok(id) => {
+            fire_memory_changed(state, &id, "observation", "").await;
+            text_result(json!({ "id": id, "status": "captured" }).to_string())
+        }
         Err(e) => error_result(format!("capture_observation failed: {e}")),
     }
 }
@@ -835,9 +900,12 @@ async fn memory_share(
         )
         .await
     {
-        Ok(()) => text_result(
-            json!({ "id": id, "visibility": visibility, "status": "updated" }).to_string(),
-        ),
+        Ok(()) => {
+            notify_memory_changed(state, &id).await;
+            text_result(
+                json!({ "id": id, "visibility": visibility, "status": "updated" }).to_string(),
+            )
+        }
         Err(e) => error_result(format!("memory_share failed: {e}")),
     }
 }
@@ -960,6 +1028,7 @@ async fn ingest_design_note(
     state
         .maybe_project_memory(&get_string_arg(args, "project_name"))
         .await;
+    fire_memory_changed(state, &id, "design", &get_string_arg(args, "title")).await;
     text_result(json!({ "id": id, "kind": "design", "status": "created" }).to_string())
 }
 
@@ -1149,7 +1218,8 @@ async fn analyze_blast_radius(
     let Some(db) = state.db() else {
         return error_result("Blast radius analysis failed: database not connected");
     };
-    match threski_search::graph::analyze_blast_radius(&db, &repo_name, &file_path, &symbol_name).await
+    match threski_search::graph::analyze_blast_radius(&db, &repo_name, &file_path, &symbol_name)
+        .await
     {
         Ok(res) => json_result(&res),
         Err(e) => error_result(format!("Blast radius analysis failed: {e}")),

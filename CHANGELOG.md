@@ -4,6 +4,24 @@ All notable changes to Threski Studio are documented here.
 
 ## [Unreleased]
 
+- **feat(server): memory, rules and tickets as mcp resources (templates +
+  live updates)** — `resources/templates/list` with the three F0.4
+  templates (`threski://memory/{kind}/{id}`, `threski://rules/{name}`,
+  `threski://ticket/{id}`), each read as JSON: a memory returns the
+  `memory_expand` projection with the URI kind pinned against the record,
+  a rule resolves by title (case-insensitive) or record id through the
+  `get_rules` shape, a ticket through the configured providers. Live
+  updates: `resources.subscribe` is now advertised and both subscription
+  mechanisms are served — legacy `resources/subscribe`/`unsubscribe` peers
+  (≤ 2025-11-25) and 2026-07-28 `subscriptions/listen` sinks (registered
+  for the accepted URIs, removed on cancellation). Memory mutations
+  (`memory_add`/`update`/`delete`/`share`, `store_rule`,
+  `set_working_state`, `capture_observation`, `ingest_design_note`) fire
+  `notifications/resources/updated` with the exact mutated URI (rules twin
+  their `threski://rules/{name}` URI) on the transport notification lane;
+  fires are best-effort and never fail the tool result. Protocol gate:
+  capability, template table, degraded reads and both subscription flows
+  over the in-memory duplex.
 - **feat(server): mcp prompts (/threski.*)** — `prompts/list` + `prompts/get`
   with five session-contract prompts (`readiness`, `status`, `why_changed`,
   `blast_radius`, `remember`): each renders a single user message instructing
