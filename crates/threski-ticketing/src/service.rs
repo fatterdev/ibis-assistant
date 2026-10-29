@@ -19,7 +19,7 @@
 //!   ( ranged a map, TI-04).
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use serde::Serialize;
@@ -134,10 +134,23 @@ pub struct Capabilities {
     pub client_env_hints: BTreeMap<String, String>,
 }
 
-/// The provider-agnostic ticketing service.
-pub struct Service {
+/// The config + provider set, shared behind one lock so the F0.6 hot reload
+/// can swap them atomically while in-flight tool calls clone the provider
+/// handles they need.
+struct Inner {
     cfg: Config,
     providers: BTreeMap<String, Arc<dyn TicketProvider>>,
+}
+
+/// The provider-agnostic ticketing service.
+///
+/// Interior mutability (F0.6): the config/providers pair is swappable at
+/// runtime (`reload`) so a live server can pick up
+/// `config/ticketing_config.json` changes without a restart — the dynamic
+/// tool discovery gate (`capabilities().providers`) then flips and the MCP
+/// surface announces/hides the `ticket_*` group accordingly.
+pub struct Service {
+    inner: RwLock<Inner>,
     db: Option<Arc<dyn Executor>>,
 }
 
@@ -147,47 +160,69 @@ impl Service {
     pub fn new(mut cfg: Config, db: Option<Arc<dyn Executor>>) -> Self {
         cfg.normalize();
         Service {
-            cfg,
-            providers: BTreeMap::new(),
+            inner: RwLock::new(Inner {
+                cfg,
+                providers: BTreeMap::new(),
+            }),
             db,
         }
     }
 
     /// Registers a provider under its name; `None` arguments are ignored
     /// (`RegisterProvider nil check).
-    pub fn register_provider(&mut self, provider: Arc<dyn TicketProvider>) {
-        self.providers
+    pub fn register_provider(&self, provider: Arc<dyn TicketProvider>) {
+        self.inner
+            .write()
+            .unwrap()
+            .providers
             .insert(provider.name().0.to_lowercase(), provider);
     }
 
+    /// F0.6 hot reload: atomically swaps the live config and provider set
+    /// (same normalization and name-keying as [`Service::new`] +
+    /// [`Service::register_provider`]). In-flight calls keep the provider
+    /// handles they cloned.
+    pub fn reload(&self, mut cfg: Config, providers: Vec<Arc<dyn TicketProvider>>) {
+        cfg.normalize();
+        let providers: BTreeMap<String, Arc<dyn TicketProvider>> = providers
+            .into_iter()
+            .map(|p| (p.name().0.to_lowercase(), p))
+            .collect();
+        let mut inner = self.inner.write().unwrap();
+        inner.providers = providers;
+        inner.cfg = cfg;
+    }
+
     /// The live (normalized) configuration.
-    pub fn config(&self) -> &Config {
-        &self.cfg
+    pub fn config(&self) -> Config {
+        self.inner.read().unwrap().cfg.clone()
     }
 
     /// Capability snapshot for the `ticket_get_capabilities` tool.
     pub fn capabilities(&self) -> Capabilities {
+        let inner = self.inner.read().unwrap();
         Capabilities {
-            default_provider: self.cfg.default_provider.0.clone(),
-            project_provider_map: self
+            default_provider: inner.cfg.default_provider.0.clone(),
+            project_provider_map: inner
                 .cfg
                 .project_provider_map
                 .iter()
                 .map(|(k, v)| (k.clone(), v.0.clone()))
                 .collect(),
-            providers: self.providers.keys().cloned().collect(),
-            header_hints: self.cfg.header_hints.clone(),
-            client_env_hints: self.cfg.client_env_hints.clone(),
+            providers: inner.providers.keys().cloned().collect(),
+            header_hints: inner.cfg.header_hints.clone(),
+            client_env_hints: inner.cfg.client_env_hints.clone(),
         }
     }
 
     /// Reference patterns for a project, falling back to the `"*"` wildcard
     ///
     pub fn reference_patterns_for_project(&self, project_key: &str) -> Vec<String> {
-        if let Some(patterns) = self.cfg.reference_patterns.get(project_key) {
+        let inner = self.inner.read().unwrap();
+        if let Some(patterns) = inner.cfg.reference_patterns.get(project_key) {
             return patterns.clone();
         }
-        if let Some(patterns) = self.cfg.reference_patterns.get("*") {
+        if let Some(patterns) = inner.cfg.reference_patterns.get("*") {
             return patterns.clone();
         }
         Vec::new()
@@ -200,18 +235,19 @@ impl Service {
         provider_arg: &str,
         project_key: &str,
     ) -> Result<(ProviderName, Arc<dyn TicketProvider>), TicketingError> {
+        let inner = self.inner.read().unwrap();
         if !provider_arg.is_empty() {
             let name = ProviderName::from(provider_arg.trim().to_lowercase());
-            let provider = self
+            let provider = inner
                 .providers
                 .get(name.as_str())
                 .ok_or_else(|| TicketingError::UnknownProvider(name.0.clone()))?;
             return Ok((name, provider.clone()));
         }
 
-        if let Some(mapped) = self.cfg.project_provider_map.get(project_key) {
+        if let Some(mapped) = inner.cfg.project_provider_map.get(project_key) {
             if !mapped.is_empty() {
-                let provider = self
+                let provider = inner
                     .providers
                     .get(mapped.as_str())
                     .ok_or_else(|| TicketingError::UnknownProvider(mapped.0.clone()))?;
@@ -219,8 +255,8 @@ impl Service {
             }
         }
 
-        let name = self.cfg.default_provider.clone();
-        let provider = self
+        let name = inner.cfg.default_provider.clone();
+        let provider = inner
             .providers
             .get(name.as_str())
             .ok_or_else(|| TicketingError::UnknownProvider(name.0.clone()))?;
@@ -272,7 +308,8 @@ impl Service {
         let (name, provider) = self.resolve_provider(&params.provider, &params.project_key)?;
         merge_provider_fields_json(&mut params.provider_fields, &params.provider_fields_json)?;
         if params.issue_type.is_empty() {
-            if let Some(by_project) = self.cfg.default_create_type.get(name.as_str()) {
+            let default_create_type = self.inner.read().unwrap().cfg.default_create_type.clone();
+            if let Some(by_project) = default_create_type.get(name.as_str()) {
                 if let Some(t) = by_project
                     .get(&params.project_key)
                     .filter(|t| !t.is_empty())
@@ -493,26 +530,35 @@ impl Service {
         issue_type: &str,
     ) -> Result<String, TicketingError> {
         let action = crate::config::normalize_workflow_action(action);
-        if let Some(cfg) = self.cfg.workflow.actions.get(&action) {
-            if let Some(by_project) = cfg.per_provider.get(provider.as_str()) {
-                if let Some(target) = by_project.get(project_key).map(String::as_str) {
-                    if !target.trim().is_empty() {
-                        return Ok(target.trim().to_string());
+        {
+            let inner = self.inner.read().unwrap();
+            if let Some(cfg) = inner.cfg.workflow.actions.get(&action) {
+                if let Some(by_project) = cfg.per_provider.get(provider.as_str()) {
+                    if let Some(target) = by_project.get(project_key).map(String::as_str) {
+                        if !target.trim().is_empty() {
+                            return Ok(target.trim().to_string());
+                        }
                     }
-                }
-                if let Some(target) = by_project.get("*").map(String::as_str) {
-                    if !target.trim().is_empty() {
-                        return Ok(target.trim().to_string());
+                    if let Some(target) = by_project.get("*").map(String::as_str) {
+                        if !target.trim().is_empty() {
+                            return Ok(target.trim().to_string());
+                        }
                     }
                 }
             }
         }
 
-        let p = self
-            .providers
-            .get(provider.as_str())
-            .ok_or_else(|| TicketingError::UnknownProvider(provider.0.clone()))?;
-        let statuses = p.list_statuses(auth, project_key, issue_type).await?;
+        let provider = {
+            let inner = self.inner.read().unwrap();
+            inner
+                .providers
+                .get(provider.as_str())
+                .ok_or_else(|| TicketingError::UnknownProvider(provider.0.clone()))?
+                .clone()
+        };
+        let statuses = provider
+            .list_statuses(auth, project_key, issue_type)
+            .await?;
         let target = infer_status_id(&action, &statuses);
         if target.is_empty() {
             return Err(TicketingError::UnresolvedWorkflowTarget);
@@ -944,7 +990,7 @@ mod tests {
     }
 
     fn service() -> Service {
-        let mut svc = Service::new(test_config(), None);
+        let svc = Service::new(test_config(), None);
         svc.register_provider(FakeProvider::new(crate::types::PROVIDER_REDMINE));
         svc.register_provider(FakeProvider::new(PROVIDER_JIRA));
         svc.register_provider(FakeProvider::new(crate::types::PROVIDER_AZURE_DEVOPS));
@@ -993,7 +1039,7 @@ mod tests {
             crate::config::WorkflowActionConfig { per_provider },
         );
 
-        let mut svc = Service::new(cfg, None);
+        let svc = Service::new(cfg, None);
         svc.register_provider(FakeProvider::new(crate::types::PROVIDER_REDMINE));
         svc.register_provider(FakeProvider::new(PROVIDER_JIRA));
 
@@ -1027,7 +1073,7 @@ mod tests {
 
     #[tokio::test]
     async fn unresolved_workflow_target_errors() {
-        let mut svc = Service::new(Config::default(), None);
+        let svc = Service::new(Config::default(), None);
         svc.register_provider(FakeProvider::new(crate::types::PROVIDER_REDMINE));
         // An action outside the resolve/close/reopen keyword sets matches no
         // status name → the original "unable to infer workflow status target" error.
@@ -1046,7 +1092,7 @@ mod tests {
 
     #[tokio::test]
     async fn apply_workflow_transitions_and_reports() {
-        let mut svc = service();
+        let svc = service();
         let redmine = FakeProvider::new(crate::types::PROVIDER_REDMINE);
         svc.register_provider(redmine.clone());
         let result = svc
@@ -1144,7 +1190,7 @@ mod tests {
     #[tokio::test]
     async fn ingest_issue_reference_upserts_graph_in_one_transaction() {
         let mock = Arc::new(MockDb::default());
-        let mut svc = Service::new(test_config(), Some(mock.clone() as Arc<dyn Executor>));
+        let svc = Service::new(test_config(), Some(mock.clone() as Arc<dyn Executor>));
         svc.register_provider(FakeProvider::new(crate::types::PROVIDER_REDMINE));
 
         svc.ingest_issue_reference(
@@ -1237,7 +1283,7 @@ mod tests {
         by_project.insert("*".to_string(), "Task".to_string());
         cfg.default_create_type
             .insert(PROVIDER_JIRA.to_string(), by_project);
-        let mut svc = Service::new(cfg, None);
+        let svc = Service::new(cfg, None);
         let jira = FakeProvider::new(PROVIDER_JIRA);
         svc.register_provider(jira.clone());
 
@@ -1270,7 +1316,7 @@ mod tests {
         by_project.insert("*".to_string(), "Task".to_string());
         cfg.default_create_type
             .insert(PROVIDER_JIRA.to_string(), by_project);
-        let mut svc = Service::new(cfg, None);
+        let svc = Service::new(cfg, None);
         let jira = FakeProvider::new(PROVIDER_JIRA);
         svc.register_provider(jira.clone());
 
@@ -1291,7 +1337,7 @@ mod tests {
     //: capabilities shape with deterministic provider order (TI-04).
     #[test]
     fn capabilities_shape_is_deterministic() {
-        let mut svc = service();
+        let svc = service();
         // Register in non-sorted order.
         svc.register_provider(FakeProvider::new("zeta"));
         let caps = svc.capabilities();

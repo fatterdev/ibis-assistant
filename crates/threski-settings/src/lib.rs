@@ -36,7 +36,7 @@ pub use ephemeral::{
     stop_ephemeral, SettingsError, EPHEMERAL_IDLE_TIMEOUT, EPHEMERAL_SHUTDOWN_GRACE, TOKEN_HEADER,
 };
 pub use http::{
-    open_url, settings_api_router, MemoryApiError, MemoryService, SearchMemoryAdapter,
-    MAX_APPLY_BODY_BYTES,
+    open_url, settings_api_router, settings_api_router_with_on_change, MemoryApiError,
+    MemoryService, SearchMemoryAdapter, MAX_APPLY_BODY_BYTES,
 };
 pub use ui::settings_ui_router;

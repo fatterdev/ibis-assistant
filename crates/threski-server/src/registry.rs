@@ -1007,6 +1007,34 @@ pub fn annotation_of(name: &str) -> Option<&'static ToolAnnotation> {
     TOOL_ANNOTATIONS.iter().find(|a| a.name == name)
 }
 
+/// F0.6 dynamic tool discovery: the 15 `ticket_*` tools are config-gated —
+/// announced only when at least one ticketing provider is registered
+/// (`AppState::ticketing_configured`), so unconfigured installs surface the
+/// core tool set only instead of 15 tools that always error.
+pub static TICKETING_TOOLS: &[&str] = &[
+    "ticket_get_capabilities",
+    "ticket_search",
+    "ticket_search_my",
+    "ticket_get",
+    "ticket_create",
+    "ticket_update",
+    "ticket_add_comment",
+    "ticket_assign",
+    "ticket_transition",
+    "ticket_list_statuses",
+    "ticket_search_users",
+    "ticket_list_projects",
+    "ticket_mark_resolved",
+    "ticket_mark_closed",
+    "ticket_reopen",
+];
+
+/// Whether `name` belongs to the config-gated ticketing group
+/// ([`TICKETING_TOOLS`]).
+pub fn is_ticketing_tool(name: &str) -> bool {
+    TICKETING_TOOLS.contains(&name)
+}
+
 /// Builds one rmcp [`Tool`] for a spec: reference-shaped schema plus the
 /// F0.2 annotations — the human-readable title (top-level and inside the
 /// annotations) and the explicit `readOnlyHint`.

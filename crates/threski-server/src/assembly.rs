@@ -115,13 +115,31 @@ pub async fn assemble_ticketing(
             (threski_ticketing::default_config(), e.to_string())
         }
     };
-    let mut service = threski_ticketing::service::Service::new(cfg.clone(), db.clone());
+    let service = threski_ticketing::service::Service::new(cfg.clone(), db.clone());
+    for provider in ticketing_providers(&cfg) {
+        service.register_provider(provider);
+    }
+    if db.is_some() {
+        if let Err(err) = threski_ticketing::migrate_legacy_issues(db.as_ref()).await {
+            tracing::warn!("Legacy issue migration warning: {err}");
+        }
+    }
+    (Arc::new(service), err)
+}
+
+/// F0.6: the provider set for a ticketing config (startup assembly and hot
+/// reload build the same list: a provider registers only when its connection
+/// block is non-empty).
+fn ticketing_providers(
+    cfg: &threski_ticketing::Config,
+) -> Vec<Arc<dyn threski_ticketing::TicketProvider>> {
+    let mut providers: Vec<Arc<dyn threski_ticketing::TicketProvider>> = Vec::new();
     if !cfg.providers.redmine.base_url.is_empty() {
         tracing::info!(
             "Initializing ticket provider: redmine ({})",
             cfg.providers.redmine.base_url
         );
-        service.register_provider(Arc::new(threski_ticketing::RedmineProvider::new(
+        providers.push(Arc::new(threski_ticketing::RedmineProvider::new(
             &cfg.providers.redmine,
         )));
     }
@@ -130,7 +148,7 @@ pub async fn assemble_ticketing(
             "Initializing ticket provider: jira ({})",
             cfg.providers.jira.base_url
         );
-        service.register_provider(Arc::new(threski_ticketing::JiraProvider::new(
+        providers.push(Arc::new(threski_ticketing::JiraProvider::new(
             &cfg.providers.jira,
         )));
     }
@@ -139,16 +157,49 @@ pub async fn assemble_ticketing(
             "Initializing ticket provider: azure_devops ({})",
             cfg.providers.azure_devops.organization_url
         );
-        service.register_provider(Arc::new(threski_ticketing::AzureDevOpsProvider::new(
+        providers.push(Arc::new(threski_ticketing::AzureDevOpsProvider::new(
             &cfg.providers.azure_devops,
         )));
     }
-    if db.is_some() {
-        if let Err(err) = threski_ticketing::migrate_legacy_issues(db.as_ref()).await {
-            tracing::warn!("Legacy issue migration warning: {err}");
+    providers
+}
+
+/// F0.6 hot reload: re-reads `config/ticketing_config.json`, swaps the
+/// live ticketing service in place (the F0.4 ingestion wiring shares the
+/// same `Arc`, so late reference resolution sees the new providers too) and
+/// announces `notifications/tools/list_changed` when the visibility gate
+/// flipped. Logs only when the configured provider set changes.
+pub async fn reload_ticketing(state: &crate::state::AppState) {
+    let cfg = match threski_ticketing::load_config() {
+        Ok(cfg) => cfg,
+        // Missing/invalid file at reload time is the routine unconfigured
+        // case (startup already warned once); degrade silently to defaults.
+        Err(e) => {
+            tracing::debug!("Ticketing config not found or invalid on reload ({e}); defaults.");
+            threski_ticketing::default_config()
+        }
+    };
+    reload_ticketing_with_config(state, cfg).await;
+}
+
+/// [`reload_ticketing`] with an explicit config (tests drive flips without
+/// touching the process CWD). Returns the visibility the gate carries now.
+pub async fn reload_ticketing_with_config(
+    state: &crate::state::AppState,
+    cfg: threski_ticketing::Config,
+) -> bool {
+    let before = state.ticket.capabilities().providers;
+    state.ticket.reload(cfg.clone(), ticketing_providers(&cfg));
+    let after = state.ticket.capabilities().providers;
+    if after != before {
+        if after.is_empty() {
+            tracing::info!("Ticketing providers reloaded: none; ticket_* tools hidden.");
+        } else {
+            tracing::info!("Ticketing providers reloaded: {}", after.join(", "));
         }
     }
-    (Arc::new(service), err)
+    state.refresh_tool_visibility().await;
+    state.ticketing_configured()
 }
 
 /// Builds the repopr service : ADO registered only when

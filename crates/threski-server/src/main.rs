@@ -464,6 +464,9 @@ async fn run_server_async(args: Vec<String>) -> i32 {
     if ticket.capabilities().providers.is_empty() {
         tracing::warn!("\u{26a0}\u{fe0f}  No ticketing providers configured. ticket_* tools will return configuration errors.");
     }
+    // F0.6: the tool list starts with this visibility (see the AppState
+    // literal below).
+    let ticketing_unconfigured = ticket.capabilities().providers.is_empty();
     let ticket_cfg = ticket.config().clone();
     let repopr = assembly::assemble_repopr(&ticket_cfg);
 
@@ -501,6 +504,11 @@ async fn run_server_async(args: Vec<String>) -> i32 {
         db_process: Mutex::new(db_process),
         resource_subs: threski_server::resources::ResourceSubscriptions::default(),
         sampling: sampling_registry,
+        // F0.6: the published visibility matches the assembled ticketing
+        // service (no providers → the ticket_* group starts hidden).
+        tool_discovery: threski_server::tool_discovery::ToolDiscovery::new(
+            !ticketing_unconfigured,
+        ),
     });
 
     // Background workers
@@ -606,6 +614,10 @@ async fn run_http(
         );
     let memory: Option<Arc<dyn threski_settings::MemoryService>> =
         Some(Arc::new(threski_settings::SearchMemoryAdapter(state.search())));
+    // F0.6: a settings UI apply is a config change — hot-reload the
+    // ticketing provider set and broadcast `notifications/tools/list_changed`
+    // when the visibility gate flips.
+    let on_change_state = state.clone();
     let app = threski_httpserver::mux::handler(
         cfg.clone(),
         mcp_service,
@@ -615,9 +627,15 @@ async fn run_http(
             state.db(),
             Some(state.ai.clone()),
         )),
-        Some(threski_settings::settings_api_router(
+        Some(threski_settings::settings_api_router_with_on_change(
             state.cfg.clone(),
             memory,
+            Arc::new(move || {
+                let state = on_change_state.clone();
+                tokio::spawn(async move {
+                    assembly::reload_ticketing(&state).await;
+                });
+            }),
         )),
         Some(threski_settings::settings_ui_router()),
     );

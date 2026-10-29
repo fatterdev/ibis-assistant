@@ -100,6 +100,10 @@ pub struct AppState {
     /// F0.5 MCP sampling: the session-peer registry feeding the
     /// `mcp_sampling` reasoning provider (tool dispatch attaches the peer).
     pub sampling: Arc<crate::sampling::SamplingSessionRegistry>,
+    /// F0.6 dynamic tool discovery: the session-peer broadcast set for
+    /// `notifications/tools/list_changed` (initialized sessions) plus the
+    /// ticketing visibility the tool list last carried.
+    pub tool_discovery: crate::tool_discovery::ToolDiscovery,
 }
 
 impl AppState {
@@ -107,6 +111,23 @@ impl AppState {
     /// the same lock).
     pub fn config(&self) -> Arc<Config> {
         Arc::new(self.cfg.read().unwrap().clone())
+    }
+
+    /// F0.6 dynamic tool discovery gate: `true` when at least one ticketing
+    /// provider is registered — the condition under which the `ticket_*`
+    /// group is announced on `tools/list`.
+    pub fn ticketing_configured(&self) -> bool {
+        !self.ticket.capabilities().providers.is_empty()
+    }
+
+    /// F0.6: re-checks the config-gated tool visibility and, when it flipped,
+    /// announces `notifications/tools/list_changed` to every initialized
+    /// session. Called after config swaps (the `settings_apply` tool and the
+    /// settings HTTP API; both hot-reload the ticketing service first).
+    pub async fn refresh_tool_visibility(&self) {
+        self.tool_discovery
+            .publish_ticketing_visibility(self.ticketing_configured())
+            .await;
     }
 
     /// Current DB snapshot (D8).

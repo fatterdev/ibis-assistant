@@ -112,6 +112,7 @@ async fn test_state(registry: Arc<SamplingSessionRegistry>) -> Arc<AppState> {
         db_process: Mutex::new(None),
         resource_subs: threski_server::resources::ResourceSubscriptions::default(),
         sampling: registry,
+        tool_discovery: threski_server::tool_discovery::ToolDiscovery::new(false),
     })
 }
 

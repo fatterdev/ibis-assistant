@@ -25,11 +25,12 @@ use std::sync::Arc;
 
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::model::{
-    CompleteRequestParams, CompleteResult, GetPromptRequestParams, GetPromptResponse,
-    ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, PaginatedRequestParams,
-    PromptMessage, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
-    ResourceContents, Role, ServerCapabilities, ServerConfig, SubscribeRequestParams,
-    SubscriptionFilter, UnsubscribeRequestParams,
+    CacheScope, CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult,
+    GetPromptRequestParams, GetPromptResponse, ListPromptsResult, ListResourceTemplatesResult,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParams, PromptMessage, ProtocolVersion,
+    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+    ResourceContents, ResultType, Role, ServerCapabilities, ServerConfig, SubscribeRequestParams,
+    SubscriptionFilter, Tool, UnsubscribeRequestParams,
 };
 use rmcp::service::{RequestContext, SubscriptionContext};
 use rmcp::tool_handler;
@@ -83,6 +84,13 @@ impl ThreskiServer {
         .with_description("Full install and usage guide, including the complete MCP tool list")
         .with_mime_type("text/markdown")
     }
+
+    /// F0.6 dynamic tool discovery: `false` for the config-gated ticketing
+    /// group when no provider is registered (unconfigured installs announce
+    /// the core tool set only).
+    fn tool_visible(&self, name: &str) -> bool {
+        !crate::registry::is_ticketing_tool(name) || self.state.ticketing_configured()
+    }
 }
 
 #[tool_handler(router = self.router)]
@@ -95,7 +103,10 @@ impl ServerHandler for ThreskiServer {
         resources.subscribe = Some(true);
         resources.list_changed = Some(true);
         let mut capabilities = ServerCapabilities::builder()
+            // F0.6: tools may appear/disappear with the ticketing config —
+            // `listChanged` advertised so clients expect the notification.
             .enable_tools()
+            .enable_tool_list_changed()
             .enable_prompts()
             .enable_completions()
             .enable_resources_with(resources)
@@ -109,6 +120,63 @@ impl ServerHandler for ThreskiServer {
                 VERSION,
             ))
             .with_instructions(INSTRUCTIONS)
+    }
+
+    /// F0.6 dynamic tool discovery: the macro's list shape (cache hints on
+    /// 2026-07-28 peers) plus the live config-gated filter — the
+    /// `ticket_*` group is announced only when a ticketing provider is
+    /// registered.
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, rmcp::ErrorData> {
+        let supports_cache_hints = context
+            .protocol_version()
+            .is_some_and(|version| version >= ProtocolVersion::V_2026_07_28);
+        let mut tools = self.router.list_all();
+        if !self.state.ticketing_configured() {
+            tools.retain(|tool| !crate::registry::is_ticketing_tool(&tool.name));
+        }
+        Ok(ListToolsResult {
+            result_type: Some(ResultType::COMPLETE),
+            tools,
+            meta: None,
+            next_cursor: None,
+            ttl_ms: supports_cache_hints.then_some(0),
+            cache_scope: supports_cache_hints.then_some(CacheScope::Public),
+        })
+    }
+
+    /// F0.6: hidden tools answer `tools/get`-style lookups (the Streamable
+    /// HTTP `Mcp-Param-*` validation reads this) as absent.
+    fn get_tool(&self, name: &str) -> Option<Tool> {
+        self.router
+            .get(name)
+            .filter(|tool| self.tool_visible(&tool.name))
+            .cloned()
+    }
+
+    /// F0.6: a config-hidden tool call gets a configuration error naming the
+    /// fix, instead of the router's bare "tool not found" (the caller may be
+    /// working from a stale tool list).
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, rmcp::ErrorData> {
+        if !self.tool_visible(&request.name) {
+            return Err(rmcp::ErrorData::invalid_params(
+                format!(
+                    "tool '{}' is not available: ticketing is not configured \
+                     (add a provider to config/ticketing_config.json)",
+                    request.name
+                ),
+                None,
+            ));
+        }
+        let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        self.router.call(tcc).await
     }
 
     async fn list_resources(
@@ -263,6 +331,10 @@ impl ServerHandler for ThreskiServer {
     }
 
     async fn on_initialized(&self, context: rmcp::service::NotificationContext<RoleServer>) {
+        // F0.6: the session joins the `notifications/tools/list_changed`
+        // broadcast set (fires when the config-gated ticketing visibility
+        // flips).
+        self.state.tool_discovery.register(&context.peer);
         // Plugin stdio binding — AddOnRegisterSession hook
         let cfg = self.state.config();
         if !cfg.is_plugin() || threski_core::workspace::plugin_has_bound_workspace(&cfg) {

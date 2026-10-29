@@ -861,6 +861,10 @@ async fn settings_apply(
         return error_result(err.to_string());
     }
     *state.cfg.write().unwrap() = out;
+    // F0.6: the config changed — hot-reload the ticketing provider set from
+    // `config/ticketing_config.json` and announce `notifications/tools/`
+    // `list_changed` when the visibility gate flips.
+    crate::assembly::reload_ticketing(state).await;
     text_result(format!(
         "Settings saved to {path}. Restart to reload providers."
     ))

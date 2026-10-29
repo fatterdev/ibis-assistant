@@ -4,6 +4,24 @@ All notable changes to Threski Studio are documented here.
 
 ## [Unreleased]
 
+- **feat(server): dynamic tool discovery for unconfigured ticketing** — the
+  `ticket_*` group is config-gated on `tools/list`: installs without a
+  ticketing provider announce only the 41 core tools, and the `tools`
+  capability now advertises `listChanged`. Calling a hidden tool answers with
+  a protocol error naming the fix (`ticketing is not configured — add a
+  provider to config/ticketing_config.json`) instead of a bare "tool not
+  found"; `tools/get`-style lookups (the Streamable HTTP `Mcp-Param-*`
+  validation) treat hidden tools as absent. The ticketing service is now
+  hot-reloadable (interior-mutable config/provider set): a config change —
+  the `settings_apply` MCP tool or a settings UI POST — re-reads
+  `config/ticketing_config.json`, swaps the live provider set and, when the
+  visibility gate flips, broadcasts `notifications/tools/list_changed` to
+  every initialized session (registered on `initialized`, dead peers pruned
+  on failed delivery); 2026-07-28 discover clients rely on the `ttl_ms: 0`
+  cache hint and simply re-list. Verify: F0.6 protocol gate over the
+  in-memory duplex (closed/open gate tool lists, hidden-call error, flip
+  broadcast with re-list), e2e plugin handshake asserts the 41-tool surface,
+  `cargo test` green.
 - **feat(ai): reasoning via mcp sampling with lm-bridge fallback** — the
   runtime reasons through the MCP client's own model: the new
   `mcp_sampling` provider sends `sampling/createMessage` on the current

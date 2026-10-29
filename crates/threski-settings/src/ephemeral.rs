@@ -384,6 +384,7 @@ async fn ephemeral_settings_api(State(es): State<Arc<EphemeralServer>>, req: Req
     let st = ApiState {
         cfg: es.cfg.clone(),
         memory: es.memory(),
+        on_change: None,
     };
     crate::http::handle_settings(State(st), req).await
 }

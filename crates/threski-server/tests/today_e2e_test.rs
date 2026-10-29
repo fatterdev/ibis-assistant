@@ -602,6 +602,9 @@ fn plugin_session_binds_roots_and_serves_memory_tool() {
         .wait_for_server_request("roots/list", Duration::from_secs(10))
         .expect("roots/list request arrives after initialized");
     // --- handshake-only mode (before the workspace binds) ---
+    // F0.6 dynamic tool discovery: the isolated e2e environment configures
+    // no ticketing provider, so the config-gated `ticket_*` group is hidden
+    // and the core 41-tool surface is announced.
     let tools = child.request(2, "tools/list", json!({}), Duration::from_secs(10));
     let names: Vec<&str> = tools["result"]["tools"]
         .as_array()
@@ -611,15 +614,36 @@ fn plugin_session_binds_roots_and_serves_memory_tool() {
         .collect();
     assert_eq!(
         names.len(),
-        56,
-        "handshake-only mode lists the 56-tool registry"
+        41,
+        "handshake-only mode lists the core 41-tool registry (ticket group hidden)"
+    );
+    assert!(
+        !names.iter().any(|n| n.starts_with("ticket_")),
+        "unconfigured ticketing must hide the ticket_* group: {names:?}"
+    );
+    let hidden_call = child.request(
+        3,
+        "tools/call",
+        json!({"name": "ticket_get_capabilities"}),
+        Duration::from_secs(10),
+    );
+    assert!(
+        hidden_call.get("error").is_some(),
+        "a hidden ticket tool call is a protocol error: {hidden_call}"
+    );
+    assert!(
+        hidden_call["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("ticketing is not configured"),
+        "the hidden-call error names the configuration fix: {hidden_call}"
     );
 
     // Tool calls that need the workspace/DB must degrade exactly as
     // the do : a tool RESULT carrying the
     // `database not connected` error, never a protocol error.
     let degraded = child.request(
-        3,
+        4,
         "tools/call",
         json!({
             "name": "get_working_state",
@@ -651,7 +675,7 @@ fn plugin_session_binds_roots_and_serves_memory_tool() {
     // --- embedded DB the binding started is reachable.
     let deadline = Instant::now() + Duration::from_secs(120);
     let mut bound_call: Option<Value> = None;
-    let mut call_id = 4;
+    let mut call_id = 5;
     while Instant::now() < deadline {
         let resp = child.request(
             call_id,

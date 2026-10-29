@@ -166,7 +166,7 @@ async fn live_ingest_issue_reference_creates_graph_rows() {
         .await
         .expect("init schema");
 
-    let mut svc = Service::new(
+    let svc = Service::new(
         Config::default(),
         Some(Arc::new(exec.clone()) as Arc<dyn Executor>),
     );

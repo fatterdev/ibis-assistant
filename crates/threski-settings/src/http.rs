@@ -150,6 +150,10 @@ pub struct ApiState {
     /// `*cfg = *out` at — a data race originally, locked here).
     pub cfg: Arc<RwLock<Config>>,
     pub memory: Option<Arc<dyn MemoryService>>,
+    /// F0.6 dynamic tool discovery: fired after a successful POST apply (a
+    /// config change) so the server lane can hot-reload the ticketing
+    /// provider set and broadcast `notifications/tools/list_changed`.
+    pub on_change: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 /// Builds the settings API router with absolute paths, ready to be merged
@@ -158,7 +162,25 @@ pub fn settings_api_router(
     cfg: Arc<RwLock<Config>>,
     memory: Option<Arc<dyn MemoryService>>,
 ) -> Router {
-    settings_api_router_with_state(ApiState { cfg, memory })
+    settings_api_router_with_state(ApiState {
+        cfg,
+        memory,
+        on_change: None,
+    })
+}
+
+/// [`settings_api_router`] with an F0.6 config-change hook (fired after a
+/// successful POST apply).
+pub fn settings_api_router_with_on_change(
+    cfg: Arc<RwLock<Config>>,
+    memory: Option<Arc<dyn MemoryService>>,
+    on_change: Arc<dyn Fn() + Send + Sync>,
+) -> Router {
+    settings_api_router_with_state(ApiState {
+        cfg,
+        memory,
+        on_change: Some(on_change),
+    })
 }
 
 pub(crate) fn settings_api_router_with_state(state: ApiState) -> Router {
@@ -391,6 +413,11 @@ async fn handle_post(st: &ApiState, req: Request) -> Response {
         let mut live = st.cfg.write().expect("config lock");
         *live = out;
         live.config_path = written.clone();
+    }
+    // F0.6: the config changed — let the server lane re-evaluate the
+    // config-gated tool surface.
+    if let Some(on_change) = &st.on_change {
+        on_change();
     }
     json_response(
         StatusCode::OK,

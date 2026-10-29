@@ -68,6 +68,7 @@ async fn test_state(projects: &[String]) -> Arc<AppState> {
         db_process: Mutex::new(None),
         resource_subs: resources::ResourceSubscriptions::default(),
         sampling: Arc::new(sampling::SamplingSessionRegistry::new()),
+        tool_discovery: threski_server::tool_discovery::ToolDiscovery::new(false),
     })
 }
 

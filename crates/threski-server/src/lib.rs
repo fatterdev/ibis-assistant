@@ -19,6 +19,7 @@ pub mod registry;
 pub mod resources;
 pub mod sampling;
 pub mod state;
+pub mod tool_discovery;
 pub mod tools;
 pub mod tools_memory;
 pub mod tools_ticket;

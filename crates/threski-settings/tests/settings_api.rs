@@ -150,6 +150,51 @@ async fn post_settings_writes_config_and_updates_live_state() {
     assert_eq!(live.config_path, path.display().to_string());
 }
 
+/// F0.6 dynamic tool discovery: the config-change hook fires after a
+/// successful POST apply — and only then (a rejected POST never swaps the
+/// config, so it must stay silent).
+#[tokio::test]
+async fn post_settings_fires_the_on_change_hook() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("config.json");
+    let lock = Arc::new(RwLock::new(cfg_with_secrets(&path.display().to_string())));
+
+    let fired = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let hook = {
+        let fired = fired.clone();
+        Arc::new(move || {
+            fired.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        })
+    };
+    let router = threski_settings::settings_api_router_with_on_change(lock.clone(), None, hook);
+
+    // A rejected apply (bad claims mode) does not fire the hook.
+    let bad = Request::builder()
+        .method("POST")
+        .uri("/api/v1/settings")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{"memory_git_store_personal_claims":"bogus"}"#,
+        ))
+        .unwrap();
+    let resp = router.clone().oneshot(bad).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(fired.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    // A successful apply fires exactly once.
+    let good = Request::builder()
+        .method("POST")
+        .uri("/api/v1/settings")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{"ai_mode":"ollama","local_model":"auto","use_cloud_when_no_gpu":false,"memory_git_store_personal_claims":"stub"}"#,
+        ))
+        .unwrap();
+    let resp = router.oneshot(good).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(fired.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
 /// The claims-mode enum validation (JSON 400).
 #[tokio::test]
 async fn post_settings_rejects_invalid_claims_mode() {
