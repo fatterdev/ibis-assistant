@@ -21,6 +21,10 @@
 //! - Origin gate (DNS-rebinding protection) on `/mcp` only — loopback browser
 //!   origins or an exact concrete bind host ([`origin`]); X-Threski-Actor trusted
 //!   only from loopback peers ([`auth`]).
+//! - F0.7 MCP App asset: the self-contained "Threski Studio Memory Curator"
+//!   HTML document ([`curator`]), served by `threski-server` as the
+//!   `ui://threski/memory-curator` UI resource (`text/html;profile=mcp-app`,
+//!   loopback-only CSP).
 //!
 //! Deltas vs (D15/D11): the legacy `/sse` + `/message` routes, their
 //! deprecation headers and the `endpoints.sse_legacy` discovery entry are
@@ -28,12 +32,17 @@
 //! instead of the original toolchain.
 
 pub mod auth;
+pub mod curator;
 pub mod discovery;
 pub mod mux;
 pub mod origin;
 pub mod upload;
 
 pub use auth::{auth_middleware, inject_auth, resolve_actor, resolve_trusted_actor};
+pub use curator::{
+    curator_html, ui_link_meta, ui_resource_meta, CURATOR_CSP, CURATOR_CONNECT_DOMAINS,
+    CURATOR_DESCRIPTION, CURATOR_MIME, CURATOR_NAME, CURATOR_URI,
+};
 pub use discovery::{
     guide_markdown, protocol_versions, DiscoveryState, ToolMeta, ToolsProvider, GUIDE_URI,
     SERVER_NAME, SERVER_VERSION,

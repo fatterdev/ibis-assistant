@@ -1037,15 +1037,33 @@ pub fn is_ticketing_tool(name: &str) -> bool {
 
 /// Builds one rmcp [`Tool`] for a spec: reference-shaped schema plus the
 /// F0.2 annotations — the human-readable title (top-level and inside the
-/// annotations) and the explicit `readOnlyHint`.
+/// annotations) and the explicit `readOnlyHint` — and, for the three memory
+/// tools, the F0.7 `_meta.ui.resourceUri` linkage to the Memory Curator app
+/// (SEP-1865 tool-UI linkage; hosts without MCP Apps support ignore it and
+/// use the plain textual output).
 pub fn annotated_tool(spec: &ToolSpec) -> Tool {
     let ann = annotation_of(spec.name)
         .unwrap_or_else(|| panic!("tool {} missing its F0.2 annotation row", spec.name));
     let schema: JsonObject =
         serde_json::from_value(schema_of(spec)).expect("tool schema is a valid JSON object");
-    Tool::new(spec.name, spec.description, schema)
+    let tool = Tool::new(spec.name, spec.description, schema)
         .with_title(ann.title)
-        .with_annotations(ToolAnnotations::with_title(ann.title).read_only(ann.read_only))
+        .with_annotations(ToolAnnotations::with_title(ann.title).read_only(ann.read_only));
+    if is_curator_tool(spec.name) {
+        tool.with_meta(threski_httpserver::curator::ui_link_meta())
+    } else {
+        tool
+    }
+}
+
+/// F0.7 — the tools whose results the Memory Curator app renders
+/// (`_meta.ui.resourceUri` on the tool objects and on the successful
+/// results).
+pub static CURATOR_TOOLS: &[&str] = &["memory_add", "memory_search", "memory_expand"];
+
+/// Whether `name` is linked to the Memory Curator MCP App.
+pub fn is_curator_tool(name: &str) -> bool {
+    CURATOR_TOOLS.contains(&name)
 }
 
 /// Precomputed schemas keyed by tool name (byte-match verification fixture,

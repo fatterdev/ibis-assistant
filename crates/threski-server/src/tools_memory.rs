@@ -10,7 +10,7 @@ use crate::args::bool_arg;
 #[allow(unused_imports)]
 use crate::args::get_string_arg;
 use crate::state::AppState;
-use crate::tools::{error_result, json_result, text_result, ToolResult};
+use crate::tools::{error_result, json_result, text_result, with_ui_meta, ToolResult};
 
 use threski_search::memory::add::AddMemoryParams;
 use threski_search::memory::capture::CaptureObservationParams;
@@ -267,7 +267,9 @@ async fn memory_add(
     let kind = params.kind.trim();
     let kind = if kind.is_empty() { "fact" } else { kind };
     fire_memory_changed(state, &id, kind, &params.title).await;
-    text_result(json!({ "id": id, "status": "created" }).to_string())
+    // F0.7: the Memory Curator app rides along (`_meta.ui.resourceUri`);
+    // the JSON text block stays the guaranteed degradation path.
+    with_ui_meta(text_result(json!({ "id": id, "status": "created" }).to_string()))
 }
 
 /// Scenario: memory_bootstrap_git_store
@@ -461,7 +463,8 @@ async fn memory_search(
         )
         .await
     {
-        Ok(results) => json_result(&results),
+        // F0.7: textual JSON output stays, the app linkage rides in `_meta`.
+        Ok(results) => with_ui_meta(json_result(&results)),
         Err(e) => error_result(format!("memory_search failed: {e}")),
     }
 }
@@ -486,7 +489,8 @@ async fn memory_expand(
         .memory_expand(actor, &id, depth, &get_string_arg(args, "actor"))
         .await
     {
-        Ok(expansion) => json_result(&expansion),
+        // F0.7: textual JSON output stays, the app linkage rides in `_meta`.
+        Ok(expansion) => with_ui_meta(json_result(&expansion)),
         Err(e) => error_result(format!("memory_expand failed: {e}")),
     }
 }

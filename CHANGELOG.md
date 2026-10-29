@@ -4,6 +4,27 @@ All notable changes to Threski Studio are documented here.
 
 ## [Unreleased]
 
+- **feat(server): memory curator mcp app with text fallback** - the MCP App
+  "Threski Studio Memory Curator" (SEP-1865, extension
+  `io.modelcontextprotocol/ui`): the httpserver embeds a self-contained app
+  document and serves it as the `ui://threski/memory-curator` resource with
+  MIME `text/html;profile=mcp-app` and loopback-only CSP (the document
+  carries the same policy as a meta tag and as `_meta.ui.csp` metadata; the
+  app talks to the host through the MCP Apps postMessage bridge -
+  `ui/initialize`, `ui/notifications/tool-input`, `ui/notifications/tool-result`
+  - and never to the network). `memory_search`, `memory_expand` and
+  `memory_add` now link the app on both layers: the tool objects declare
+  `_meta.ui.resourceUri` (host-side prefetch) and their successful results
+  carry the same `_meta` key, while the textual output stays untouched and
+  guaranteed - hosts without MCP Apps support simply ignore the metadata and
+  render the text (error results never carry the linkage). The app itself
+  degrades to a static description panel when the bridge handshake never
+  completes. Verify: F0.7 protocol gate over the in-memory duplex (listed
+  with app MIME + CSP metadata, readable document, foreign `ui://` stays an
+  unknown resource, curator linkage on exactly the three memory tools),
+  unit gates for the CSP pinning and the text-fallback wire shapes,
+  `cargo test` green.
+
 - **feat(server): dynamic tool discovery for unconfigured ticketing** — the
   `ticket_*` group is config-gated on `tools/list`: installs without a
   ticketing provider announce only the 41 core tools, and the `tools`

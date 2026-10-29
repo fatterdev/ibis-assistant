@@ -13,7 +13,9 @@
 //!   remember — with argument completions)
 //! - `WithLogging` only when mode ≠ stdio
 //! - instructions recommending Streamable HTTP `POST /mcp` + `threski://guide`
-//! - resources: `threski://guide` (listable) plus the F0.4 templates
+//! - resources: `threski://guide` (listable), the F0.7 MCP App
+//!   `ui://threski/memory-curator` (SEP-1865 `text/html;profile=mcp-app`)
+//!   and the F0.4 templates
 //!   `threski://memory/{kind}/{id}`, `threski://rules/{name}`,
 //!   `threski://ticket/{id}` (`crate::resources` — read dispatch + the
 //!   live-update registry feeding `notifications/resources/updated`; both
@@ -63,6 +65,20 @@ pub struct ThreskiServer {
     /// Plugin stdio binding: fires once on the session `initialized`
     /// notification (`AddOnRegisterSession hook).
     plugin_binding_done: std::sync::atomic::AtomicBool,
+}
+
+/// F0.7 — the MCP App "Threski Studio Memory Curator": the `ui://` UI
+/// resource declared with the SEP-1865 MIME type and the loopback-only
+/// `_meta.ui.csp` policy (the document itself embeds the same CSP).
+pub fn curator_resource() -> Resource {
+    Resource::new(
+        threski_httpserver::curator::CURATOR_URI,
+        threski_httpserver::curator::CURATOR_NAME,
+    )
+    .with_title(threski_httpserver::curator::CURATOR_NAME)
+    .with_description(threski_httpserver::curator::CURATOR_DESCRIPTION)
+    .with_mime_type(threski_httpserver::curator::CURATOR_MIME)
+    .with_meta(threski_httpserver::curator::ui_resource_meta())
 }
 
 impl ThreskiServer {
@@ -185,7 +201,7 @@ impl ServerHandler for ThreskiServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, rmcp::ErrorData> {
         Ok(ListResourcesResult {
-            resources: vec![Self::guide_resource()],
+            resources: vec![Self::guide_resource(), crate::mcp_server::curator_resource()],
             ..Default::default()
         })
     }
@@ -216,6 +232,21 @@ impl ServerHandler for ThreskiServer {
             ])
             .into());
         }
+        // F0.7 MCP App read: the Memory Curator document goes out with the
+        // SEP-1865 MIME type and the loopback CSP metadata (hosts without
+        // MCP Apps support never fetch it — the memory tools keep their
+        // always-present textual output).
+        if request.uri == threski_httpserver::curator::CURATOR_URI {
+            return Ok(ReadResourceResult::new(vec![
+                ResourceContents::text(
+                    threski_httpserver::curator::curator_html(),
+                    request.uri,
+                )
+                .with_mime_type(threski_httpserver::curator::CURATOR_MIME)
+                .with_meta(threski_httpserver::curator::ui_resource_meta()),
+            ])
+            .into());
+        }
         // F0.4 template reads (memory / rules / ticket); anything else is a
         // protocol-level bad request.
         let parsed = crate::resources::parse_uri(&request.uri).ok_or_else(|| {
@@ -242,6 +273,7 @@ impl ServerHandler for ThreskiServer {
     ) -> Result<(), rmcp::ErrorData> {
         if crate::resources::parse_uri(&request.uri).is_none()
             && request.uri != threski_httpserver::discovery::GUIDE_URI
+            && request.uri != threski_httpserver::curator::CURATOR_URI
         {
             return Err(rmcp::ErrorData::invalid_params(
                 format!("unknown resource {}", request.uri),

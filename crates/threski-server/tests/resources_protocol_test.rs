@@ -198,12 +198,13 @@ async fn resources_capability_templates_and_reads() {
     assert_eq!(res.subscribe, Some(true), "subscribe advertised: {info:?}");
     assert_eq!(res.list_changed, Some(true), "list_changed advertised");
 
-    // resources/list stays the static guide surface (templates are separate).
+    // resources/list: the static guide surface plus the F0.7 Memory
+    // Curator MCP App (templates are separate).
     let listed = peer
         .list_resources(Default::default())
         .await
         .expect("resources/list");
-    assert_eq!(listed.resources.len(), 1, "guide only: {listed:?}");
+    assert_eq!(listed.resources.len(), 2, "guide + curator app: {listed:?}");
 
     // resources/templates/list: exactly the F0.4 rows.
     let templates = peer

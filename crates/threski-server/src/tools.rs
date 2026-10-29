@@ -39,6 +39,20 @@ pub fn json_result<T: serde::Serialize>(value: &T) -> ToolResult {
     }
 }
 
+/// F0.7 — attaches `_meta.ui.resourceUri` (the Memory Curator MCP App) to a
+/// successful tool result. Error results keep their plain shape: the UI
+/// renders only meaningful executions, and in both cases the textual content
+/// stays the guaranteed degradation path for hosts without MCP Apps support.
+pub fn with_ui_meta(result: ToolResult) -> ToolResult {
+    match result {
+        Ok(mut ctr) if !ctr.is_error.unwrap_or(false) => {
+            ctr = ctr.with_meta(Some(threski_httpserver::curator::ui_link_meta()));
+            Ok(ctr)
+        }
+        other => other,
+    }
+}
+
 /// The request identity (`httpserver.ResolveActor(ctx, …) plumbing):
 /// credentials ride the HTTP request extensions; stdio callers are local.
 pub fn actor_context(ctx: &RequestContext<RoleServer>) -> threski_search::ActorContext {
@@ -915,4 +929,70 @@ async fn optimize_knowledge(
         }
     });
     text_result(format!("Optimization started for {iter} iterations."))
+}
+
+#[cfg(test)]
+mod ui_meta_tests {
+    use super::*;
+    use rmcp::model::ContentBlock;
+    use threski_httpserver::curator;
+
+    /// F0.7 text-fallback gate: a successful memory-tool result keeps its
+    /// textual content (hosts without MCP Apps support render this) and
+    /// gains `_meta.ui.resourceUri -> ui://threski/memory-curator`.
+    #[test]
+    fn successful_results_keep_text_and_gain_the_curator_link() {
+        let result = with_ui_meta(text_result("{\"id\":\"memory:1\"}")).expect("ok result");
+        assert_eq!(result.is_error, Some(false));
+        match result.content.first().expect("text block always present") {
+            ContentBlock::Text(text) => assert!(text.text.contains("memory:1")),
+            other => panic!("expected text content, got {other:?}"),
+        }
+        let uri = result
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get("ui"))
+            .and_then(|ui| ui.get("resourceUri"))
+            .and_then(|v| v.as_str())
+            .expect("ui.resourceUri present");
+        assert_eq!(uri, curator::CURATOR_URI);
+    }
+
+    /// Error results never carry the UI linkage.
+    #[test]
+    fn error_results_stay_meta_free() {
+        let result = with_ui_meta(error_result("boom")).expect("error is still an ok result");
+        assert_eq!(result.is_error, Some(true));
+        assert!(result.meta.is_none(), "no _meta on error results");
+    }
+
+    /// The wire shape: `_meta.ui.resourceUri` alongside the text block.
+    #[test]
+    fn wire_shape_carries_the_meta_key() {
+        let result = with_ui_meta(text_result("hi")).expect("ok result");
+        let wire = serde_json::to_value(&result).expect("result serializes");
+        assert_eq!(
+            wire["_meta"]["ui"]["resourceUri"],
+            serde_json::Value::String(curator::CURATOR_URI.to_string())
+        );
+        assert_eq!(wire["content"][0]["type"], "text");
+        assert_eq!(wire["content"][0]["text"], "hi");
+    }
+
+    /// The Memory Curator linkage table covers exactly the three memory
+    /// tools the plan names (and nothing else).
+    #[test]
+    fn curator_linkage_covers_the_three_memory_tools() {
+        assert_eq!(
+            crate::registry::CURATOR_TOOLS,
+            &["memory_add", "memory_search", "memory_expand"]
+        );
+        for name in crate::registry::CURATOR_TOOLS {
+            assert!(
+                crate::registry::is_curator_tool(name),
+                "{name} is a curator tool"
+            );
+        }
+        assert!(!crate::registry::is_curator_tool("get_rules"));
+    }
 }
