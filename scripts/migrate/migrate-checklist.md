@@ -43,13 +43,20 @@ refactor: ide surfaces to threski studio (ide-host, cursor plugin, vsix)
 docs: rebrand to threski studio with sacred-ibis lore
 ```
 
-## 5. Review gate R1
+## 5. Review gate R1 — **chiuso 29/10/2026**
 
-- [ ] cargo test green
-- [ ] cargo xtask dist → `dist/threski.exe`
-- [ ] VSIX installa e registra il provider MCP (VS Code 1.144)
-- [ ] grep residui: solo lore
-- [ ] owner: rename repo GitHub → `fatterdev/threski-studio` + update remote
+- [x] cargo test green — 71 suite, 799 passed / 0 failed (1 test flaky timing in
+  `threski-ai`, verde al re-run; pre-esistente)
+- [x] cargo xtask dist → `dist/threski.exe` (smoke: `threski 0.1.0`)
+- [x] VSIX installa — `fatterdev.threski-studio-1.0.0.vsix` (ide-host vendored);
+  la registrazione del provider MCP in VS Code 1.144 si verifica all'uso (owner)
+- [x] grep residui: solo lore (README "Why the name" + note storiche CHANGELOG 0.2.0)
+- [x] owner: rename repo GitHub → `fatterdev/threski-studio` (redirect attivo,
+  verificato via API) + default branch `main`
+- CI su `main`: run d584594 **green** (rust windows+ubuntu con clippy -D warnings,
+  ide-host framing test) — 29/10/2026
+- Promozione: `runtime/` promosso a root del prodotto (commit 8f8b920); planning
+  kit in `docs/planning/`; remote `origin` = `github-personale` (chiave fatterdev)
 
 Quando `runtime/` viene promosso a root del prodotto, spostare i file di piano/docs
-secondo la nuova layout e aggiornare README/PLAN.
+secondo la nuova layout e aggiornare README/PLAN. — **fatto** (29/10/2026).
