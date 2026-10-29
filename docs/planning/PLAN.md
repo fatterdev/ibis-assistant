@@ -5,6 +5,8 @@
 > Copilot Memory e Microsoft Scope.
 > Regola operativa: **nessuna modifica al repo sorgente `C:\devsrc\ibis-assistant`**
 > (che viene letto in sola lettura dallo script di migrazione); il prodotto nasce qui.
+> Aggiornamento 29/10/2026: **F0.1 completata** e runtime migrato promosso a root del
+> prodotto; i riferimenti a `runtime/` nelle fasi vanno letti come root del repo.
 
 ## 1. Decisioni di prodotto
 

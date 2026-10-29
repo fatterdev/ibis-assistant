@@ -1,7 +1,8 @@
 #Requires -Version 7
 <#
 F0.1 global rename: reads the source repo READ-ONLY and writes a migrated tree
-ibis -> threski ("Threski Studio"). See PLAN.md section 5 and docs/naming-map.md.
+ibis -> threski ("Threski Studio"). See docs/planning/PLAN.md section 5 and
+docs/planning/naming-map.md.
 
 Usage:
   pwsh scripts/migrate/migrate-rename.ps1 -Source C:\devsrc\ibis-assistant -Destination C:\devsrc\threski-studio\runtime [-Force]

@@ -11,7 +11,7 @@ pwsh scripts/migrate/migrate-rename.ps1 -Source C:\devsrc\ibis-assistant -Destin
 
 Lo script: copia l'albero (escludendo `.git`, `target`, `node_modules`, `dist`,
 `.ruff_cache`, log), rinomina le directory dei crate `ibis-*` → `threski-*`, applica le
-regole di sostituzione in ordine (vedi `docs/naming-map.md` §Regole) e stampa i residui
+regole di sostituzione in ordine (vedi `docs/planning/naming-map.md` §Regole) e stampa i residui
 `ibis` da revisionare manualmente.
 
 ## 2. Verifica build
