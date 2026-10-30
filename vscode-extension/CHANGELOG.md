@@ -9,6 +9,9 @@ The runtime changelog lives in the [repository root](https://github.com/fatterde
   settings prefix `ibis.*`, commands "Ibis Assistant: *", MCP server label
   `Ibis`, vendored `@ibis/ide-host`, fixed `@ext:fatterdev.ibis-assistant`
   settings filter.
+- **Engine bump** — `engines.vscode` and `@types/vscode` raised to `^1.144.0`
+  (VS Code 1.144, Oct 2026); packaging toolchain updated to `@vscode/vsce` 4.x
+  (required for OIDC trusted publishing).
 
 ## [0.2.0] — 2026-10-29
 

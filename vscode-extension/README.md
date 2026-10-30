@@ -9,7 +9,7 @@
 This extension is the VS Code packaging: it spawns an isolated Ibis Assistant stdio child or attaches to a shared personal runtime, registers the MCP server for VS Code agent mode, and bridges IDE-provided language models back to the runtime.
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/fatterdev/ibis-assistant/blob/main/LICENSE)
-[![VS Code](https://img.shields.io/badge/VS%20Code-%E2%89%A51.101-007ACC.svg)](https://code.visualstudio.com/)
+[![VS Code](https://img.shields.io/badge/VS%20Code-%E2%89%A51.144-007ACC.svg)](https://code.visualstudio.com/)
 
 ## What you get
 
@@ -22,7 +22,7 @@ This extension is the VS Code packaging: it spawns an isolated Ibis Assistant st
 
 ## Requirements
 
-- VS Code **1.101+** (the MCP server-definition provider API). Other commands work on older versions, but MCP auto-registration does not.
+- VS Code **1.144+** (required by `engines.vscode`; includes the MCP server-definition provider API).
 - The `ibis` binary on `PATH` (or an absolute path in `ibis.runtime.binaryPath`). Download from [Releases](https://github.com/fatterdev/ibis-assistant/releases) — no Rust toolchain required for normal use.
 
 ## Install
@@ -113,7 +113,7 @@ All settings live under `ibis.*` in VS Code Settings. Precedence is **explicit V
 
 ## MCP integration
 
-The extension contributes the `ibis` MCP server-definition provider. On VS Code 1.101+ the server appears in the MCP servers list and is started on demand in agent mode. The definition is recomputed from live settings on every request, so changes to runtime settings apply to the next session without a reload (LM bridge port and provider registration need a window reload).
+The extension contributes the `ibis` MCP server-definition provider. On VS Code 1.144+ the server appears in the MCP servers list and is started on demand in agent mode. The definition is recomputed from live settings on every request, so changes to runtime settings apply to the next session without a reload (LM bridge port and provider registration need a window reload).
 
 - **Spawn (default):** VS Code runs `ibis -mode stdio -runtime-mode plugin` with `RUNTIME_MODE=plugin` and the resolved `IBIS_*` environment.
 - **Attach:** VS Code connects to `ibis.runtime.mcpUrl` (Streamable HTTP, e.g. the personal daemon's `/mcp`).
@@ -147,7 +147,7 @@ Memory is sharing-first, stored in the SurrealDB owned by the attached runtime: 
 | Symptom | Fix |
 |---------|-----|
 | `ibis is not recognized` / spawn fails | Put the binary on `PATH`, or set an absolute `ibis.runtime.binaryPath`. The binary is spawned without the repo as cwd. |
-| No Ibis MCP server in agent mode | Requires VS Code 1.101+; check **Ibis Assistant: Status** (`MCP provider: registered`) and reload after changing `ibis.mcp.registerProvider`. |
+| No Ibis MCP server in agent mode | Requires VS Code 1.144+; check **Ibis Assistant: Status** (`MCP provider: registered`) and reload after changing `ibis.mcp.registerProvider`. |
 | `LM bridge not started` in the output channel | `vscode.lm` is unavailable, `ibis.lmBridge.enabled` is off, or the port is busy — change `ibis.lmBridge.port` and reload. |
 | **Ibis Assistant: Open Settings** cannot reach the UI | Start a personal daemon (`ibis run`) or let it fall back to the ephemeral loopback URL from `settings_open_ui`; adjust `ibis.settings.probeUrls` for non-default ports. |
 | Two IDEs, memories not shared | Attach both to one personal daemon (`ibis.runtime.mode=attach` + `ibis run`); do not point two plugin children at one SurrealDB. |
