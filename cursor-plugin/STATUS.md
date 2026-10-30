@@ -5,7 +5,7 @@ English readiness notes for agents and humans. **No Cursor MCP login** is requir
 ## MCP
 
 - Transport: stdio child `ibis -mode stdio -runtime-mode plugin`
-- Namespace: `ibis` (ready when the Go binary is on `PATH`)
+- Namespace: `ibis` (ready when the Rust binary `ibis` is on `PATH`)
 - Empty Cursor window (no folder): handshake still succeeds by design; SurrealDB/ingest stay off until a workspace is bound
 
 ## Data
@@ -39,7 +39,7 @@ English readiness notes for agents and humans. **No Cursor MCP login** is requir
 
 ## First-use checklist
 
-1. Go binary `ibis` on `PATH`
+1. Rust binary `ibis` on `PATH`
 2. Open a git repo folder (for full value)
 3. Configure AI keys via Settings (or personal daemon + shared `IBIS_MCP_URL`)
 4. `init_project` then `ask_project` / log tools as needed

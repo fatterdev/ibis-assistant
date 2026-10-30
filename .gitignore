@@ -19,6 +19,8 @@ ollama*.exe
 OllamaSetup.exe
 vscode-extension/vendor/
 
-# Local-only agent instructions (never commit)
+# Local-only agent instructions and IDE / smoke state (never commit)
 AGENTS.md
+.cursor/
+.r2-smoke-data/
 vscode-extension/LICENSE

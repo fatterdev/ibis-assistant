@@ -4,15 +4,15 @@
 
 # Ibis Assistant for Cursor
 
-Thin Cursor plugin that **spawns** the Ibis Assistant Go binary as an MCP stdio child (default). It does not embed Go in-process and does not ship the binary.
+Thin Cursor plugin that **spawns** the Ibis Assistant Rust binary as an MCP stdio child (default). It does not embed the runtime in-process and does not ship the binary.
 
 The opened folder is the live workspace (`RUNTIME_MODE=plugin`). Knowledge is stored under `%LOCALAPPDATA%\ibis\plugin` (or `IBIS_DATA_DIR`), separate from a personal `ibis` daemon unless you explicitly use a **shared runtime** (below). A Cursor empty window (no folder) still completes the MCP handshake (no `${workspaceFolder}` in `mcp.json`, no SurrealDB) so the shared plugin id is not marked failed. The opened folder is bound from `IBIS_WORKSPACE` / Cursor workspace env / MCP `roots/list` when present.
 
 ## What you get here
 
 - **MCP** (`mcp.json`) — tools for ingest, ask, logs, tickets, PRs, settings, typed memory
-- **Commands** — **Ibis: Open Settings**, **Ibis: Status**, **Ibis: Remember**, **Ibis: Set working state**
-- **Rules / skill** — readiness guidance (`rules/`, `skills/readiness/`)
+- **Commands** — **Ibis: Open Settings**, **Ibis: Status**, **Ibis: Remember**, **Ibis: Set working state** (`commands/ibis-*.md`)
+- **Rules / skill** — readiness guidance (`rules/ibis-readiness.mdc`, `skills/ibis-readiness/`)
 - **Hooks** — non-spamming session context guidance plus conditional durable-observation capture (`hooks/hooks.json`)
 - **STATUS.md** — Auth/readiness notes for agents (no Cursor MCP login)
 
@@ -27,21 +27,21 @@ Memory operator guide: [docs/memory_layer.md](../docs/memory_layer.md). Prefer `
 
 ## Install
 
-1. Build or install the Go binary and put it on `PATH` as `ibis` (Windows: `ibis.exe`).
+1. Download or build the Rust binary and put it on `PATH` as `ibis` (Windows: `ibis.exe`).
 
-   From the repo root, install into the user Go bin (already on a typical Windows PATH):
+   From the repo root, build the `dist/` bundle and ensure it is on `PATH`:
 
    ```powershell
-   go build -o "$env:USERPROFILE\go\bin\ibis.exe" ./cmd/server
+   cargo xtask dist
    ```
 
-   A personal install (`ibis /install`) also works if that directory is on `PATH`.
+   A personal install (`ibis /install`) or a binary from [Releases](https://github.com/fatterdev/ibis-assistant/releases) also works when placed on `PATH`.
 
    Cursor spawns the command **without** the repo as cwd. If the exe exists only in the working tree, MCP fails with: `ibis is not recognized as an internal or external command`.
 
 2. Enable this plugin from the repo copy, or from the local Cursor plugins folder:
 
-   - Canonical source: `cursor-plugin/` in [ibis](https://github.com/fatterdev/ibis-assistant)
+   - Canonical source: `cursor-plugin/` in [ibis-assistant](https://github.com/fatterdev/ibis-assistant)
    - Local install: `~/.cursor/plugins/local/ibis/` (copied from `cursor-plugin/`)
 
 3. Reload Cursor. The MCP server `ibis` starts with:
@@ -51,7 +51,7 @@ Memory operator guide: [docs/memory_layer.md](../docs/memory_layer.md). Prefer `
    RUNTIME_MODE=plugin
    ```
 
-   Do **not** put `${workspaceFolder}` in plugin `mcp.json`. Cursor empty windows cannot resolve that variable and abort spawn, which marks the shared MCP identifier as error. The Go child binds the opened folder from `IBIS_WORKSPACE` (if you set it), Cursor/VS Code workspace env vars, MCP `roots/list`, or a git cwd that is not the user home directory.
+   Do **not** put `${workspaceFolder}` in plugin `mcp.json`. Cursor empty windows cannot resolve that variable and abort spawn, which marks the shared MCP identifier as error. The Rust child binds the opened folder from `IBIS_WORKSPACE` (if you set it), Cursor/VS Code workspace env vars, MCP `roots/list`, or a git cwd that is not the user home directory.
 
 ## Personal daemon vs plugin / shared runtime
 
@@ -76,4 +76,4 @@ Optional env:
 
 AI setup for plugin data dir: [docs/ai_and_settings.md](../docs/ai_and_settings.md).
 
-The Go server, HTTP MCP (`/mcp`), Settings UI (`/settings/`), and Windows service stay in the main repository, not in this plugin package.
+The Rust server, HTTP MCP (`/mcp`), Settings UI (`/settings/`), and Windows service stay in the main repository, not in this plugin package.

@@ -1,7 +1,14 @@
 # Changelog
 
-All notable changes to the **Threski Studio for VS Code** extension are documented here.
-The runtime changelog lives in the [repository root](https://github.com/fatterdev/threski-studio/blob/master/CHANGELOG.md).
+All notable changes to the **Ibis Assistant for VS Code** extension are documented here.
+The runtime changelog lives in the [repository root](https://github.com/fatterdev/ibis-assistant/blob/main/CHANGELOG.md).
+
+## [Unreleased]
+
+- **Revert product naming to Ibis Assistant** — VSIX id `fatterdev.ibis-assistant`,
+  settings prefix `ibis.*`, commands "Ibis Assistant: *", MCP server label
+  `Ibis`, vendored `@ibis/ide-host`, fixed `@ext:fatterdev.ibis-assistant`
+  settings filter.
 
 ## [0.2.0] — 2026-10-29
 

@@ -28,7 +28,7 @@ Le uniche eccezioni ammesse: il crate `mcp-bridge` (privo del prefisso), il nome
 | Agent plugin | `threski` (skill corte) | `ibis` (skill corte: `/ibis usage`, `/ibis status`, …) |
 | Skill | `usage`, `readiness`, `status`, `remember`, `set-working-state` | invariate (corte) |
 | ide-host | `@threski/ide-host`, bin `threski-mcp-host.mjs`, clientInfo `threski-ide-host/1.0.0` | `@ibis/ide-host`, bin `ibis-mcp-host.mjs`, clientInfo `ibis-ide-host/1.0.0` |
-| Cursor plugin | spawn `threski`, `THRESKI_*`, skill/commands `usage/-readiness/-status/-remember` | spawn `ibis`, `IBIS_*`, stessi nomi corti |
+| Cursor plugin | spawn `threski`, `THRESKI_*`, skill/commands `threski-*` | spawn `ibis`, `IBIS_*`, skill/commands `ibis-*` (in Cursor i nomi file sono globali senza prefisso plugin) |
 | Marketplace plugin | repo `fatterdev/threski-marketplace`, `plugin=threski` | repo `fatterdev/ibis-marketplace`, `plugin=ibis` |
 | MCP registry | `server.json` name `threski` | `server.json` name `ibis` |
 | Output channel / TreeView VSIX | "Threski Studio" | "Ibis Assistant" |

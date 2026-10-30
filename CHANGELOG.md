@@ -1,8 +1,20 @@
 # Changelog
 
-All notable changes to Threski Studio are documented here.
+All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
+
+- **fix: post-revert release workflow, vsix extension id and docs alignment** -
+  `.github/workflows/release.yml` now packages the actual `ibis` (`ibis.exe`)
+  and `mcp-bridge` (`mcp-bridge.exe`) binaries per target with `set -euo
+  pipefail` instead of silently skipping a non-existent `ibis-assistant*`
+  binary; `vscode-extension/extension.js` fixes `EXTENSION_ID` from
+  `fatterdev.ibis` to `fatterdev.ibis-assistant` (so **Ibis Assistant: Open
+  Extension Settings (VS Code)** filters `@ext:fatterdev.ibis-assistant`) and
+  aligns command UI titles; `vscode-extension/README.md`,
+  `vscode-extension/CHANGELOG.md`, `cursor-plugin/*` and `docs/planning/*`
+  fix leftover `Threski Studio`, `MIT`, `master`-branch and Go-binary
+  references; `.gitignore` ignores local `.cursor/` and `.r2-smoke-data/`.
 
 - **refactor!: revert rebrand to ibis assistant** - the product naming reverts
   to **Ibis Assistant** (owner decision 30/10/2026): crates `threski-*` ->

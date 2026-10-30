@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/fatterdev/ibis-assistant/master/vscode-extension/assets/icon.png" alt="Ibis Assistant" width="128" height="128">
+  <img src="https://raw.githubusercontent.com/fatterdev/ibis-assistant/main/vscode-extension/assets/icon.png" alt="Ibis Assistant" width="128" height="128">
 </p>
 
 # Ibis Assistant for VS Code
@@ -8,16 +8,16 @@
 
 This extension is the VS Code packaging: it spawns an isolated Ibis Assistant stdio child or attaches to a shared personal runtime, registers the MCP server for VS Code agent mode, and bridges IDE-provided language models back to the runtime.
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/fatterdev/ibis-assistant/blob/master/LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/fatterdev/ibis-assistant/blob/main/LICENSE)
 [![VS Code](https://img.shields.io/badge/VS%20Code-%E2%89%A51.101-007ACC.svg)](https://code.visualstudio.com/)
 
 ## What you get
 
 - **MCP server provider** — VS Code's MCP integration (`registerMcpServerDefinitionProvider`) starts `ibis -mode stdio -runtime-mode plugin` automatically, or attaches to a shared runtime over Streamable HTTP.
 - **IDE LM bridge** — when `vscode.lm` is available, the runtime can use IDE-provided models (`use_ide_provided_models`); embeddings stay on Ollama.
-- **Browser Settings** — **Ibis: Open Settings** reuses the personal `/settings/` UI or falls back to an ephemeral loopback URL with a one-shot token via MCP `settings_open_ui`.
-- **Memory commands** — **Ibis: Remember** (`memory_add`) and **Ibis: Set working state** (`set_working_state`) straight from the Command Palette.
-- **Diagnostics** — **Ibis: Status** and an **Ibis Assistant** output channel reporting backend, runtime uniqueness, and bridge state.
+- **Browser Settings** — **Ibis Assistant: Open Settings** reuses the personal `/settings/` UI or falls back to an ephemeral loopback URL with a one-shot token via MCP `settings_open_ui`.
+- **Memory commands** — **Ibis Assistant: Remember** (`memory_add`) and **Ibis Assistant: Set working state** (`set_working_state`) straight from the Command Palette.
+- **Diagnostics** — **Ibis Assistant: Status** and an **Ibis Assistant** output channel reporting backend, runtime uniqueness, and bridge state.
 - **Extensive settings** — every runtime knob exposed as VS Code settings, with environment-variable fallbacks (see tables below).
 
 ## Requirements
@@ -33,7 +33,7 @@ Local VSIX (recommended while the Marketplace publishing is pending):
 cd vscode-extension
 npm install
 npx --yes @vscode/vsce package --no-dependencies
-code --install-extension .\ibis-1.0.0.vsix
+code --install-extension .\ibis-assistant-1.0.0.vsix
 ```
 
 For iterative development open this folder in an **Extension Development Host** (`F5`) instead of `code --install-extension` on the source directory (that CLI only accepts an extension id or a `.vsix` file).
@@ -58,12 +58,12 @@ For iterative development open this folder in an **Extension Development Host** 
 
 | Command | What it does |
 |---------|--------------|
-| **Ibis: Open Settings** | Opens the Ibis browser Settings UI (hybrid AI, cloud keys, local models, paths, Memory browser). Probes personal HTTP first, then MCP `settings_open_ui`. |
-| **Ibis: Open Extension Settings (VS Code)** | Opens VS Code Settings filtered to this extension (`@ext:fatterdev.ibis`). |
-| **Ibis: Show Output** | Reveals the Ibis Assistant output channel with activation and status logs. |
-| **Ibis: Status** | Reports the effective backend (spawn vs attach), plugin data dir, bound workspace, LM bridge, and memory defaults. Output destination follows `ibis.status.outputMode`. |
-| **Ibis: Remember** | Typed durable memory (`memory_add`) with kind quick pick and configurable default kind/visibility. |
-| **Ibis: Set working state** | Branch/session scratchpad (`set_working_state`), optionally with the workspace folder as project name. |
+| **Ibis Assistant: Open Settings** | Opens the Ibis browser Settings UI (hybrid AI, cloud keys, local models, paths, Memory browser). Probes personal HTTP first, then MCP `settings_open_ui`. |
+| **Ibis Assistant: Open Extension Settings (VS Code)** | Opens VS Code Settings filtered to this extension (`@ext:fatterdev.ibis-assistant`). |
+| **Ibis Assistant: Show Output** | Reveals the Ibis Assistant output channel with activation and status logs. |
+| **Ibis Assistant: Status** | Reports the effective backend (spawn vs attach), plugin data dir, bound workspace, LM bridge, and memory defaults. Output destination follows `ibis.status.outputMode`. |
+| **Ibis Assistant: Remember** | Typed durable memory (`memory_add`) with kind quick pick and configurable default kind/visibility. |
+| **Ibis Assistant: Set working state** | Branch/session scratchpad (`set_working_state`), optionally with the workspace folder as project name. |
 
 ## Settings
 
@@ -97,7 +97,7 @@ All settings live under `ibis.*` in VS Code Settings. Precedence is **explicit V
 
 | Setting | Default | Description | Env equivalent |
 |---------|---------|-------------|----------------|
-| `ibis.settings.url` | *(empty)* | URL opened by **Ibis: Open Settings**; empty probes the list below then falls back to MCP `settings_open_ui`. | `IBIS_SETTINGS_URL` |
+| `ibis.settings.url` | *(empty)* | URL opened by **Ibis Assistant: Open Settings**; empty probes the list below then falls back to MCP `settings_open_ui`. | `IBIS_SETTINGS_URL` |
 | `ibis.settings.probeUrls` | `["http://127.0.0.1:3030/settings/", "http://127.0.0.1:3031/settings/"]` | Personal Settings UI endpoints probed in order. | — |
 | `ibis.settings.probeTimeoutMs` | `800` | Probe timeout in milliseconds for settings/auto-attach HTTP checks. | — |
 
@@ -105,10 +105,10 @@ All settings live under `ibis.*` in VS Code Settings. Precedence is **explicit V
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `ibis.memory.defaultKind` | `ask` | Kind used by **Ibis: Remember**: `ask` keeps the quick pick, otherwise `decision` / `fix` / `rule` / `constraint` / `gotcha` / `design` / `fact` writes directly. |
+| `ibis.memory.defaultKind` | `ask` | Kind used by **Ibis Assistant: Remember**: `ask` keeps the quick pick, otherwise `decision` / `fix` / `rule` / `constraint` / `gotcha` / `design` / `fact` writes directly. |
 | `ibis.memory.defaultVisibility` | `team` | `visibility` for `memory_add`: sharing-first `team`, or `personal` (owner-only). |
 | `ibis.workingState.useWorkspaceProject` | `true` | Sends the first workspace folder name as `project_name` to `set_working_state`. |
-| `ibis.status.outputMode` | `toast` | **Ibis: Status** destination: `toast`, `output`, or `both`. |
+| `ibis.status.outputMode` | `toast` | **Ibis Assistant: Status** destination: `toast`, `output`, or `both`. |
 | `ibis.debug.verboseLogging` | `false` | Logs verbose activation and backend-resolution details to the output channel. |
 
 ## MCP integration
@@ -136,30 +136,30 @@ When enabled, the extension registers a `vscode.lm` handler and listens on `127.
 | Cursor plugin + VS Code, both default spawn | **No** — two children; never share one SurrealDB silently |
 | Both attach to a personal daemon (`ibis run` + `ibis.runtime.mode=attach`) | **Yes** — one personal daemon, the recommended shared setup |
 
-See [docs/runtime_modes.md](https://github.com/fatterdev/ibis-assistant/blob/master/docs/runtime_modes.md) and [docs/ide_host_and_lm_bridge.md](https://github.com/fatterdev/ibis-assistant/blob/master/docs/ide_host_and_lm_bridge.md).
+See [docs/runtime_modes.md](https://github.com/fatterdev/ibis-assistant/blob/main/docs/runtime_modes.md) and [docs/ide_host_and_lm_bridge.md](https://github.com/fatterdev/ibis-assistant/blob/main/docs/ide_host_and_lm_bridge.md).
 
 ## Typed memory
 
-Memory is sharing-first, stored in the SurrealDB owned by the attached runtime: `memory_add` / **Ibis: Remember** for durable notes, `set_working_state` / **Ibis: Set working state** for branch scratchpads, `load_session_context` once per session, `capture_observation` sparingly, `memory_consolidate` to distill. With isolated plugin children use `memory_export` / `memory_import`, or attach both IDEs to one personal daemon. Operator guide: [docs/memory_layer.md](https://github.com/fatterdev/ibis-assistant/blob/master/docs/memory_layer.md).
+Memory is sharing-first, stored in the SurrealDB owned by the attached runtime: `memory_add` / **Ibis Assistant: Remember** for durable notes, `set_working_state` / **Ibis Assistant: Set working state** for branch scratchpads, `load_session_context` once per session, `capture_observation` sparingly, `memory_consolidate` to distill. With isolated plugin children use `memory_export` / `memory_import`, or attach both IDEs to one personal daemon. Operator guide: [docs/memory_layer.md](https://github.com/fatterdev/ibis-assistant/blob/main/docs/memory_layer.md).
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
 | `ibis is not recognized` / spawn fails | Put the binary on `PATH`, or set an absolute `ibis.runtime.binaryPath`. The binary is spawned without the repo as cwd. |
-| No Ibis MCP server in agent mode | Requires VS Code 1.101+; check **Ibis: Status** (`MCP provider: registered`) and reload after changing `ibis.mcp.registerProvider`. |
+| No Ibis MCP server in agent mode | Requires VS Code 1.101+; check **Ibis Assistant: Status** (`MCP provider: registered`) and reload after changing `ibis.mcp.registerProvider`. |
 | `LM bridge not started` in the output channel | `vscode.lm` is unavailable, `ibis.lmBridge.enabled` is off, or the port is busy — change `ibis.lmBridge.port` and reload. |
-| **Ibis: Open Settings** cannot reach the UI | Start a personal daemon (`ibis run`) or let it fall back to the ephemeral loopback URL from `settings_open_ui`; adjust `ibis.settings.probeUrls` for non-default ports. |
+| **Ibis Assistant: Open Settings** cannot reach the UI | Start a personal daemon (`ibis run`) or let it fall back to the ephemeral loopback URL from `settings_open_ui`; adjust `ibis.settings.probeUrls` for non-default ports. |
 | Two IDEs, memories not shared | Attach both to one personal daemon (`ibis.runtime.mode=attach` + `ibis run`); do not point two plugin children at one SurrealDB. |
 
 ## Documentation
 
-- [Repository README](https://github.com/fatterdev/ibis-assistant/blob/master/README.md) — product overview and quick start
-- [AI & Settings](https://github.com/fatterdev/ibis-assistant/blob/master/docs/ai_and_settings.md) — hybrid AI, cloud keys, wizard, Settings UI
-- [Runtime modes](https://github.com/fatterdev/ibis-assistant/blob/master/docs/runtime_modes.md) — personal / plugin / server
-- [IDE host & LM bridge](https://github.com/fatterdev/ibis-assistant/blob/master/docs/ide_host_and_lm_bridge.md)
-- [Memory layer](https://github.com/fatterdev/ibis-assistant/blob/master/docs/memory_layer.md)
+- [Repository README](https://github.com/fatterdev/ibis-assistant/blob/main/README.md) — product overview and quick start
+- [AI & Settings](https://github.com/fatterdev/ibis-assistant/blob/main/docs/ai_and_settings.md) — hybrid AI, cloud keys, wizard, Settings UI
+- [Runtime modes](https://github.com/fatterdev/ibis-assistant/blob/main/docs/runtime_modes.md) — personal / plugin / server
+- [IDE host & LM bridge](https://github.com/fatterdev/ibis-assistant/blob/main/docs/ide_host_and_lm_bridge.md)
+- [Memory layer](https://github.com/fatterdev/ibis-assistant/blob/main/docs/memory_layer.md)
 
 ## License
 
-Apache-2.0 — see [LICENSE](https://github.com/fatterdev/ibis-assistant/blob/master/LICENSE) and [NOTICE](https://github.com/fatterdev/ibis-assistant/blob/master/NOTICE).
+Apache-2.0 — see [LICENSE](https://github.com/fatterdev/ibis-assistant/blob/main/LICENSE) and [NOTICE](https://github.com/fatterdev/ibis-assistant/blob/main/NOTICE).

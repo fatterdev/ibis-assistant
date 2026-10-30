@@ -1,6 +1,6 @@
 const vscode = require("vscode");
 
-const EXTENSION_ID = "fatterdev.ibis";
+const EXTENSION_ID = "fatterdev.ibis-assistant";
 
 /** @type {vscode.OutputChannel | undefined} */
 let outputChannel;
@@ -163,7 +163,7 @@ async function activate(context) {
   );
 
   logLine(
-    `activated (ide-host: ${host.source}, engine: ${vscode.version}); run "Ibis: Status" for the effective backend`,
+    `activated (ide-host: ${host.source}, engine: ${vscode.version}); run "Ibis Assistant: Status" for the effective backend`,
   );
   logVerbose(
     cfg,
@@ -385,7 +385,7 @@ async function rememberMemory(host, cfg) {
   if (kind === "ask") {
     const kindPick = await vscode.window.showQuickPick(kinds, {
       placeHolder: "Memory kind",
-      title: "Ibis: Remember",
+      title: "Ibis Assistant: Remember",
     });
     if (!kindPick) {
       return;
@@ -394,7 +394,7 @@ async function rememberMemory(host, cfg) {
   }
 
   const title = await vscode.window.showInputBox({
-    title: "Ibis: Remember",
+    title: "Ibis Assistant: Remember",
     prompt: `Short title (${kind})`,
     placeHolder: "e.g. Prefer Streamable HTTP for MCP",
   });
@@ -402,7 +402,7 @@ async function rememberMemory(host, cfg) {
     return;
   }
   const content = await vscode.window.showInputBox({
-    title: "Ibis: Remember",
+    title: "Ibis Assistant: Remember",
     prompt: "Full memory content",
     placeHolder: "What should future agents and teammates reuse?",
     ignoreFocusOut: true,
@@ -430,7 +430,7 @@ async function rememberMemory(host, cfg) {
  */
 async function setWorkingState(host, cfg) {
   const content = await vscode.window.showInputBox({
-    title: "Ibis: Set working state",
+    title: "Ibis Assistant: Set working state",
     prompt: "What are you working on right now?",
     placeHolder: "Current task, open files, next steps",
     ignoreFocusOut: true,

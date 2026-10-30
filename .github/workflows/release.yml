@@ -26,12 +26,18 @@ jobs:
       - name: Package
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p dist/release
-          cp target/${{ matrix.target }}/release/ibis-assistant* dist/release/ || true
-          cp target/${{ matrix.target }}/release/mcp-bridge* dist/release/ || true
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            cp "target/${{ matrix.target }}/release/ibis.exe" dist/release/
+            cp "target/${{ matrix.target }}/release/mcp-bridge.exe" dist/release/
+          else
+            cp "target/${{ matrix.target }}/release/ibis" dist/release/
+            cp "target/${{ matrix.target }}/release/mcp-bridge" dist/release/
+          fi
       - uses: actions/upload-artifact@v6
         with:
-          name: ibis-assistant-${{ matrix.target }}
+          name: ibis-${{ matrix.target }}
           path: dist/release
 
   release:
@@ -49,21 +55,16 @@ jobs:
       - name: Collect artifacts
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p release
-          for d in artifacts/*; do
-            name=$(basename "$d")
-            f=$(find "$d" -name 'ibis-assistant*' -type f | head -n1)
-            if [ -n "$f" ]; then
-              ext="${f##*.}"
-              if [ "$ext" = "exe" ]; then
-                cp "$f" "release/ibis-assistant-${name/ibis-assistant-/}.exe"
-              else
-                cp "$f" "release/ibis-assistant-${name/ibis-assistant-/}"
-              fi
-            fi
-            b=$(find "$d" -name 'mcp-bridge*' -type f | head -n1)
-            if [ -n "$b" ] && [[ "$name" == *linux* ]]; then
-              cp "$b" "release/mcp-bridge-linux-amd64"
+          for d in artifacts/ibis-*; do
+            target="${d#artifacts/ibis-}"
+            if [ -f "$d/ibis.exe" ]; then
+              cp "$d/ibis.exe" "release/ibis-${target}.exe"
+              cp "$d/mcp-bridge.exe" "release/mcp-bridge-${target}.exe"
+            else
+              cp "$d/ibis" "release/ibis-${target}"
+              cp "$d/mcp-bridge" "release/mcp-bridge-${target}"
             fi
           done
           zip -r release/ibis-assistant-cursor-plugin.zip cursor-plugin/
