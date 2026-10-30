@@ -308,13 +308,21 @@ async function callMcpToolHttp(url, toolName, args) {
 }
 
 /**
+ * Default per-request wait for one-shot stdio MCP calls. A cold plugin child
+ * initializes its data dir (embedded SurrealDB + migrations) on first launch,
+ * which can exceed 15s on slower disks; override with IBIS_MCP_TOOL_TIMEOUT_MS.
+ */
+export const DEFAULT_TOOL_TIMEOUT_MS = Number(process.env.IBIS_MCP_TOOL_TIMEOUT_MS || 60_000);
+
+/**
  * @param {Backend & { mode: "spawn" }} backend
  * @param {string} toolName
  * @param {Record<string, unknown>} args
- * @param {{ keepAliveMs?: number }} [opts]
+ * @param {{ keepAliveMs?: number, timeoutMs?: number }} [opts]
  */
-async function callMcpToolStdio(backend, toolName, args, { keepAliveMs = 0 } = {}) {
+async function callMcpToolStdio(backend, toolName, args, { keepAliveMs = 0, timeoutMs } = {}) {
   const child = spawnStdioChild(backend);
+  const waitMs = timeoutMs || DEFAULT_TOOL_TIMEOUT_MS;
   let outBuf = Buffer.alloc(0);
   const replies = new Map();
   /** @type {Array<() => void>} */
@@ -348,7 +356,7 @@ async function callMcpToolStdio(backend, toolName, args, { keepAliveMs = 0 } = {
     child.stdin.write(`${JSON.stringify(obj)}\n`);
   };
 
-  const waitFor = (id, ms = 15000) =>
+  const waitFor = (id, ms = waitMs) =>
     new Promise((resolve, reject) => {
       let settled = false;
       const finish = (fn, value) => {
