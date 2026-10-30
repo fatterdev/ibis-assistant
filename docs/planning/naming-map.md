@@ -21,11 +21,11 @@ all'uccello "ibis" nella lore (intenzionali).
 | VSIX | `fatterdev.ibis-assistant` | `fatterdev.threski-studio`, display "Threski Studio" |
 | Settings VSIX | `ibis.*` (22 chiavi) | `threskiStudio.*` |
 | Commands VSIX | `Ibis: *` (`ibis.openSettings`, …) | `Threski Studio: *` (`threskiStudio.openSettings`, …) |
-| Agent plugin | — | `threski-studio` |
-| Skill | `ibis-readiness` (Cursor) | `threski-usage`, `threski-readiness`, `threski-status`, `threski-remember`, `threski-set-working-state` |
+| Agent plugin | — | `threski` (skill corte: `/threski usage`, `/threski status`, …) |
+| Skill | `ibis-readiness` (Cursor) | `usage`, `readiness`, `status`, `remember`, `set-working-state` (slash `/threski <nome>`) |
 | ide-host | `@ibis-assistant/ide-host`, bin `ibis-mcp-host.mjs`, clientInfo `ibis-ide-host/1.0.0` | `@threski/ide-host`, bin `threski-mcp-host.mjs`, clientInfo `threski-ide-host/1.0.0` |
-| Cursor plugin | spawn `ibis-assistant`, `IBIS_*` | spawn `threski`, `THRESKI_*`, skill/commands `threski-*` |
-| Marketplace plugin | — | repo `fatterdev/threski-marketplace`, deep link `vscode://chat-plugin/install?source=fatterdev/threski-marketplace&plugin=threski-studio` |
+| Cursor plugin | spawn `ibis-assistant`, `IBIS_*` | spawn `threski`, `THRESKI_*`, skill/commands `usage/-readiness/-status/-remember` |
+| Marketplace plugin | — | repo `fatterdev/threski-marketplace`, deep link `vscode://chat-plugin/install?source=fatterdev/threski-marketplace&plugin=threski` |
 | MCP registry | — | `server.json` name `threski` |
 | Output channel / TreeView VSIX | "Ibis Assistant" | "Threski Studio" |
 

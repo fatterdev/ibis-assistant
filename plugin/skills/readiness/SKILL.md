@@ -1,5 +1,5 @@
 ---
-name: threski-readiness
+name: readiness
 description: First-use and empty-window readiness checklist for Threski. Use when session context is empty, tools fail unexpectedly, or the user asks whether Threski is set up. Produces a structured readiness table and the next concrete step.
 ---
 

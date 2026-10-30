@@ -18,13 +18,13 @@
 | Env vars | `IBIS_*` → `THRESKI_*` |
 | Binario/CLI | `threski` (`threski run`, `threski memory add`) |
 | VSIX | `fatterdev.threski-studio`, display "Threski Studio", settings `threskiStudio.*` |
-| Agent plugin | `threski-studio` (Agent Plugins 1.0), marketplace repo `fatterdev/threski-marketplace` |
+| Agent plugin | `threski` (Agent Plugins 1.0; skill corte → slash `/threski usage`), marketplace repo `fatterdev/threski-marketplace` |
 | Reasoning | **MCP sampling** come via primaria; LM bridge custom deprecato ma mantenuto come fallback; Ollama fallback finale |
 | MCP Apps | **Incluso nel primo rilascio** ("Memory Curator", con degradazione testuale sempre garantita) |
 | API VS Code | engines `^1.144.0`, uso delle API stabili più recenti (`chatInstructions`, LM tools, MCP provider, MCP Apps) |
 | Publishing | Full distribution: VS Marketplace (publisher `fatterdev`, OIDC Trusted Publishing) + Open VSX + MCP registry + plugin marketplace + `vscode:mcp/install` |
 | Track D (Scope) | Sperimentale, config-as-code; **D-CLAIMS** = benchmark interno dei claims (gate pre-publishing); **D-INSIGHTS** = Scope Insights come fonte di memoria (import script-first, promozione a ingest lane solo dopo ≥3 iterazioni utili) |
-| Skill duplicati | Il contratto di sessione vive come skill `threski-usage` nel plugin e come `chatInstructions` nella VSIX — mai entrambi come skill |
+| Skill duplicati | Il contratto di sessione vive come skill `usage` nel plugin e come `chatInstructions` nella VSIX — mai entrambi come skill; skill e comandi non si duplicano (le skill corte sono l'unica superficie slash `/threski <nome>`) |
 | Skill sync Copilot Memory | Sì, sperimentale (`threski-sync-copilot-memory`) |
 
 ## 2. Mappa di naming
@@ -37,7 +37,7 @@
 | MCP server (label per agenti) | "Threski"; prompts `/threski.<nome>`; risorse `threski://…` |
 | MCP registry (`server.json`) | `threski` |
 | VSIX | `fatterdev.threski-studio` — "Threski Studio" |
-| Plugin | `threski-studio` — skill `threski-usage/-readiness/-status/-remember/-set-working-state` |
+| Plugin | `threski` — skill `usage/-readiness/-status/-remember/-set-working-state` (slash `/threski <nome>`; label MCP VSIX "Threski") |
 | Cursor plugin | binario `threski`, env `THRESKI_*`, skill/commands `threski-*` |
 | ide-host | `@threski/ide-host`, default `THRESKI_BIN="threski"`, clientInfo `threski-ide-host/1.0.0` |
 | Crate Rust | `threski-core`, `threski-server`, `threski-ai`, … (`mcp-bridge` invariato) |
@@ -125,14 +125,19 @@ resources in "Add Context", sampling attivo, App visibile.
 
 **→ REVIEW R3** (azioni manuali ② ③ ⑤ prima): VSIX installata, UI verificata; publish su Marketplace + Open VSX + registry.
 
-## 7. FASE 2 — Agent plugin "threski-studio" (parallela a Fase 1)
+## 7. FASE 2 — Agent plugin "threski" (parallela a Fase 1)
+
+> Aggiornamento 30/10/2026: l'id del plugin è `threski` (non `threski-studio`)
+> e le skill portano nomi corti, così i comandi slash sono `/threski usage`,
+> `/threski status`, … (la VS Code li renderizza come `<plugin> <skill>`).
+> Nessun `commands/` duplicato: le skill sono l'unica superficie slash.
 
 | Sub | Contenuto | Commit |
 |---|---|---|
-| F2.1 | `plugin/plugin.json` (Agent Plugins 1.0) + `plugin/mcp.json` (spawn `threski -mode stdio -runtime-mode plugin`; attach `THRESKI_MCP_URL`) | `feat(plugin): threski-studio agent plugin scaffold` |
-| F2.2 | 5 skill (scaffold già in `plugin/skills/`): `threski-usage` (contratto di sessione + mappa tool + igiene memoria), `threski-readiness`, `threski-status`, `threski-remember`, `threski-set-working-state` | `feat(plugin): skills incl. session-contract usage skill` |
+| F2.1 | `plugin/plugin.json` (Agent Plugins 1.0) + `plugin/mcp.json` (spawn `threski -mode stdio -runtime-mode plugin`; attach `THRESKI_MCP_URL`) | `feat(plugin): threski agent plugin scaffold` |
+| F2.2 | 5 skill (scaffold già in `plugin/skills/`): `usage` (contratto di sessione + mappa tool + igiene memoria), `readiness`, `status`, `remember`, `set-working-state` | `feat(plugin): skills incl. session-contract usage skill` |
 | F2.3 | `com.github.copilot/hooks/hooks.json` + script: `sessionStart` → contratto, `agentStop` → `capture_observation` condizionale (verificare payload con Copilot hooks reference) | `feat(plugin): session start/stop hooks` |
-| F2.4 | agents `threski-forensics.agent.md` (read-only), `threski-curator.agent.md`; slash commands `/threski-status`, `/threski-remember` | `feat(plugin): forensics/curator agents and slash commands` |
+| F2.4 | agents `threski-forensics.agent.md` (read-only), `threski-curator.agent.md` (la superficie slash resta solo le skill corte, senza `commands/` duplicati) | `feat(plugin): forensics/curator agents` |
 | F2.5 | `automations/`: `nightly-ingest.automation.md`, `weekly-consolidate.automation.md` | `feat(plugin): ingest and consolidation automation templates` |
 | F2.6 | Repo `fatterdev/threski-marketplace` (marketplace.json schema Claude-compat) + README + badge `vscode://chat-plugin/install` + snippet team `.github/copilot/settings.json` | `feat(plugin): marketplace and workspace recommendations` |
 

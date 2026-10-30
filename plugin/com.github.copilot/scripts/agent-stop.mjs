@@ -14,4 +14,4 @@ try {
   event = {};
 }
 
-process.stdout.write(JSON.stringify({ additionalContext: REMINDER, source: "threski-studio", event: event.event ?? "agentStop" }));
+process.stdout.write(JSON.stringify({ additionalContext: REMINDER, source: "threski", event: event.event ?? "agentStop" }));

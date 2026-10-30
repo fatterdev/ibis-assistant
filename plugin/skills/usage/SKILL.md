@@ -1,5 +1,5 @@
 ---
-name: threski-usage
+name: usage
 description: How to use Threski correctly in a session: the session contract (load session context once), the tool selection map (why_changed vs ask_project vs memory_search), and memory hygiene rules (kinds, capture_observation, visibility). Use at session start and whenever unsure which Threski tool fits the task.
 ---
 
@@ -16,7 +16,7 @@ contexts small and memory trustworthy.
    not for chat transcripts or task bookkeeping.
 3. Do **not** call `settings_get` or `ticket_get_capabilities` unless diagnosing a
    problem or the user asks about configuration. Prefer the readiness summary from
-   `load_session_context` or the `threski-readiness` skill when the window is empty.
+   `load_session_context` or the `readiness` skill when the window is empty.
 4. When a genuinely new, durable lesson emerges at the end of real work, use
    `capture_observation` (or `memory_add` with an explicit kind). If the lesson is
    not durable, say nothing and move on.

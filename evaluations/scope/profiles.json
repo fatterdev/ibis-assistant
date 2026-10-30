@@ -13,15 +13,15 @@
   "skills": [
     {
       "slug": "threski-usage",
-      "source": "github/fatterdev/threski-studio/plugin/skills/threski-usage"
+      "source": "github/fatterdev/threski-studio/plugin/skills/usage"
     },
     {
       "slug": "threski-readiness",
-      "source": "github/fatterdev/threski-studio/plugin/skills/threski-readiness"
+      "source": "github/fatterdev/threski-studio/plugin/skills/readiness"
     },
     {
       "slug": "threski-remember",
-      "source": "github/fatterdev/threski-studio/plugin/skills/threski-remember"
+      "source": "github/fatterdev/threski-studio/plugin/skills/remember"
     }
   ],
   "profiles": [
@@ -47,9 +47,9 @@
       "model": "TODO-verify-model-id",
       "mcpServers": ["threski"],
       "skillRevisions": [
-        "github/fatterdev/threski-studio/plugin/skills/threski-usage",
-        "github/fatterdev/threski-studio/plugin/skills/threski-readiness",
-        "github/fatterdev/threski-studio/plugin/skills/threski-remember"
+        "github/fatterdev/threski-studio/plugin/skills/usage",
+        "github/fatterdev/threski-studio/plugin/skills/readiness",
+        "github/fatterdev/threski-studio/plugin/skills/remember"
       ],
       "extensions": ["fatterdev.threski-studio"]
     }

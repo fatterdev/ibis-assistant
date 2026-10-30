@@ -68,7 +68,7 @@
     "mcpServerDefinitionProviders": [
       {
         "id": "threski",
-        "label": "Threski Studio"
+        "label": "Threski"
       }
     ],
     "configuration": {

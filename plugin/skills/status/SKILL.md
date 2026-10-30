@@ -1,5 +1,5 @@
 ---
-name: threski-status
+name: status
 description: Report the Threski runtime status (backend, AI reasoning provider, ticketing, workspace binding) by calling settings_get once. Use when the user asks for status or diagnostics about Threski itself.
 ---
 

@@ -334,16 +334,16 @@ function registerMcpProvider(context, host) {
       }
       if (backend.mode === "http" && backend.url) {
         if (typeof vscode.McpHttpServerDefinition === "function") {
-          defs.push(new vscode.McpHttpServerDefinition("Threski Studio", vscode.Uri.parse(backend.url)));
+          defs.push(new vscode.McpHttpServerDefinition("Threski", vscode.Uri.parse(backend.url)));
         } else if (typeof vscode.McpServerDefinition === "function") {
-          defs.push({ label: "Threski Studio", uri: vscode.Uri.parse(backend.url) });
+          defs.push({ label: "Threski", uri: vscode.Uri.parse(backend.url) });
         }
         return defs;
       }
       if (typeof vscode.McpStdioServerDefinition === "function") {
         defs.push(
           new vscode.McpStdioServerDefinition(
-            "Threski Studio",
+            "Threski",
             backend.command,
             backend.args,
             { ...(backend.env || {}) },

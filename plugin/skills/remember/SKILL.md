@@ -1,5 +1,5 @@
 ---
-name: threski-remember
+name: remember
 description: Capture a durable project memory with the correct type using memory_add. Use when the user says "remember this", when a decision is made, when a fix resolves a failure, or when a constraint or gotcha must be kept for the team.
 ---
 

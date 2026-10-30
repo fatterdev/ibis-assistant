@@ -4,6 +4,19 @@ All notable changes to Threski Studio are documented here.
 
 ## [Unreleased]
 
+- **feat(naming): short /threski slash names across plugin and vsix** - the
+  agent plugin id drops from `threski-studio` to `threski` and the five
+  skills drop the `threski-` prefix (`usage`, `readiness`, `status`,
+  `remember`, `set-working-state`), so VS Code renders them as
+  `/threski usage`, `/threski status`, … instead of the doubled
+  `/threski-studio threski-usage`; the duplicate `commands/threski-status.md`
+  and `commands/threski-remember.md` are removed (the skills are the single
+  slash surface, same names and descriptions). The VSIX MCP server label
+  becomes `Threski` (naming map), so MCP prompts surface as short
+  `/threski <prompt>` entries. The `sessionStart` hook fixes a leftover
+  "Ibis Studio Status" reference; Track D profiles and docs follow the new
+  skill paths. Verify: plugin.json/mcp.json/profiles.json parse, hook
+  scripts run and emit `source: threski`, `vsce package` green.
 - **fix(cli): accept go-style single-dash flags for ide spawns** - the spawn
   contract used by every IDE surface (ide-host, the VSIX MCP provider,
   `plugin/mcp.json`, `cursor-plugin/mcp.json`, evaluation profiles) passes

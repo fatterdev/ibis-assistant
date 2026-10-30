@@ -12,7 +12,7 @@ The opened folder is the live workspace (`RUNTIME_MODE=plugin`). Knowledge is st
 
 - **MCP** (`mcp.json`) — tools for ingest, ask, logs, tickets, PRs, settings, typed memory
 - **Commands** — **Threski: Open Settings**, **Threski: Status**, **Threski: Remember**, **Threski: Set working state**
-- **Rules / skill** — readiness guidance (`rules/`, `skills/threski-readiness/`)
+- **Rules / skill** — readiness guidance (`rules/`, `skills/readiness/`)
 - **Hooks** — non-spamming session context guidance plus conditional durable-observation capture (`hooks/hooks.json`)
 - **STATUS.md** — Auth/readiness notes for agents (no Cursor MCP login)
 
