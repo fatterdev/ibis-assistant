@@ -30,6 +30,11 @@ All notable changes to Ibis Assistant are documented here.
   never blocks blindly). New `scripts/smoke-plugin.mjs` (Parte A R3/R4):
   26 checks on plugin scaffold, hook contract, VSIX contributions and
   distribution manifests — 26/26 PASS.
+- **docs: review r3/r4 checklist** — `docs/planning/review-r3r4-checklist.md`:
+  gate runbook for the VSIX (install, status bar, tree view, remember with
+  provenance, chat instruction, walkthrough, MCP provider) and the plugin
+  (install from source, skills, MCP server, hooks, agents, automations),
+  plus the publish-gate steps (②③⑤, workflow dispatch, marketplace push).
 
 ## [0.2.0] — 2026-10-30
 
