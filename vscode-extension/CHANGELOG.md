@@ -12,6 +12,10 @@ The runtime changelog lives in the [repository root](https://github.com/fatterde
 - **Engine bump** — `engines.vscode` and `@types/vscode` raised to `^1.144.0`
   (VS Code 1.144, Oct 2026); packaging toolchain updated to `@vscode/vsce` 4.x
   (required for OIDC trusted publishing).
+- **Status bar item** — right-aligned item showing the effective backend mode
+  (spawn/attach) with LM-bridge and MCP-provider indicators; tooltip carries the
+  full status, clicking runs **Ibis Assistant: Status**, and any `ibis.*`
+  settings change refreshes it.
 
 ## [0.2.0] — 2026-10-29
 

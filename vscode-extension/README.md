@@ -14,6 +14,7 @@ This extension is the VS Code packaging: it spawns an isolated Ibis Assistant st
 ## What you get
 
 - **MCP server provider** — VS Code's MCP integration (`registerMcpServerDefinitionProvider`) starts `ibis -mode stdio -runtime-mode plugin` automatically, or attaches to a shared runtime over Streamable HTTP.
+- **Status bar item** — shows the effective backend (spawn/attach) plus LM-bridge and MCP-provider indicators; click it to run **Ibis Assistant: Status**.
 - **IDE LM bridge** — when `vscode.lm` is available, the runtime can use IDE-provided models (`use_ide_provided_models`); embeddings stay on Ollama.
 - **Browser Settings** — **Ibis Assistant: Open Settings** reuses the personal `/settings/` UI or falls back to an ephemeral loopback URL with a one-shot token via MCP `settings_open_ui`.
 - **Memory commands** — **Ibis Assistant: Remember** (`memory_add`) and **Ibis Assistant: Set working state** (`set_working_state`) straight from the Command Palette.
