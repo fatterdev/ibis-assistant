@@ -660,15 +660,28 @@ impl crate::search::SearchService {
             where_parts.join(" AND ")
         );
         bindings.push(("vec".into(), crate::commit_meaning::vec_value_f32(&vector)));
+        tracing::info!(
+            "memory_search: querying db (fetch_limit={fetch_limit}, vector_len={}, elapsed={:?})",
+            vector.len(),
+            t0.elapsed()
+        );
         let outcome = db
             .smart_query(&sql, bind(bindings))
             .await
             .map_err(|e| SearchError::other(format!("search memory: {e}")))?;
+        tracing::info!("memory_search: db query returned in {:?}", t0.elapsed());
         let rows_values = rows::normalize_rows(&outcome).unwrap_or_default();
         let mut memories = memories_from_rows(&rows_values);
+        tracing::info!("memory_search: rows={} elapsed={:?}", memories.len(), t0.elapsed());
         let (keywords, entities) = crate::retrieval_boost::tokenize_query(&params.query);
+        tracing::info!("memory_search: boosting (elapsed={:?})", t0.elapsed());
         let linked_symbols =
             crate::retrieval_boost::resolve_linked_symbols(self.db.as_ref(), &entities).await;
+        tracing::info!(
+            "memory_search: linked_symbols={} elapsed={:?}",
+            linked_symbols.len(),
+            t0.elapsed()
+        );
         let mut hits: Vec<crate::retrieval_boost::ScoredHit> = memories
             .iter()
             .enumerate()
