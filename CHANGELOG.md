@@ -4,6 +4,25 @@ All notable changes to Threski Studio are documented here.
 
 ## [Unreleased]
 
+- **refactor!: revert rebrand to ibis assistant** - the product naming reverts
+  to **Ibis Assistant** (owner decision 30/10/2026): crates `threski-*` ->
+  `ibis-*` (`mcp-bridge` unchanged), env `THRESKI_*` -> `IBIS_*`, resource
+  scheme `threski://` -> `ibis://`, binary `ibis` (short), data dir
+  `%LOCALAPPDATA%\ibis`, VSIX `fatterdev.ibis-assistant` with settings
+  `ibis.*` and commands "Ibis Assistant: *", ide-host `@ibis/ide-host`
+  (clientInfo `ibis-ide-host/1.0.0`), agent plugin `ibis` with the short
+  skills (`/ibis usage`, ...), MCP label "Ibis" (`/ibis <prompt>`), MCP App
+  "Ibis Assistant Memory Curator" (`ui://ibis/memory-curator`). The retired
+  `threski://` scheme remains only as the foreign-scheme example in the
+  resource-parse test; *Threskiornis aethiopicus* stays in the lore (the
+  bird's genus). All F0.2-F0.7 features and this session's fixes carry over
+  unchanged (mechanical rename). Tool: `scripts/migrate/rename-back-ibis.ps1`
+  (in-place inverse of the F0.1 migration); historical documents
+  (CHANGELOG, PLAN, migrate scripts) keep the threski-era record. Verify:
+  `cargo test` green, `cargo xtask dist` -> `ibis.exe`, `vsce package` ->
+  `ibis-assistant-1.0.0.vsix`, ide-host framing test, live stdio handshake
+  (`ibis -mode stdio -runtime-mode plugin` answers `id=1`).
+
 - **feat(naming): short /threski slash names across plugin and vsix** - the
   agent plugin id drops from `threski-studio` to `threski` and the five
   skills drop the `threski-` prefix (`usage`, `readiness`, `status`,

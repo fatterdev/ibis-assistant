@@ -5,7 +5,7 @@
 
 ## Summary
 
-Threski Studio is one Go binary with three **runtimes** (`runtime_mode`). Personal and plugin use the developer working tree **directly**. Server keeps a clone under `discovery_root/dynamic`. OS symlink/junction aliases are rejected. HTTP MCP uses Streamable HTTP (`/mcp`) as the product default, keeps legacy SSE, and exposes agent autoconfig plus a human install/usage guide. Cursor plugin is an in-repo `mcpServers` host that spawns the same binary on stdio.
+Ibis Assistant is one Go binary with three **runtimes** (`runtime_mode`). Personal and plugin use the developer working tree **directly**. Server keeps a clone under `discovery_root/dynamic`. OS symlink/junction aliases are rejected. HTTP MCP uses Streamable HTTP (`/mcp`) as the product default, keeps legacy SSE, and exposes agent autoconfig plus a human install/usage guide. Cursor plugin is an in-repo `mcpServers` host that spawns the same binary on stdio.
 
 `mode` in `config.json` remains the **listener kind** (`sse` | `stdio`). Do not overload it.
 
@@ -15,9 +15,9 @@ Threski Studio is one Go binary with three **runtimes** (`runtime_mode`). Person
 |---------|---------|-----------|-----------------|
 | `personal` | `run` / daemon / Windows service on the same PC as the repos | Working-tree path (`projects[].working_repo_path`, else `git_repos`) | Exe-relative / `config.json` SurrealDB |
 | `server` | Same binary on a dedicated host | Git clone at `discovery_root/dynamic/<name>` | Host-local SurrealDB |
-| `plugin` | Cursor-owned **child**: `threski -mode stdio` (no Windows service) | Opened Cursor folder | Isolated Cursor/user-data DB; do not silently share with a personal install |
+| `plugin` | Cursor-owned **child**: `ibis -mode stdio` (no Windows service) | Opened Cursor folder | Isolated Cursor/user-data DB; do not silently share with a personal install |
 
-- One artifact: `make dist` → `threski` (+ `mcp-bridge` for Claude Desktop stdio→SSE).
+- One artifact: `make dist` → `ibis` (+ `mcp-bridge` for Claude Desktop stdio→SSE).
 - Plugin is a thin TypeScript host that **spawns** that binary. Go is not loaded in-process into Cursor.
 - If personal HTTP and plugin stdio both run on one PC: **warn** (port/DB collision); do not auto-attach.
 - Destructive git (`fetch` + `reset --hard`) only on **server-owned clones**. Forbidden on personal/plugin working trees.
@@ -79,7 +79,7 @@ One English source, live port/URLs interpolated.
 
 - `GET /` + `Accept: application/json`: enough to attach (Streamable HTTP URL, legacy SSE URL, protocol versions, `runtime_mode`, bind, auth header names, tools + schemas). Also MCP `server/discover` after the SDK upgrade.
 - `GET /` HTML: complete install and usage guide (run/start/service, config, personal vs server bind, Cursor/Claude snippets, CLI, log upload, main tools).
-- Same guide as markdown: `Accept: text/markdown` and MCP resource `threski://guide` so a **connected** agent can show it to a human.
+- Same guide as markdown: `Accept: text/markdown` and MCP resource `ibis://guide` so a **connected** agent can show it to a human.
 
 Do not add a `get_setup_guide` tool unless resources are unavailable. Long tool results stay operational (progress + result), not chapters of this guide.
 

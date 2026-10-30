@@ -23,8 +23,8 @@
 
 ## 0. One-sentence thesis
 
-Git already gives Threski a **changelog of code transitions** and a way to obtain **code state at any ref**.  
-Threski today stores and retrieves the changelog semantically (`commit_chunk`) and the **HEAD** code/memory slice.  
+Git already gives Ibis a **changelog of code transitions** and a way to obtain **code state at any ref**.  
+Ibis today stores and retrieves the changelog semantically (`commit_chunk`) and the **HEAD** code/memory slice.  
 This spec defines the missing formal object: a **world slice at ref R** — code + typed claims valid at R — plus operators `as_of` and `knowledge_diff`, so multiple contemporaneous truths can coexist along the git DAG without reinforcement as the primary timeline.
 
 ---
@@ -35,7 +35,7 @@ This spec defines the missing formal object: a **world slice at ref R** — code
 
 Let a repository’s history be a DAG of commits \(C\).
 
-| Dual | Informal name | Git analogue | Threski today |
+| Dual | Informal name | Git analogue | Ibis today |
 |------|---------------|--------------|------------|
 | **Δ (transition)** | Semantic changelog | `git show` / `git log -p` | `commit_chunk` (+ `changed` edges) |
 | **Σ (state)** | World at a point | tree object / `git show R:path` | Mostly **HEAD only** (`file_chunk`/`source_file` with `is_head`; memory `status=current`) |
@@ -212,7 +212,7 @@ No separate `content_changed` channel. Supersession already appears as \(-m_{\ma
 
 ### 4.6 Ask under `at_ref` — honest retrieval contract (closes G4)
 
-**Non-promise:** Threski does **not** maintain per-commit embedding corpora. Full semantic search over arbitrary historical trees is a non-goal (§8).
+**Non-promise:** Ibis does **not** maintain per-commit embedding corpora. Full semantic search over arbitrary historical trees is a non-goal (§8).
 
 When `ask_project` receives `at_ref=R` (resolved OID):
 

@@ -1,14 +1,14 @@
 # Naming
 
-**Product brand:** Threski Studio  
-**Slug:** `threski` (binary, Windows service, PID file, MCP client key)
+**Product brand:** Ibis Assistant  
+**Slug:** `ibis` (binary, Windows service, PID file, MCP client key)
 
 | Surface | Name |
 |---------|------|
-| Display / docs | Threski Studio |
-| Executable | `threski` / `threski.exe` |
-| GitHub | `https://github.com/fatterdev/threski-studio` |
-| Future IDE plugin | Threski Studio for Cursor (stdio child of the same binary) |
+| Display / docs | Ibis Assistant |
+| Executable | `ibis` / `ibis.exe` |
+| GitHub | `https://github.com/fatterdev/ibis-assistant` |
+| Future IDE plugin | Ibis Assistant for Cursor (stdio child of the same binary) |
 
 **Runtimes** (`runtime_mode` in config; not the MCP listener `mode`):
 
@@ -22,14 +22,14 @@
 
 **AI / settings:** hybrid reasoning + Settings UX — [ai_and_settings.md](ai_and_settings.md).
 
-**Typed memory:** sharing-first `memory_*` MCP tools (default `visibility=team`); SurrealDB source of truth; optional `memory.projection_enabled` → `.threski/memory/*.md`. Operator guide: [memory_layer.md](memory_layer.md).
+**Typed memory:** sharing-first `memory_*` MCP tools (default `visibility=team`); SurrealDB source of truth; optional `memory.projection_enabled` → `.ibis/memory/*.md`. Operator guide: [memory_layer.md](memory_layer.md).
 
 The MCP process is an implementation detail (“the MCP server”), not a separate product name.
 
 ## Remotes
 
-- **origin:** `fatterdev/threski-studio` (canonical)
+- **origin:** `fatterdev/ibis-assistant` (canonical)
 
 ## Local workspace folder
 
-Prefer naming the checkout directory to match the slug (e.g. `…/threski`). The folder name is cosmetic only.
+Prefer naming the checkout directory to match the slug (e.g. `…/ibis`). The folder name is cosmetic only.

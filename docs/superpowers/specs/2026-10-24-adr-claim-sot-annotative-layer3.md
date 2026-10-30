@@ -24,7 +24,7 @@ Three options were framed (parking doc §6):
 **Hybrid A+B, sequenced:**
 
 1. **Option A is binding as the foundation, now.** Implement Layer 3 per the spec (phases 3b → 3b′ → 3c → 3d → 3e; 3f optional) with Surreal as the operational claim index and git-bound anchors (HOLDAt, I(m)/X(m), AncestorSet, dirty/orphan policies).
-2. **Option B is adopted** for the durable claim subset (`decision` / `rule` / `fix`): claims live as files in the repo (`.threski/claims/`), **entered via a bootstrap commit — never via history rewrite** — with Surreal as the derived one-way index. Design in the addendum; implementation phases 4a–4d follow Layer 3 phases 3b–3e.
+2. **Option B is adopted** for the durable claim subset (`decision` / `rule` / `fix`): claims live as files in the repo (`.ibis/claims/`), **entered via a bootstrap commit — never via history rewrite** — with Surreal as the derived one-way index. Design in the addendum; implementation phases 4a–4d follow Layer 3 phases 3b–3e.
 3. **Option C remains rejected** as totalizing. A later git-owned *subset* is B, not C.
 
 #31 (Layer 1–2) stays unblocked and merges independently.
@@ -59,7 +59,7 @@ Three options were framed (parking doc §6):
 
 - **Scope = owner actor:** on team servers the policy covers the owner's personal rows only; other actors' personal rows are always `db_only`.
 - **Leak warning:** switching to `in_repo` with a configured remote warns that repo access becomes the visibility boundary (MCP actor visibility does not extend to clones).
-- Defaults are wizard-visible and mutable (`config fast/full`, Settings GUI, `Threski: Open Settings`).
+- Defaults are wizard-visible and mutable (`config fast/full`, Settings GUI, `Ibis: Open Settings`).
 
 ## 6. Consequences
 
@@ -75,7 +75,7 @@ If B proves costly: flip git-eligible kinds back to Surreal-owned (existing file
 
 ## 8. Standard ambition
 
-The operator's goal is for the git-tree claim store to become an **accepted cross-tool standard** (EditorConfig/MCP pattern). This ADR therefore requires the file language to stay minimal, tool-agnostic and versioned (`schema: 1` core — see addendum §2/§11); Threski is its reference implementation, not its owner.
+The operator's goal is for the git-tree claim store to become an **accepted cross-tool standard** (EditorConfig/MCP pattern). This ADR therefore requires the file language to stay minimal, tool-agnostic and versioned (`schema: 1` core — see addendum §2/§11); Ibis is its reference implementation, not its owner.
 
 ## 9. What this ADR does not decide
 

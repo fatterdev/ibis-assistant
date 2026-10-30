@@ -1,4 +1,4 @@
-# Threski Studio — Piano di implementazione (bloccato)
+# Ibis Assistant — Piano di implementazione (bloccato)
 
 > Stato: **approvato, pronto all'esecuzione**. Sorgente delle decisioni: sessione di
 > ricerca e brainstorming del 29/10/2026 su VS Code 1.144, Agent Plugins 1.0, MCP,
@@ -7,25 +7,32 @@
 > (che viene letto in sola lettura dallo script di migrazione); il prodotto nasce qui.
 > Aggiornamento 29/10/2026: **F0.1 completata** e runtime migrato promosso a root del
 > prodotto; i riferimenti a `runtime/` nelle fasi vanno letti come root del repo.
+> **Aggiornamento 30/10/2026 — revert del rebrand**: prodotto = **Ibis Assistant**
+> (binario `ibis`, MCP label "Ibis", data dir `%LOCALAPPDATA%\ibis`, repo
+> `fatterdev/ibis-assistant`). Tutti i riferimenti `threski`/`threski-studio` nel resto
+> di questo documento (fasi F0.2–F0.7 eseguite, F1–F3, Track D) vanno letti con la
+> mappa di revert in [naming-map.md](naming-map.md): `threski`→`ibis`,
+> `threski-studio`→`ibis-assistant`. Le F0.2–F0.7 sono complete anche dopo il revert
+> (rename meccanico, zero cambi funzionali).
 
 ## 1. Decisioni di prodotto
 
 | Decisione | Esito |
 |---|---|
-| Prodotto | **Threski Studio** — living project memory for real codebases |
-| Radice brand | `threski` (da *Threskiornis*, l'ibis sacro di Thoth) — rename **globale**, zero eccezioni |
-| Crate Rust interni | `ibis-*` → `threski-*` (rinominati anche loro, nessuna eccezione; solo `mcp-bridge` resta perché privo del prefisso) |
-| Env vars | `IBIS_*` → `THRESKI_*` |
-| Binario/CLI | `threski` (`threski run`, `threski memory add`) |
-| VSIX | `fatterdev.threski-studio`, display "Threski Studio", settings `threskiStudio.*` |
-| Agent plugin | `threski` (Agent Plugins 1.0; skill corte → slash `/threski usage`), marketplace repo `fatterdev/threski-marketplace` |
+| Prodotto | **Ibis Assistant** — living project memory for real codebases (revert 30/10/2026: il nome Threski è stato scartato dall'owner) |
+| Radice brand | `ibis` (l'ibis sacro di Thoth, *Threskiornis aethiopicus* nella lore) — revert globale dal rebrand F0.1, zero eccezioni |
+| Crate Rust interni | `threski-*` → `ibis-*` (revert; solo `mcp-bridge` resta perché privo del prefisso) |
+| Env vars | `THRESKI_*` → `IBIS_*` |
+| Binario/CLI | `ibis` (`ibis run`, `ibis memory add`) — nome corto |
+| VSIX | `fatterdev.ibis-assistant`, display "Ibis Assistant", settings `ibis.*` |
+| Agent plugin | `ibis` (Agent Plugins 1.0; skill corte → slash `/ibis usage`), marketplace repo `fatterdev/ibis-marketplace` |
 | Reasoning | **MCP sampling** come via primaria; LM bridge custom deprecato ma mantenuto come fallback; Ollama fallback finale |
 | MCP Apps | **Incluso nel primo rilascio** ("Memory Curator", con degradazione testuale sempre garantita) |
 | API VS Code | engines `^1.144.0`, uso delle API stabili più recenti (`chatInstructions`, LM tools, MCP provider, MCP Apps) |
 | Publishing | Full distribution: VS Marketplace (publisher `fatterdev`, OIDC Trusted Publishing) + Open VSX + MCP registry + plugin marketplace + `vscode:mcp/install` |
 | Track D (Scope) | Sperimentale, config-as-code; **D-CLAIMS** = benchmark interno dei claims (gate pre-publishing); **D-INSIGHTS** = Scope Insights come fonte di memoria (import script-first, promozione a ingest lane solo dopo ≥3 iterazioni utili) |
-| Skill duplicati | Il contratto di sessione vive come skill `usage` nel plugin e come `chatInstructions` nella VSIX — mai entrambi come skill; skill e comandi non si duplicano (le skill corte sono l'unica superficie slash `/threski <nome>`) |
-| Skill sync Copilot Memory | Sì, sperimentale (`threski-sync-copilot-memory`) |
+| Skill duplicati | Il contratto di sessione vive come skill `usage` nel plugin e come `chatInstructions` nella VSIX — mai entrambi come skill; skill e comandi non si duplicano (le skill corte sono l'unica superficie slash `/ibis <nome>`) |
+| Skill sync Copilot Memory | Sì, sperimentale (`ibis-sync-copilot-memory`) |
 
 ## 2. Mappa di naming
 

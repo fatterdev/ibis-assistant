@@ -9,7 +9,7 @@
 
 ## North star
 
-Threski fights AI temporal blindness with **stacked layers** (see formal Layer 0–3 map in the [git-indexed world state spec](superpowers/specs/2026-10-24-git-indexed-world-state.md)):
+Ibis fights AI temporal blindness with **stacked layers** (see formal Layer 0–3 map in the [git-indexed world state spec](superpowers/specs/2026-10-24-git-indexed-world-state.md)):
 
 1. **Δ Commit meaning (May + #31)** — each git commit historicized as `commit_chunk` (message + patch embeddings). Answers *why / when / what changed* (changelog dual).
 2. **HEAD truth hygiene (Oct #28 + #31)** — typed memory with `status`, wall-clock `valid_until`, visibility, supersession, path-based stale vs HEAD file hash. Answers *what is true for the team **now** (at HEAD)*.

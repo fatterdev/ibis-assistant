@@ -1,6 +1,6 @@
 # Ticketing + PR Client Guide
 
-Operational guide for Threski Studio multi-provider ticketing and PR automation.
+Operational guide for Ibis Assistant multi-provider ticketing and PR automation.
 
 ## 1) Server configuration
 

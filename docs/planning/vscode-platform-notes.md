@@ -56,11 +56,11 @@ Riferimenti chiave emersi dalla ricerca del 29/10/2026, usati per le decisioni i
   Copilot e repo GitHub) + *user preferences* (account, cross-repo). Recall a session
   start, upvote/downvote, **TTL 28 giorni se inutilizzata**, on-by-default.
 - Local harness: memory file `/memories/`, `/memories/repo/`, `/memories/session/`.
-- Posizionamento Threski: memoria **tipizzata** (decision/fix/rule/constraint/gotcha/design/fact),
+- Posizionamento Ibis: memoria **tipizzata** (decision/fix/rule/constraint/gotcha/design/fact),
   **supersession + history**, **provenance sul grafo git**, retrieval ibrida
   (vector+time+keyword+graph), legami con `why_changed`/blast radius, log e ticket,
   **self-hosted** con actor identity di team. Copilot Memory = preferenze/fatti cloud;
-  Threski = knowledge graph di progetto.
+  Ibis = knowledge graph di progetto.
 
 ## Contribution points correnti (rilevanti)
 `chatAgents` (.agent.md), `chatInstructions` (istruzioni auto-attaccate quando rilevanti),

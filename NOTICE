@@ -1,4 +1,4 @@
-Threski Studio
+Ibis Assistant
 Copyright 2026 fatterdev
 
 This product is a living project memory system for real codebases: an MCP
@@ -6,7 +6,7 @@ knowledge graph built from git causality, polyglot ast-grep structure, AI
 rule synthesis, log analysis, ticketing, and typed team memory, persisted in
 a single SurrealDB knowledge graph.
 
-Project home: https://github.com/fatterdev/threski-studio
+Project home: https://github.com/fatterdev/ibis-assistant
 Licensed under the Apache License, Version 2.0 (see LICENSE).
 
 This product includes and relies on third-party software and services:
@@ -29,6 +29,6 @@ redistribution of this product, with or without modification, must retain
 the copyright, patent, trademark, and attribution notices contained in this
 NOTICE file. Derivative works must carry this attribution forward.
 
-The Threski Studio name, logo, and visual identity (docs/assets/) are
+The Ibis Assistant name, logo, and visual identity (docs/assets/) are
 excluded from the patent and trademark license grant in section 6 of the
 Apache License, Version 2.0.

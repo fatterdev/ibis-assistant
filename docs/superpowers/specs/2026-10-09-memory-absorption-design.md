@@ -1,4 +1,4 @@
-# Memory absorption: durable, shareable, temporally-aware memory for Threski Studio
+# Memory absorption: durable, shareable, temporally-aware memory for Ibis Assistant
 
 **Date:** 2026-10-09
 **Status:** Implemented (PR #28) — operator guide: [memory_layer.md](../../memory_layer.md); plan: [plan](../plans/2026-10-09-memory-absorption.md)
@@ -8,9 +8,9 @@
 
 ## Summary
 
-Threski Studio has a `memory` table (free-text "collaborative memory") and a `reasoning` table (question/outcome pairs), both vector-searched from `ask_project`. That is **semantic recall with no structure**: no kind, no current-vs-superseded state, no owner, no team/personal boundary, no link back to the code/commit/issue that produced the memory, and no single low-cost capture path an agent can call on every turn without spamming tools.
+Ibis Assistant has a `memory` table (free-text "collaborative memory") and a `reasoning` table (question/outcome pairs), both vector-searched from `ask_project`. That is **semantic recall with no structure**: no kind, no current-vs-superseded state, no owner, no team/personal boundary, no link back to the code/commit/issue that produced the memory, and no single low-cost capture path an agent can call on every turn without spamming tools.
 
-This spec absorbs the useful ideas from the "Why Similarity Isn't Enough for Memory" article and `spec_cognitive_architecture.md`'s Memify layer — **typed memory, temporal supersession, usage-based reinforcement, graph provenance** — directly into the existing `memory` table and MCP tool surface. It does **not** adopt a third-party memory framework (Cognee or otherwise) and does **not** turn Threski Studio into a general agent-memory product. It extends what already exists: one SurrealDB `memory` table, one `search.Service`, one MCP server.
+This spec absorbs the useful ideas from the "Why Similarity Isn't Enough for Memory" article and `spec_cognitive_architecture.md`'s Memify layer — **typed memory, temporal supersession, usage-based reinforcement, graph provenance** — directly into the existing `memory` table and MCP tool surface. It does **not** adopt a third-party memory framework (Cognee or otherwise) and does **not** turn Ibis Assistant into a general agent-memory product. It extends what already exists: one SurrealDB `memory` table, one `search.Service`, one MCP server.
 
 18 new MCP tools are added. `provide_collaborative_memory` and `save_reasoning_outcome` keep their exact existing signatures and behavior (back-compat) and additionally feed the new memory model so old and new clients see the same data.
 
@@ -22,19 +22,19 @@ This spec absorbs the useful ideas from the "Why Similarity Isn't Enough for Mem
 - Grouping: `workstream` node + `part_of_workstream` edge for "everything about migrating X".
 - One cheap capture path (`capture_observation`) agents can call often without classification overhead; one aggregator (`load_session_context`) hooks call once instead of four tools.
 - A background consolidation loop (local Ollama, extends the existing RAFT optimizer) that classifies/merges raw observations and supersedes stale memories.
-- Identity via `X-Threski-Actor` header (HTTP) with an `actor` tool argument fallback (stdio/plugin), reusing the `InjectAuth` pattern already used for ticketing headers.
+- Identity via `X-Ibis-Actor` header (HTTP) with an `actor` tool argument fallback (stdio/plugin), reusing the `InjectAuth` pattern already used for ticketing headers.
 - Full back-compat for `provide_collaborative_memory` and `save_reasoning_outcome`.
-- Optional, source-of-truth-preserving `.threski/memory/*.md` projection for humans/agents without MCP access.
+- Optional, source-of-truth-preserving `.ibis/memory/*.md` projection for humans/agents without MCP access.
 
 ## Non-goals (product DNA guardrails)
 
-Threski Studio is a **local-first + team-server MCP knowledge graph for code**, not a general-purpose agent platform. This spec explicitly does **not**:
+Ibis Assistant is a **local-first + team-server MCP knowledge graph for code**, not a general-purpose agent platform. This spec explicitly does **not**:
 
 - Add multi-tenant SaaS accounts, billing, org/workspace hierarchies, or per-seat licensing to the memory system. `visibility=team` relies on "you can reach this SurrealDB instance" as the trust boundary, exactly like the rest of the product (git credentials, ticketing tokens).
 - Add blockchain/ledger-based attestation, hashing-for-trust, or any append-only cryptographic audit chain for memories. `provenance.source_hash` is a plain content hash for dedup, not a trust proof.
 - Absorb a generic agent-orchestration/runtime (LangChain/AutoGPT-style planner, tool router, multi-agent scheduler). `memory_consolidate` reuses the existing `optimization.Optimizer` RAFT loop; it is not a new execution engine.
 - Replace SurrealDB with a separate vector DB, relational store, or graph store. One `memory` table, one `workstream` table, three new edges — everything else (vector search, graph traversal) reuses `internal/search`.
-- Make the `.threski/memory/*.md` projection a sync mechanism. SurrealDB is always the source of truth; the projection is regenerable output, off by default.
+- Make the `.ibis/memory/*.md` projection a sync mechanism. SurrealDB is always the source of truth; the projection is regenerable output, off by default.
 
 ## Architecture
 
@@ -68,7 +68,7 @@ flowchart TB
     Edges[[supersedes / derived_from / part_of_workstream]]
   end
   subgraph identity [Identity]
-    Header[X-Threski-Actor header]
+    Header[X-Ibis-Actor header]
     ArgFallback[actor tool arg]
   end
   CapObs --> Add
@@ -105,10 +105,10 @@ flowchart TB
 | `reasoning` table | Exists; unchanged, cross-linked via `derived_from` |
 | `provide_collaborative_memory`, `save_reasoning_outcome` | Exist; kept verbatim, now also populate the new model |
 | `optimization.Optimizer` / RAFT loop | Exists; extended with `MemoryConsolidate` |
-| `httpserver.InjectAuth` ticketing-header pattern | Exists; reused for `X-Threski-Actor` |
+| `httpserver.InjectAuth` ticketing-header pattern | Exists; reused for `X-Ibis-Actor` |
 | `kind`/`status`/`visibility`/`owner`/`tags`/`provenance`/`workstream`/`supersedes`/`derived_from` | **New** |
 | 18 new MCP memory tools | **New** |
-| `.threski/memory/*.md` projection | **New**, optional, default off |
+| `.ibis/memory/*.md` projection | **New**, optional, default off |
 
 ## Data model
 
@@ -192,26 +192,26 @@ Partial/filtered unique indexes (`DEFINE INDEX ... UNIQUE WHERE kind = 'working_
 
 `internal/db/migration.go` gets migration `{ID: 3, SQL: ...}` that backfills existing `memory` rows created by the old `AddCollaborativeMemory` path (which only ever set `content` and `embedding`) with `kind='fact'`, `status='current'`, `visibility='team'`, `confidence=0.7`, `created_at=time::now()`, `updated_at=time::now()` wherever those fields are `NONE`. Existing `reasoning` rows are untouched (`reasoning` stays a separate table; new reasoning outcomes additionally get a linked `memory` row of `kind='reasoning'`, see "Back-compat routing").
 
-## Identity: `X-Threski-Actor` header + `actor` argument fallback
+## Identity: `X-Ibis-Actor` header + `actor` argument fallback
 
 Mirrors the existing ticketing-header pattern in `internal/httpserver/auth.go` (`X-Redmine-API-Key`, `X-Jira-Email`, ...).
 
 ```go
 // internal/auth/keys.go — new context key
 // ActorContextKey stores the human/agent identity attributed to memory writes.
-ActorContextKey contextKey = "threski_actor"
+ActorContextKey contextKey = "ibis_actor"
 ```
 
 ```go
 // internal/httpserver/auth.go — InjectAuth gains one more header
-if actor := strings.TrimSpace(r.Header.Get("X-Threski-Actor")); actor != "" {
+if actor := strings.TrimSpace(r.Header.Get("X-Ibis-Actor")); actor != "" {
 	ctx = context.WithValue(ctx, auth.ActorContextKey, actor)
 }
 ```
 
 ```go
 // internal/httpserver/auth.go — new helper, used by every memory_* MCP handler
-// ResolveActor returns the X-Threski-Actor header value if present, else the
+// ResolveActor returns the X-Ibis-Actor header value if present, else the
 // "actor" tool argument, else "unknown". Header wins because stdio plugin
 // clients cannot set custom headers but CAN pass a tool argument, while HTTP
 // MCP clients (shared personal/server runtimes with multiple IDE sessions)
@@ -235,15 +235,15 @@ Reuses the existing runtime placement from `runtime_modes.md`; this spec does no
 
 | Runtime | SurrealDB instance | What lands here |
 | ------- | ------------------- | ---------------- |
-| `personal` | Exe-relative / `config.json`-configured, on the developer's PC | All memory for repos in `projects[]`/`git_repos` on that PC. Single-user by default, but `visibility=team` still means "any client that connects to this instance", because a personal daemon can be shared (`THRESKI_MCP_URL`) later without migration. |
-| `plugin` (Cursor/VS Code child, isolated) | `%LOCALAPPDATA%\threski\plugin` (or `THRESKI_DATA_DIR`) | Memory captured by that IDE child only. Physically isolated per machine; promote to a shared store via `memory_export` → `memory_import`, or point the plugin at a shared runtime (next row) so writes land there directly. |
-| `plugin` attached to shared personal daemon (`THRESKI_MCP_URL=http://127.0.0.1:3030/mcp`) | The personal daemon's SurrealDB | Both Cursor and VS Code (and the CLI) share one `memory` table on that PC — no export/import needed, this is the recommended "I use two IDEs" setup per `ide_host_and_lm_bridge.md`. |
+| `personal` | Exe-relative / `config.json`-configured, on the developer's PC | All memory for repos in `projects[]`/`git_repos` on that PC. Single-user by default, but `visibility=team` still means "any client that connects to this instance", because a personal daemon can be shared (`IBIS_MCP_URL`) later without migration. |
+| `plugin` (Cursor/VS Code child, isolated) | `%LOCALAPPDATA%\ibis\plugin` (or `IBIS_DATA_DIR`) | Memory captured by that IDE child only. Physically isolated per machine; promote to a shared store via `memory_export` → `memory_import`, or point the plugin at a shared runtime (next row) so writes land there directly. |
+| `plugin` attached to shared personal daemon (`IBIS_MCP_URL=http://127.0.0.1:3030/mcp`) | The personal daemon's SurrealDB | Both Cursor and VS Code (and the CLI) share one `memory` table on that PC — no export/import needed, this is the recommended "I use two IDEs" setup per `ide_host_and_lm_bridge.md`. |
 | `server` | Dedicated host SurrealDB, owned clones under `discovery_root/dynamic` | The authoritative team store. `visibility=team` memories here are visible to every developer/CI job that can reach the server; `visibility=personal` memories are still stored here but filtered by owner (see below), so a team member's personal notes don't leak to teammates even on the shared server. |
 
 ## Sharing-first: `visibility=team` is the default, `owner` is attribution
 
 - `memory_add` defaults `visibility` to `team` unless the caller explicitly passes `visibility="personal"`. The product bias is "write it so your teammates and future-you benefit", not "default to private and hope people remember to share".
-- `owner` (resolved via `ResolveActor`) is stamped on every memory for attribution ("who said this is true"), never used as an access filter for `visibility=team` memories. Any caller that can reach the SurrealDB instance can read any `team` memory, exactly like any other table in this schema (there is no row-level ACL system anywhere else in Threski Studio, and this spec does not add one — see DNA guardrails).
+- `owner` (resolved via `ResolveActor`) is stamped on every memory for attribution ("who said this is true"), never used as an access filter for `visibility=team` memories. Any caller that can reach the SurrealDB instance can read any `team` memory, exactly like any other table in this schema (there is no row-level ACL system anywhere else in Ibis Assistant, and this spec does not add one — see DNA guardrails).
 - `visibility=personal` memories are filtered server-side in `MemorySearch`/`GetWorkingState`/`LoadSessionContext`: only returned when the resolved actor equals the memory's `owner`. This is the one place `owner` acts as a filter, and it is intentionally the exception, not the rule.
 - `memory_share(id, visibility)` is the explicit promote/demote action — flipping `visibility` is a deliberate call, not an automatic side effect of any other tool.
 
@@ -462,7 +462,7 @@ Returns `{"id":"...","visibility":"...","status":"updated"}`.
 | `status` | string | no | Default `current` |
 | `format` | string | no | `json` (default) \| `markdown` |
 
-Returns `{"count": N, "items": [...]}` for `json`, or a markdown document (one section per memory) for `format=markdown` — this is also what powers the `.threski/memory/*.md` projection.
+Returns `{"count": N, "items": [...]}` for `json`, or a markdown document (one section per memory) for `format=markdown` — this is also what powers the `.ibis/memory/*.md` projection.
 
 ### 18. `memory_import`
 
@@ -493,14 +493,14 @@ Both tools keep their **exact existing MCP signature and return text** — no br
     "sessionStart": [
       {
         "type": "prompt",
-        "prompt": "Threski Studio plugin is available. Do not call memory_* tools on every turn. If you need prior context for this project (working state, rules, recent fixes, open decisions), call load_session_context ONCE. Use capture_observation sparingly, only for genuinely new, reusable findings — not for routine tool output. If the user needs setup status, prefer the Threski: Status command or STATUS.md — do not call settings_get / ticket_get_capabilities unless diagnosing missing AI keys or ticketing."
+        "prompt": "Ibis Assistant plugin is available. Do not call memory_* tools on every turn. If you need prior context for this project (working state, rules, recent fixes, open decisions), call load_session_context ONCE. Use capture_observation sparingly, only for genuinely new, reusable findings — not for routine tool output. If the user needs setup status, prefer the Ibis: Status command or STATUS.md — do not call settings_get / ticket_get_capabilities unless diagnosing missing AI keys or ticketing."
       }
     ]
   }
 }
 ```
 
-No new hook event (no per-tool-call or stop hook) is added — a `prompt` hook that fires once per session is the entire anti-spam mechanism. `vscode-extension/extension.js`'s `threskiStudio.status` command gains one more status line (`Memory: call load_session_context for working state + rules + recent fixes`) for parity, since VS Code has no equivalent hooks system.
+No new hook event (no per-tool-call or stop hook) is added — a `prompt` hook that fires once per session is the entire anti-spam mechanism. `vscode-extension/extension.js`'s `ibis.status` command gains one more status line (`Memory: call load_session_context for working state + rules + recent fixes`) for parity, since VS Code has no equivalent hooks system.
 
 ## Consolidation loop (local Ollama, extends RAFT)
 
@@ -514,15 +514,15 @@ No new hook event (no per-tool-call or stop hook) is added — a `prompt` hook t
 
 This is additive to `OptimizeLoop`, not a replacement — `optimize_knowledge` keeps reinforcing `file_chunk` access the way it does today.
 
-## Optional `.threski/memory/*.md` projection
+## Optional `.ibis/memory/*.md` projection
 
 SurrealDB is always the source of truth. When `config.json`'s `memory.projection_enabled` is `true` (default `false`), every successful `memory_add`/`memory_update`/`memory_consolidate` write additionally regenerates a markdown file at:
 
 ```
-<repo>/.threski/memory/<kind>/<slug>-<id-suffix>.md
+<repo>/.ibis/memory/<kind>/<slug>-<id-suffix>.md
 ```
 
-using the same renderer as `memory_export(format="markdown")`. Each file is fully regenerable from SurrealDB (deleting `.threski/memory/` and re-running `memory_export` restores it), so it is never read back into SurrealDB automatically — `memory_import` is the only path that reads markdown/JSON back in, and only when a human explicitly runs it. A generated `.threski/memory/.gitignore` template ignores `observation/` and `working_state/` (ephemeral/noisy) while leaving `rule/`, `decision/`, `fix/`, `constraint/`, `design/`, `gotcha/` committable, so teams can choose to review durable memory in pull requests like any other file.
+using the same renderer as `memory_export(format="markdown")`. Each file is fully regenerable from SurrealDB (deleting `.ibis/memory/` and re-running `memory_export` restores it), so it is never read back into SurrealDB automatically — `memory_import` is the only path that reads markdown/JSON back in, and only when a human explicitly runs it. A generated `.ibis/memory/.gitignore` template ignores `observation/` and `working_state/` (ephemeral/noisy) while leaving `rule/`, `decision/`, `fix/`, `constraint/`, `design/`, `gotcha/` committable, so teams can choose to review durable memory in pull requests like any other file.
 
 ## Testing
 
@@ -535,7 +535,7 @@ using the same renderer as `memory_export(format="markdown")`. Each file is full
 
 ## Security
 
-- `X-Threski-Actor` is an identity hint, not an authentication credential — same trust model as the existing ticketing headers (`InjectAuth` already documents this implicitly: anything reaching the HTTP listener is already inside the trust boundary set by network binding, same as `visibility=team`).
+- `X-Ibis-Actor` is an identity hint, not an authentication credential — same trust model as the existing ticketing headers (`InjectAuth` already documents this implicitly: anything reaching the HTTP listener is already inside the trust boundary set by network binding, same as `visibility=team`).
 - `memory_delete(hard=true)` and `memory_share` enforce `owner == actor` in application code (no DB-level row security is introduced — consistent with the rest of the schema).
 - No secrets are ever stored in `memory.content`; this is unenforced by the schema (same as today) but called out in tool descriptions.
 

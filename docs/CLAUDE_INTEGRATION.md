@@ -1,19 +1,19 @@
 # Claude Desktop Integration Guide
 
-This guide describes how to connect **Claude Desktop** to the **Threski Studio** using a local bridge.
+This guide describes how to connect **Claude Desktop** to the **Ibis Assistant** using a local bridge.
 
 ## 🌉 Why a Bridge?
 
-Claude Desktop currently supports "Stdio" (standard input/output) connections for local MCP servers. Threski Studio's **product default** for HTTP clients is Streamable HTTP at `/mcp`. Legacy HTTP+SSE (`/sse`) remains so `mcp-bridge` and older clients can share the same knowledge graph.
+Claude Desktop currently supports "Stdio" (standard input/output) connections for local MCP servers. Ibis Assistant's **product default** for HTTP clients is Streamable HTTP at `/mcp`. Legacy HTTP+SSE (`/sse`) remains so `mcp-bridge` and older clients can share the same knowledge graph.
 
-To connect Claude Desktop, we use a lightweight **MCP Bridge** that runs locally, talks "Stdio" to Claude, and forwards messages to the Threski Studio **SSE** endpoint (`http://localhost:3030/sse`) until the bridge is moved onto `/mcp`.
+To connect Claude Desktop, we use a lightweight **MCP Bridge** that runs locally, talks "Stdio" to Claude, and forwards messages to the Ibis Assistant **SSE** endpoint (`http://localhost:3030/sse`) until the bridge is moved onto `/mcp`.
 
 ---
 
 ## 🛠️ Installation & Setup
 
-### 1. Prerequisite: The Threski Studio
-Ensure the Threski Studio is running (e.g. `http://localhost:3030/mcp` for new HTTP clients; the bridge below still uses `/sse`).
+### 1. Prerequisite: The Ibis Assistant
+Ensure the Ibis Assistant is running (e.g. `http://localhost:3030/mcp` for new HTTP clients; the bridge below still uses `/sse`).
 
 ### 2. Build the Bridge Tool
 If you haven't already, compile the bridge tool included in this repository.
@@ -73,7 +73,7 @@ Sharing-first model (default `visibility=team`). Prefer these over ad-hoc notes.
 * **Forensics:** `recent_failures`, `why_changed` (includes `commit_chunk` meaning excerpts)
 * **Lifecycle:** `memory_consolidate` (local-first distill), `memory_share`, `memory_export` / `memory_import`
 * **Design / insights:** `ingest_design_note` (`kind=design` + `derived_from`), `memory_insights` (kind/tag clustering, optional embeddings + local AI labels)
-* **Optional projection:** `memory.projection_enabled` writes regenerable `.threski/memory/*.md` (SurrealDB remains source of truth)
+* **Optional projection:** `memory.projection_enabled` writes regenerable `.ibis/memory/*.md` (SurrealDB remains source of truth)
 
 Do **not** call `memory_*` on every turn — use `load_session_context` once when you need prior context; `capture_observation` only for reusable findings.
 

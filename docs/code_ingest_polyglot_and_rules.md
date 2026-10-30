@@ -48,7 +48,7 @@ Keep hand-written rules in `rules/` for core languages; treat AI files as additi
 ## MCP / CLI
 
 - MCP: `ingest_code` (path / project context as registered in `cmd/server/main.go`)
-- CLI: `threski ingest code --path ./path/to/project`
+- CLI: `ibis ingest code --path ./path/to/project`
 
 ## Verification
 

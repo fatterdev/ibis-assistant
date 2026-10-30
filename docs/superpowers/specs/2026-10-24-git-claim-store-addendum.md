@@ -11,7 +11,7 @@
 
 | Claim class | Store | Notes |
 |-------------|-------|-------|
-| `decision`, `rule`, `fix` with `visibility=team` | **git** (`.threski/claims/`) + derived Surreal index | durable, PR-reviewable |
+| `decision`, `rule`, `fix` with `visibility=team` | **git** (`.ibis/claims/`) + derived Surreal index | durable, PR-reviewable |
 | `observation`, `working_state` (any visibility) | **Surreal only** | operational/ephemeral by nature |
 | `visibility=personal` (any kind) | per policy (§4) | owner actor only |
 | Per-claim `store=deny` | Surreal only | beats policy and kind map |
@@ -20,9 +20,9 @@ Every Surreal claim row carries `store: git | surreal`. Git-owned rows are **der
 
 ## 2. File language — designed as an open standard
 
-The file language is deliberately **tool-agnostic** so the store can become an accepted cross-tool convention (EditorConfig/MCP pattern): plain markdown + YAML frontmatter, truth predicate = plain git (file presence in tree), **no proprietary required fields**. Threski is the reference implementation; conformance is defined by §10 tests. The well-known directory is `.threski/claims/`; format evolution is governed by the `schema` field (integer, current `1`).
+The file language is deliberately **tool-agnostic** so the store can become an accepted cross-tool convention (EditorConfig/MCP pattern): plain markdown + YAML frontmatter, truth predicate = plain git (file presence in tree), **no proprietary required fields**. Ibis is the reference implementation; conformance is defined by §10 tests. The well-known directory is `.ibis/claims/`; format evolution is governed by the `schema` field (integer, current `1`).
 
-One file ↔ one claim: `.threski/claims/<id>.md`
+One file ↔ one claim: `.ibis/claims/<id>.md`
 
 ```markdown
 ---
@@ -41,7 +41,7 @@ Body markdown. The claim.
 
 **Minimal core any conforming tool must honor:** `schema`, `id`, `kind`, `title`, `created` + body; truth predicate = file presence in `tree(R)`; supersession via `supersedes` + old-file deletion. Everything else is optional extension space.
 
-**Truth predicate (git-native):** a git-owned claim holds at ref R ⟺ `.threski/claims/<id>.md` exists in `tree(R)`.
+**Truth predicate (git-native):** a git-owned claim holds at ref R ⟺ `.ibis/claims/<id>.md` exists in `tree(R)`.
 
 - **I(m)** = first commit containing the file; **X(m)** = commit that removes it (⊥ if present at HEAD). Derived from file history at ingest and denormalized into the Surreal index — never hand-written OIDs.
 - **Supersession** = new claim file added **and** old file deleted in the same commit; the new file carries `supersedes: <old-id>`. History preserves the old version for `as_of`.
@@ -54,7 +54,7 @@ Body markdown. The claim.
 ```text
 memory_add / consolidate
    → Surreal row (store decided by kind map + policy §4)
-   → [git-owned] codec renders .threski/claims/<id>.md
+   → [git-owned] codec renders .ibis/claims/<id>.md
    → staged into pending commit set → commit (chore(claims): add <id>)
    → ingest reads tree → upserts Surreal index row (store: git, I/X from file history)
 ```
@@ -80,17 +80,17 @@ Rules: scope is the **owner actor** (other actors' personal rows always `db_only
 CLI (under the `memory` command group): `memory bootstrap-git-store [--dry-run]`.
 
 - Scans current durable Surreal claims (git-eligible kinds, visibility per policy §4).
-- Renders files into `.threski/claims/` and creates **one** commit: `chore(claims): bootstrap git claim store (N claims)`.
+- Renders files into `.ibis/claims/` and creates **one** commit: `chore(claims): bootstrap git claim store (N claims)`.
 - **Pre-bootstrap honesty:** git-owned claims have I(m) = bootstrap commit; earlier wall-clock history remains Surreal-only (`derived_from`, `memory_history`). `as_of` at refs before the bootstrap returns no git-owned claims — documented behavior, not a bug.
 - Idempotent: claims already present in the tree are skipped; second run produces zero new commits.
 
 ## 6. git notes (optional, phase 5, gated)
 
-`refs/notes/threski-claims` anchors **historical** commits to claim ids (cross-links enriching commit meaning). Notes are pointers (`claim=<id>`), never claim storage, never required for correctness, rebuildable from the DB. They do not appear in PR diffs by default and must not be treated as reviewable knowledge.
+`refs/notes/ibis-claims` anchors **historical** commits to claim ids (cross-links enriching commit meaning). Notes are pointers (`claim=<id>`), never claim storage, never required for correctness, rebuildable from the DB. They do not appear in PR diffs by default and must not be treated as reviewable knowledge.
 
 ## 7. Clone-only degraded mode (phase 5)
 
-With no Surreal reachable: parse `.threski/claims/` from `tree(HEAD)` (or any `as_of` ref). Git-owned claims are fully readable; `stub` files show title only. MCP read tools work in this mode; hits are labeled `source_kind=claim_file`.
+With no Surreal reachable: parse `.ibis/claims/` from `tree(HEAD)` (or any `as_of` ref). Git-owned claims are fully readable; `stub` files show title only. MCP read tools work in this mode; hits are labeled `source_kind=claim_file`.
 
 ## 8. Conflicts
 
@@ -131,10 +131,10 @@ The operator's stated goal is for this storage method to become an **accepted st
 
 - **Minimal core schema** (`schema: 1`): five required fields, YAML frontmatter + markdown body, no tool lock-in.
 - **Git-native truth predicate** (file presence) — readable by any git client, no database required.
-- **Well-known path** (`.threski/claims/`) + versioned format for evolution.
-- **Threski as reference implementation**: codec, ingest, `as_of`, degraded clone-only mode; conformance defined by §10 tests.
+- **Well-known path** (`.ibis/claims/`) + versioned format for evolution.
+- **Ibis as reference implementation**: codec, ingest, `as_of`, degraded clone-only mode; conformance defined by §10 tests.
 
-Third-party implementations only need: parse frontmatter, list tree paths, respect `supersedes` + deletion. Everything Threski-specific (embeddings, actor visibility, policy enforcement) is index-side, invisible to the standard.
+Third-party implementations only need: parse frontmatter, list tree paths, respect `supersedes` + deletion. Everything Ibis-specific (embeddings, actor visibility, policy enforcement) is index-side, invisible to the standard.
 
 ## 12. Non-goals
 

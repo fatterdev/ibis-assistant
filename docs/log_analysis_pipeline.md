@@ -57,7 +57,7 @@ Returns structured anomalies (JSON). When invoked from a watched path, the watch
 ### CLI (against a running server)
 
 ```bash
-threski logs analyze --project MyApp --text "ERROR something failed"
+ibis logs analyze --project MyApp --text "ERROR something failed"
 # optional: --file logical_name.log
 ```
 

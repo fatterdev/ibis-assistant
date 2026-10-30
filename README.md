@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/assets/social-preview.png" alt="Threski Studio - Living project memory for real codebases" width="100%">
+  <img src="docs/assets/social-preview.png" alt="Ibis Assistant - Living project memory for real codebases" width="100%">
 </p>
 
-<h1 align="center">Threski Studio</h1>
+<h1 align="center">Ibis Assistant</h1>
 
 <p align="center">
   <a href="#license"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
@@ -14,7 +14,7 @@
 
 **One executable that turns a messy, polyglot working tree and production logs into a queryable knowledge graph - then lives on it as project memory.**
 
-Threski Studio is an MCP server for real codebases: it ingests git causality, ast-grep structure, AI-synthesized AST rules, logs, and tickets into a single SurrealDB graph, and stores typed team memory *on that same graph* - retrieved with hybrid search (vector + time + keywords + graph). Client-agnostic MCP (Cursor, VS Code, Claude Desktop, CLI). Personal daemon or team server. Local-first hybrid AI (Ollama; cloud optional).
+Ibis Assistant is an MCP server for real codebases: it ingests git causality, ast-grep structure, AI-synthesized AST rules, logs, and tickets into a single SurrealDB graph, and stores typed team memory *on that same graph* - retrieved with hybrid search (vector + time + keywords + graph). Client-agnostic MCP (Cursor, VS Code, Claude Desktop, CLI). Personal daemon or team server. Local-first hybrid AI (Ollama; cloud optional).
 
 ## How it fits together
 
@@ -54,49 +54,49 @@ No Rust toolchain required for normal use:
 
 ```bash
 # 1. Grab the latest binary from Releases and put it on PATH
-#    https://github.com/fatterdev/threski-studio/releases
+#    https://github.com/fatterdev/ibis-assistant/releases
 
 # 2. First launch: interactive wizard (probes GPU/CPU, writes keys and paths)
-threski          # config fast if needed
-threski run      # MCP POST /mcp + /settings/ UI
+ibis          # config fast if needed
+ibis run      # MCP POST /mcp + /settings/ UI
 
 # 3. Point your MCP client at it
-#    Cursor/VS Code: "Threski Studio: Open Settings" | others: http://127.0.0.1:3030/mcp
+#    Cursor/VS Code: "Ibis Assistant: Open Settings" | others: http://127.0.0.1:3030/mcp
 ```
 
 Exercise the graph:
 
 ```bash
-threski ingest code --path ./path/to/project
-threski ask "What breaks if Prices changes?" --branch main
-threski logs analyze --project MyApp --text "ERROR timeout talking to db"
-threski memory add --project MyApp --kind decision --title "MCP transport" --text "Prefer Streamable HTTP at /mcp"
+ibis ingest code --path ./path/to/project
+ibis ask "What breaks if Prices changes?" --branch main
+ibis logs analyze --project MyApp --text "ERROR timeout talking to db"
+ibis memory add --project MyApp --kind decision --title "MCP transport" --text "Prefer Streamable HTTP at /mcp"
 ```
 
 Build from source:
 
 ```bash
-git clone https://github.com/fatterdev/threski-studio.git
-cd threski
-cargo xtask dist          # dist/threski.exe + mcp-bridge + rules + sgconfig
+git clone https://github.com/fatterdev/ibis-assistant.git
+cd ibis
+cargo xtask dist          # dist/ibis.exe + mcp-bridge + rules + sgconfig
 cargo test                # 786+ tests; SurrealDB/Ollama/sg sidecars auto-provision
 ```
 
-Two IDEs on one machine? Run the personal daemon once and point the second at it with `THRESKI_MCP_URL`. Tracked defaults live in `config_master.json`; never commit a local `config.json`.
+Two IDEs on one machine? Run the personal daemon once and point the second at it with `IBIS_MCP_URL`. Tracked defaults live in `config_master.json`; never commit a local `config.json`.
 
 ## Repo layout
 
 ```text
 crates/              Rust workspace (20+ crates)
-  threski-core            domain model
-  threski-ingest-*        git / code / logs / redmine / dynamic ingest lanes
-  threski-search          hybrid retrieval (vector + time + keywords + graph)
-  threski-server          56-tool MCP surface over Streamable HTTP
-  threski-db              SurrealDB persistence (schema-first, SCHEMAFULL)
-  threski-cli / threski-wizard  CLI + onboarding wizard
+  ibis-core            domain model
+  ibis-ingest-*        git / code / logs / redmine / dynamic ingest lanes
+  ibis-search          hybrid retrieval (vector + time + keywords + graph)
+  ibis-server          56-tool MCP surface over Streamable HTTP
+  ibis-db              SurrealDB persistence (schema-first, SCHEMAFULL)
+  ibis-cli / ibis-wizard  CLI + onboarding wizard
   mcp-bridge           stdio MCP bridge for IDE hosts
 ide-host/            Thin Node IDE host (plugin stdio or shared HTTP MCP)
-vscode-extension/    VS Code extension (Threski: Open Settings, Remember, status)
+vscode-extension/    VS Code extension (Ibis: Open Settings, Remember, status)
 cursor-plugin/       Cursor plugin (binary on PATH, no ${workspaceFolder} wiring)
 docs/                Guides: ingest, logs, memory, runtimes, settings, ticketing
 rules/               ast-grep rule packs (static + AI-synthesized)
@@ -106,7 +106,7 @@ config/              Reference configurations
 ## What it is not
 
 - **Not a SaaS.** No tenancy, no hosted memory service, no signup - keys live in your local `config.json` (ENV is override only).
-- **Not an agent OS.** Threski does not absorb or rewrite your agents; it feeds them context.
+- **Not an agent OS.** Ibis does not absorb or rewrite your agents; it feeds them context.
 - **Not a generic memory API.** Memory here is typed, project-scoped, and lives on the code graph - not chat-transcript storage.
 - **Not a SurrealDB replacement or a markdown sync bus.** Surreal *is* the store; markdown projection is optional.
 - **No blockchain attestation.** Provenance is git, not ledgers.
@@ -117,14 +117,14 @@ config/              Reference configurations
 - Windows-first test estate (786+ tests) with CI on `windows-latest` and `ubuntu-24.04`.
 - Release binaries ship with build provenance attestations.
 
-Contributions are welcome - PRs and issues at [github.com/fatterdev/threski-studio](https://github.com/fatterdev/threski-studio). Prefer ast-grep rules (incl. synthesis) over regex-only ingest, `memory_add`/`capture_observation` for durable notes, and `ticket_*` over legacy tool names.
+Contributions are welcome - PRs and issues at [github.com/fatterdev/ibis-assistant](https://github.com/fatterdev/ibis-assistant). Prefer ast-grep rules (incl. synthesis) over regex-only ingest, `memory_add`/`capture_observation` for durable notes, and `ticket_*` over legacy tool names.
 
 ## Why the name
 
-*Threski* comes from *Threskiornis aethiopicus*, the sacred ibis of Thoth -
+*Ibis* comes from *Threskiornis aethiopicus*, the sacred ibis of Thoth -
 scribe of the Egyptian pantheon and patron of knowledge. The scribes of the
 House of Life worked under the ibis' sign: the place where a civilization
-collected, copied and preserved everything it knew. Threski Studio wants to be
+collected, copied and preserved everything it knew. Ibis Assistant wants to be
 exactly that for your codebase - a living memory that records what happened and
 why, and makes it searchable.
 
@@ -134,4 +134,4 @@ Licensed under the **Apache License, Version 2.0** - see [LICENSE](LICENSE) and 
 
 Copyright 2026 fatterdev
 
-Redistributions of this software, with or without modification, must retain the copyright, patent, trademark, and attribution notices contained in [NOTICE](NOTICE), as required by Apache-2.0 §4(d). The Threski Studio name, logo, and visual identity are excluded from that grant per Apache-2.0 §6 - do not use them to market derived products without permission.
+Redistributions of this software, with or without modification, must retain the copyright, patent, trademark, and attribution notices contained in [NOTICE](NOTICE), as required by Apache-2.0 §4(d). The Ibis Assistant name, logo, and visual identity are excluded from that grant per Apache-2.0 §6 - do not use them to market derived products without permission.

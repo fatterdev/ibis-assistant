@@ -6,9 +6,9 @@
 
 ## Summary
 
-Threski Studio gains **local Ollama reasoning** (chat, not only embeddings), a **hybrid local/cloud ReasoningRouter**, a **multi-cloud client pool** (Gemini, OpenAI-compatible, Claude), **hardware-aware model auto-selection** (AMD/NVIDIA/CPU), and a unified **SettingsEngine** driving:
+Ibis Assistant gains **local Ollama reasoning** (chat, not only embeddings), a **hybrid local/cloud ReasoningRouter**, a **multi-cloud client pool** (Gemini, OpenAI-compatible, Claude), **hardware-aware model auto-selection** (AMD/NVIDIA/CPU), and a unified **SettingsEngine** driving:
 
-- CLI: `threski config` / `config fast` (default) and `config full`
+- CLI: `ibis config` / `config fast` (default) and `config full`
 - **Same settings UI** in the browser on personal HTTP (`/settings`) and via Cursor (`settings_open_ui`)
 
 Users enter API keys in the wizard/GUI (plug-and-play). Env vars are optional overrides only—never the primary setup path.
@@ -241,12 +241,12 @@ Inventory: runtime, DB, embedding, reasoning (+ clouds), discovery/logs, SMTP, t
 
 | Command | Behavior |
 | ------- | -------- |
-| `threski config` | Same as **`config fast`** (default) |
-| `threski config fast` | Fast path |
-| `threski config full` | Full/detailed path (all sections) |
-| `threski config --ai` | AI subsection only (fast-shaped unless `full` also passed) |
-| `threski config --show` | Non-interactive summary (keys masked) |
-| `threski config --recommend` | JSON recommendations |
+| `ibis config` | Same as **`config fast`** (default) |
+| `ibis config fast` | Fast path |
+| `ibis config full` | Full/detailed path (all sections) |
+| `ibis config --ai` | AI subsection only (fast-shaped unless `full` also passed) |
+| `ibis config --show` | Non-interactive summary (keys masked) |
+| `ibis config --recommend` | JSON recommendations |
 
 First-run (missing `config.json`) launches **fast**.
 
