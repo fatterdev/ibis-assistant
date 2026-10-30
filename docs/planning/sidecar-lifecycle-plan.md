@@ -79,3 +79,35 @@
 
 **Decisione richiesta dall'owner**: approvare il piano (o ridurne lo scope —
 es. macOS best-effort ora, reconciliation dopo) prima di procedere con i punti 1–4.
+
+## Stato di esecuzione (aggiornato 30/10/2026)
+
+**Fatto e committato:**
+- `39ec177` — increment Windows: `ibis-core::process_tree` (job object lazy
+  KILL_ON_JOB_CLOSE, `ensure_children_job()` chiamato *prima* dello spawn nei
+  soli siti che avviano child; fallback per-child; `children_job_active()`),
+  wiring in `ibis-db::ProcessManager` + `ibis-ai::OllamaProcess`,
+  CTRL_BREAK graceful (spawn in process group proprio), probe e2e
+  (`examples/job_probe.rs`: child verificato morto dopo hard exit del parent).
+  Test: ibis-core 40/40, ibis-db lib 20/20. FFI windows-sys (la FFI manoscritta
+  falliva con error 87 — usare windows-sys, non riportarla).
+- `86565de` — questo piano.
+
+**Operazioni pendenti (macchina owner, Windows):**
+1. `cargo install --path crates/ibis-server --bin ibis --force` — il binario su
+   PATH `C:\devbin\cargo\bin\ibis.exe` è ancora **stale 0.1.0** (pre-fix
+   BatchManager: log loop `Expected string, got record` in
+   `%LOCALAPPDATA%\ibis\plugin\plugin.log`).
+2. `cargo xtask dist` — ricostruire `dist\ibis.exe` (quello attuale è delle
+   11:47, pre-job-object) e verificare `ibis --version` → `0.2.0`.
+3. e2e orfani con il binario nuovo: spawn `ibis -mode stdio` (IBIS_DATA_DIR
+   temporanea) → kill → nessun residuo `surreal.exe`/`ollama.exe`.
+4. Poi riprendere il gate: R3.3 della checklist (espansione tree) era bloccata
+   proprio dal binario stale.
+
+**Decisioni owner pendenti:** punti 1–4 del piano (approvazione), scope macOS
+best-effort, follow-up reconciliation (candidato Track D).
+
+**Percorsi macchina rilevanti:** engine locale `C:\devbin\paoai-strix-engine`
+(modelli in `models\`, servizi nssm `StrixServer` :8080, `StrixEmbed` :8081,
+`StrixUITars` :8082 per i test UI); runner UI test `scripts/ui-test/`.

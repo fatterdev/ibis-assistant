@@ -181,8 +181,30 @@ Pre-flight: cartella `plugin/` del repo.
 | Item | Parte A (automatizzata) | Parte B (VS Code 1.144, owner) |
 |---|---|---|
 | Plugin scaffold + hook contract | **26/26 PASS** (30/10/2026) | P4.1–P4.6: ☐ |
-| VSIX packaging + contributions | 4/4 PASS | R3.1–R3.8: ☐ |
+| VSIX packaging + contributions | 4/4 PASS | R3.1 ✅ R3.2 ✅ R3.3 ☐ (parziale) — R3.4–R3.8 ☐ |
 | Publish pipeline | manifest + badge verificati | ☐ (post ②③⑤) |
 
-**Stato: PARTIE A COMPLETA (26/26), PARTIE B in attesa di esecuzione owner**
-(azioni ② ③ ⑤). Registrare qui le evidenze (screenshot/log) come fatto per R2.
+**Avanzamento Parte B (30/10/2026, run `artifacts/ui-tests/202610301404-r3r4`):**
+- **R3.1 PASS** — attivazione letta dal canale Output: `activated (ide-host:
+  vendor, engine: 1.144.0)`; LM bridge :39201 listening; MCP provider
+  registered; la riga info vendored-fallback è attesa per design. Evidenze:
+  log owner + 2 screenshot.
+- **R3.2 PASS** — click sull'item di status bar → toast Ibis Assistant: Status
+  con `Backend: spawn ibis -mode stdio -runtime-mode plugin`, workspace
+  bindato, LM bridge listening, MCP provider registered, memory default
+  ask/team. Evidenze: toast owner + screenshot.
+- **R3.3 PARZIALE** — tree view con tutti gli 8 kind e icone corrette (evidenza
+  screenshot). Finding: alla prima espansione `error: timeout waiting for MCP
+  response id=1` (inizializzazione del plugin store > 15s) → **risolto** con
+  timeout configurabile 60s in ide-host (`9124c84`); seconda attesa su id=2
+  ricondotta al **binario stale** su PATH (`C:\devbin\cargo\bin\ibis.exe`
+  0.1.0 pre-fix BatchManager, log loop in plugin.log) → da ricostruire, vedi
+  `sidecar-lifecycle-plan.md` §Stato di esecuzione (punti 1–3). Dopo rebuild:
+  ripetere frasi B/C di R3.3 (l'albero è vuoto finché R3.4 non crea memorie).
+- Contesto macchina: engine locale Strix (`C:\devbin\paoai-strix-engine`,
+  servizio `StrixUITars` :8082 con UI-TARS-7B-DPO per il computer-use) e runner
+  `scripts/ui-test/run-ui-tests.mjs` (`screenshot`, `mark`, `collect`).
+
+**Stato: PARTIE A COMPLETA (26/26), PARTIE B in esecuzione (R3.1–R3.2 PASS)**
+(azioni ② ③ ⑤ ancora da fare). Registrare qui le evidenze (screenshot/log)
+come fatto per R2.
