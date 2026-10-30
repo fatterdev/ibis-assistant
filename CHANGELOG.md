@@ -11,6 +11,14 @@ All notable changes to Ibis Assistant are documented here.
   via `mcp-publisher` GitHub OIDC from root `server.json`
   (`io.github.fatterdev/ibis`, loopback Streamable HTTP personal runtime);
   `vscode:mcp/install` badge in the VSIX README.
+- **feat(plugin): marketplace and workspace recommendations** (F2.6) —
+  `marketplace/` scaffold pushed later as the `fatterdev/ibis-marketplace`
+  repo (owner action): Claude-Code-compatible `marketplace.json` listing the
+  `ibis` plugin from `fatterdev/ibis-assistant@plugin` (single source of
+  truth), install badge `vscode://chat-plugin/install`, and the team
+  `.github/copilot/settings.json` snippet. F2.1–F2.5 were already satisfied
+  by the migrated plugin scaffold (plugin.json/mcp.json, 5 skills, session
+  hooks, forensics/curator agents, ingest/consolidate automations).
 
 ## [0.2.0] — 2026-10-30
 
