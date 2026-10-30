@@ -25,6 +25,13 @@ The runtime changelog lives in the [repository root](https://github.com/fatterde
   `sha256:<hex>` `source_hash`, same scheme as HEAD ingest) so memories go
   stale when the linked file changes; the selection variant records the
   `file:start-end` range in the content.
+- **Session-contract chat instruction** — `ibis-session-contract`
+  (`chatInstructions`) ships the session contract (load session context once,
+  tool selection map, memory hygiene) so agent sessions follow it without
+  duplicating the plugin's `usage` skill.
+- **Onboarding walkthrough** — 4-step "Get Started with Ibis Assistant":
+  install the binary, choose spawn/attach, browse memory, remember with
+  provenance.
 
 ## [0.2.0] — 2026-10-29
 

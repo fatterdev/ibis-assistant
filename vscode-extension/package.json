@@ -142,6 +142,61 @@
         }
       ]
     },
+    "chatInstructions": [
+      {
+        "id": "ibis-session-contract",
+        "name": "ibis-session-contract",
+        "description": "Ibis Assistant session contract: when to load session context, the tool selection map, and memory hygiene rules",
+        "path": "./instructions/ibis-session-contract.instructions.md"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "ibis-onboarding",
+        "title": "Get Started with Ibis Assistant",
+        "description": "Connect VS Code to the Ibis Assistant runtime and start capturing project memory.",
+        "steps": [
+          {
+            "id": "install-binary",
+            "title": "Install the ibis binary",
+            "description": "Download the runtime from GitHub Releases (no Rust toolchain needed), or point `ibis.runtime.binaryPath` at an existing binary.",
+            "markdown": "The **ibis** binary is the runtime behind this extension. Download it from [Releases](https://github.com/fatterdev/ibis-assistant/releases) and make sure it is on `PATH`, or set **Ibis Assistant: Runtime Binary Path** (`ibis.runtime.binaryPath`) to an absolute path.\n\n[Open extension settings](command:ibis.openExtensionSettings)",
+            "completionEvents": [
+              "onCommand:ibis.openExtensionSettings"
+            ]
+          },
+          {
+            "id": "choose-backend",
+            "title": "Choose how to reach the runtime",
+            "description": "Spawn an isolated child per window (default) or attach to a shared personal runtime.",
+            "markdown": "Two modes:\n\n- **spawn** (default) — each window starts its own `ibis -mode stdio -runtime-mode plugin` child with a plugin data dir.\n- **attach** — share one personal runtime (`ibis run` on `http://127.0.0.1:3030/mcp`) between Cursor and VS Code.\n\n[Pick the runtime mode](command:ibis.openExtensionSettings)",
+            "completionEvents": [
+              "onSettingChanged:ibis.runtime.mode"
+            ]
+          },
+          {
+            "id": "browse-memory",
+            "title": "Browse memory and load session context",
+            "description": "Open the Ibis Assistant view, search typed memory, and let agents load the session contract.",
+            "markdown": "The activity-bar **Ibis Assistant** view lists memory kinds (decision, fix, rule, …) with entries from MCP `memory_search`; click an entry for the full detail.\n\nOpen the view, then attach the **ibis-session-contract** chat instruction to agent sessions so they call `load_session_context` once and keep memory hygiene.\n\n[Open the memory view](command:workbench.view.extension.ibis)",
+            "completionEvents": [
+              "onView:ibis.memoryExplorer"
+            ]
+          },
+          {
+            "id": "remember-with-provenance",
+            "title": "Remember with provenance",
+            "description": "Capture a selection (with file:line range) or a whole-file fact; both bind to the source file and go stale when it changes.",
+            "markdown": "Select code and run **Ibis Assistant: Remember Selection** (editor context menu) to capture it with `file:start-end` provenance, or use **Ibis Assistant: Remember File** for a fact about a whole file. Both pass `source_path` + sha256 `source_hash` to `memory_add`, so git-driven staleness can invalidate them when the file changes.\n\n[Try Remember](command:ibis.remember) · [Remember Selection](command:ibis.rememberSelection)",
+            "completionEvents": [
+              "onCommand:ibis.remember",
+              "onCommand:ibis.rememberSelection",
+              "onCommand:ibis.rememberFile"
+            ]
+          }
+        ]
+      }
+    ],
     "mcpServerDefinitionProviders": [
       {
         "id": "ibis",
