@@ -1,5 +1,7 @@
 const vscode = require("vscode");
 
+const { registerMemoryTree } = require("./memory-tree");
+
 const EXTENSION_ID = "fatterdev.ibis-assistant";
 
 /** @type {vscode.OutputChannel | undefined} */
@@ -107,6 +109,7 @@ async function activate(context) {
   await startLmBridge(host, cfg);
   registerMcpProvider(context, host);
   createStatusBarItem(context, host);
+  registerMemoryTree(context, { getConfig, resolveBackend, logLine }, host);
 
   context.subscriptions.push(
     vscode.commands.registerCommand("ibis.openSettings", async () => {

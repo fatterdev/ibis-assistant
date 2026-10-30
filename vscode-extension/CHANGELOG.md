@@ -16,6 +16,10 @@ The runtime changelog lives in the [repository root](https://github.com/fatterde
   (spawn/attach) with LM-bridge and MCP-provider indicators; tooltip carries the
   full status, clicking runs **Ibis Assistant: Status**, and any `ibis.*`
   settings change refreshes it.
+- **Memory tree view** — activity-bar "Ibis Assistant" view listing memory
+  kinds (decision, fix, rule, constraint, gotcha, design, fact, ask) with
+  entries via MCP `memory_search`, free-text semantic search, refresh, and a
+  read-only detail editor filled from MCP `memory_expand`.
 
 ## [0.2.0] — 2026-10-29
 

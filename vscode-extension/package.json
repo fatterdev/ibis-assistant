@@ -63,8 +63,59 @@
       {
         "command": "ibis.setWorkingState",
         "title": "Ibis Assistant: Set working state"
+      },
+      {
+        "command": "ibis.memory.search",
+        "title": "Ibis Assistant: Search Memory",
+        "icon": "$(search)"
+      },
+      {
+        "command": "ibis.memory.refresh",
+        "title": "Ibis Assistant: Refresh Memory",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "ibis.memory.openDetail",
+        "title": "Ibis Assistant: Open Memory Detail"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ibis",
+          "title": "Ibis Assistant",
+          "icon": "assets/activitybar.svg"
+        }
+      ]
+    },
+    "views": {
+      "ibis": [
+        {
+          "id": "ibis.memoryExplorer",
+          "name": "Memory"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "ibis.memory.search",
+          "group": "navigation@1",
+          "when": "view == ibis.memoryExplorer"
+        },
+        {
+          "command": "ibis.memory.refresh",
+          "group": "navigation@2",
+          "when": "view == ibis.memoryExplorer"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "ibis.memory.openDetail",
+          "when": "false"
+        }
+      ]
+    },
     "mcpServerDefinitionProviders": [
       {
         "id": "ibis",
