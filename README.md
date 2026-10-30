@@ -88,7 +88,7 @@ Two IDEs on one machine? Run the personal daemon once and point the second at it
 
 ```text
 crates/              Rust workspace (20+ crates)
-  ibis-core            domain model
+  ibis-core            domain model + sidecar process-tree ownership (job object / PDEATHSIG / watchdog)
   ibis-ingest-*        git / code / logs / redmine / dynamic ingest lanes
   ibis-search          hybrid retrieval (vector + time + keywords + graph)
   ibis-server          56-tool MCP surface over Streamable HTTP

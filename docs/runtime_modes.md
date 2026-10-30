@@ -1,7 +1,7 @@
 # Runtime modes, HTTP MCP, and the Cursor plugin
 
-**Date:** 2026-09-18 (AI/Settings 2026-09-19; typed memory 2026-10-09)  
-**Status:** Implemented. Design: [superpowers/specs/2026-09-18-runtime-modes-design.md](superpowers/specs/2026-09-18-runtime-modes-design.md). Hybrid AI: [ai_and_settings.md](ai_and_settings.md). Memory: [memory_layer.md](memory_layer.md), [superpowers/specs/2026-10-09-memory-absorption-design.md](superpowers/specs/2026-10-09-memory-absorption-design.md).
+**Date:** 2026-09-18 (AI/Settings 2026-09-19; typed memory 2026-10-09; sidecar lifecycle 2026-10-30)  
+**Status:** Implemented. Design: [superpowers/specs/2026-09-18-runtime-modes-design.md](superpowers/specs/2026-09-18-runtime-modes-design.md). Hybrid AI: [ai_and_settings.md](ai_and_settings.md). Memory: [memory_layer.md](memory_layer.md), [superpowers/specs/2026-10-09-memory-absorption-design.md](superpowers/specs/2026-10-09-memory-absorption-design.md). Sidecar lifecycle: [planning/sidecar-lifecycle-plan.md](planning/sidecar-lifecycle-plan.md).
 
 Ibis Assistant is **one Go binary** (`ibis`) with three **runtimes** (`runtime_mode` in `config.json` / `RUNTIME_MODE` / `-runtime-mode`). Listener kind (`mode`: `sse` | `stdio`) is separate.
 
@@ -56,6 +56,22 @@ For a **unique shared runtime**, run personal HTTP (`ibis run` on `127.0.0.1:303
 ## VS Code extension
 
 Secondary packaging: [`vscode-extension/`](../vscode-extension/). Same spawn/attach and Settings/LM bridge contracts. Marketplace / Open VSX publish is optional later.
+
+## Sidecar lifecycle (spawned SurrealDB / Ollama / ast-grep)
+
+Ownership principle: **ibis owns only the processes it spawns.** Configurations that attach to already-running services (Streamable HTTP attach, external SurrealDB/Ollama) never spawn sidecars, never create a job/watchdog, and never touch those processes.
+
+Code: `ibis-core::process_tree` (single API: `configure_spawn` + `graceful_stop`); study and cross-OS matrix: [planning/sidecar-lifecycle-plan.md](planning/sidecar-lifecycle-plan.md).
+
+| OS | Parent-death mechanism (crash / hard-kill safe) | Graceful stop |
+|----|--------------------------------------------------|---------------|
+| Windows | Kill-on-close **Job Object**, self-attached before the first spawn; children and grandchildren inherit the membership — the kernel kills the tree on any ibis exit path. Fallback when a harness job forbids self-attach: per-child assignment. | `CTRL_BREAK_EVENT` to the child's own process group (needs a shared console), kill after 2s grace |
+| Linux | `pre_exec` sets `prctl(PR_SET_PDEATHSIG, SIGKILL)` plus the child's own process group: the kernel SIGKILLs the child when the parent dies. The fork→prctl race is closed by re-checking the parent after `prctl`; the signal is bound to the creating *thread* (spawn sidecars from long-lived threads only, never `spawn_blocking`) and covers the direct child. | `SIGINT` to the process group (grandchildren included), kill after 2s grace |
+| macOS | No kernel primitive exists: the child gets its own process group and a **parent-death watchdog** (`ibis -sidecar-watchdog <pgid>`, armed at spawn) holds the read end of a pipe whose write end ibis keeps open for its lifetime; EOF on ibis death → `SIGKILL` of the group. | `SIGINT` to the process group, kill after 2s grace |
+
+`graceful_stop` is the single stop policy for both the embedded database (`ProcessManager`) and the Ollama daemon (`OllamaProcess`): ask first (SIGINT / console ctrl event, so the storage engine flushes), then kill after the grace window. Readiness stays TCP dial every 500ms up to 30s; data-dir layout and DB credentials are unchanged.
+
+Known limits: on Linux, hard-kill of ibis is fully covered for the direct child (grandchildren are covered by the graceful path and the reconciliation follow-up); on macOS, a `SIGKILL` of both ibis *and* the watchdog in the same instant can still leave a sidecar — post-crash reconciliation (stale sidecar detection by data dir/port at startup) is planned to close that residual.
 
 ## Config sketch (personal)
 
