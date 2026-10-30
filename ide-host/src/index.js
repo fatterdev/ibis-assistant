@@ -259,13 +259,14 @@ export async function runHttpStdioBridge(url) {
  * @param {Backend} backend
  * @param {string} toolName
  * @param {Record<string, unknown>} [args]
+ * @param {{ keepAliveMs?: number }} [opts]
  * @returns {Promise<string>}
  */
-export async function callMcpTool(backend, toolName, args = {}) {
+export async function callMcpTool(backend, toolName, args = {}, opts = {}) {
   if (backend.mode === "http") {
     return callMcpToolHttp(backend.url, toolName, args);
   }
-  return callMcpToolStdio(backend, toolName, args);
+  return callMcpToolStdio(backend, toolName, args, opts);
 }
 
 /**
@@ -310,8 +311,9 @@ async function callMcpToolHttp(url, toolName, args) {
  * @param {Backend & { mode: "spawn" }} backend
  * @param {string} toolName
  * @param {Record<string, unknown>} args
+ * @param {{ keepAliveMs?: number }} [opts]
  */
-async function callMcpToolStdio(backend, toolName, args) {
+async function callMcpToolStdio(backend, toolName, args, { keepAliveMs = 0 } = {}) {
   const child = spawnStdioChild(backend);
   let outBuf = Buffer.alloc(0);
   const replies = new Map();
@@ -409,12 +411,32 @@ async function callMcpToolStdio(backend, toolName, args) {
     }
     return textFromToolResult(result.result);
   } finally {
-    try {
-      child.stdin.end();
-    } catch {
-      /* ignore */
+    if (keepAliveMs > 0) {
+      // The one-shot child hosts in-process listeners that outlive this call
+      // (e.g. the ephemeral settings UI): keep it alive for keepAliveMs
+      // instead of tearing it down right after the response. The runtime's
+      // own idle timeout (20 min) stays authoritative; if this host exits
+      // first, the closing stdin pipe ends the child by itself.
+      const closeChild = () => {
+        try {
+          child.stdin.end();
+        } catch {
+          /* ignore */
+        }
+        child.kill();
+      };
+      const timer = setTimeout(closeChild, keepAliveMs);
+      if (typeof timer.unref === "function") {
+        timer.unref();
+      }
+    } else {
+      try {
+        child.stdin.end();
+      } catch {
+        /* ignore */
+      }
+      child.kill();
     }
-    child.kill();
   }
 }
 

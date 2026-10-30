@@ -475,7 +475,17 @@ async function resolveSettingsURL(host, backend, cfg = getConfig()) {
       /* probe next */
     }
   }
-  const text = await host.callMcpTool(backend, "settings_open_ui", {});
+  // settings_open_ui hosts the ephemeral loopback listener inside the child
+  // process: a one-shot spawn child must stay alive after the tool call, or
+  // the browser hits ERR_CONNECTION_REFUSED. 20 min = the runtime's own
+  // ephemeral idle timeout. Attach mode needs no keep-alive (the shared
+  // runtime hosts the listener).
+  const text = await host.callMcpTool(
+    backend,
+    "settings_open_ui",
+    {},
+    backend.mode === "spawn" ? { keepAliveMs: 20 * 60 * 1000 } : {},
+  );
   const url = host.extractSettingsURL(text);
   if (!url) {
     throw new Error("settings_open_ui did not return a URL");
