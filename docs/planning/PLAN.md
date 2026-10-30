@@ -14,6 +14,13 @@
 > mappa di revert in [naming-map.md](naming-map.md): `threski`→`ibis`,
 > `threski-studio`→`ibis-assistant`. Le F0.2–F0.7 sono complete anche dopo il revert
 > (rename meccanico, zero cambi funzionali).
+> **Aggiornamento 30/10/2026 — gate R2 chiuso**: review R2 superata (Parte A
+> protocollo 23/23 via `scripts/smoke-mcp.mjs`; Parte B B1–B5 con evidenza owner in
+> VS Code 1.144 — zero conferme read-only, `/ibis.*`, resources in Add Context,
+> sampling attivo via `chat.mcp.serverSampling` + registro sampling requests,
+> MCP App con fallback testuale). Evidenze e finding in
+> [review-r2-checklist.md](review-r2-checklist.md). Fix BatchManager record-id
+> incluso; runtime rilasciato **0.2.0** (tag `v0.2.0`). Da qui: **[F1 ∥ F2]**.
 
 ## 1. Decisioni di prodotto
 
