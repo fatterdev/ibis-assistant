@@ -33,6 +33,18 @@ const vsixPath = join(root, "vscode-extension", "ibis-assistant-1.0.0.vsix");
 const uiTarsExe = process.env.UI_TARS_EXE || join(process.env.LOCALAPPDATA || "", "UiTars", "UI-TARS.exe");
 const vscodeExe = process.env.VSCODE_EXE || "code";
 
+const SCREENSHOT_PS1 = `
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+$bmp.Save($args[0], [System.Drawing.Imaging.ImageFormat]::Png)
+$g.Dispose(); $bmp.Dispose()
+Write-Output "saved $($args[0])"
+`;
+
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const taskById = new Map(manifest.tasks.map((t) => [t.id, t]));
 
@@ -257,6 +269,29 @@ function cmdList() {
   console.log(`\nrun folder: ${dir ? join(evidenceRoot, dir) : "none yet (new)"}`);
 }
 
+function cmdScreenshot() {
+  const id = rest[0];
+  if (!taskById.get(id)) {
+    console.error(`unknown task ${id}`);
+    process.exit(1);
+  }
+  const dir = runDir();
+  const existing = readdirSync(dir).filter((f) => f.toLowerCase().startsWith(id.toLowerCase()) && f.endsWith(".png"));
+  const next = String(existing.length + 1).padStart(2, "0");
+  const file = join(dir, `${id}-${next}-screen.png`);
+  const ps1 = join(dir, ".screenshot.ps1");
+  writeFileSync(ps1, SCREENSHOT_PS1);
+  const res = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, file], {
+    timeout: 30_000,
+  });
+  if (res.status !== 0) {
+    console.error(`screenshot failed: ${res.stderr}`);
+    process.exit(1);
+  }
+  console.log(`[screenshot] ${file}`);
+  refreshArtifacts(dir);
+}
+
 function cmdHelp() {
   console.log(
     [
@@ -271,6 +306,8 @@ function cmdHelp() {
       "                       and launch VS Code + UI-TARS Desktop",
       "  mark <taskId> <pass|fail> [--note \"...\"] [--run <dir>]",
       "                       record the judgement for a task (refreshes results.md)",
+      "  screenshot <taskId>  capture the full screen into the run folder as",
+      "                       <taskId>-NN-screen.png (evidence without app export)",
       "  collect [--run <dir>]  map evidence files to tasks and refresh results.md",
       "  report [--run <dir>]   print the full results table",
       "",
@@ -280,5 +317,5 @@ function cmdHelp() {
   );
 }
 
-const commands = { list: cmdList, prompt: () => printPrompt(rest[0]), prep: cmdPrep, new: cmdNew, mark: cmdMark, collect: cmdCollect, report: cmdReport, help: cmdHelp };
+const commands = { list: cmdList, prompt: () => printPrompt(rest[0]), prep: cmdPrep, new: cmdNew, mark: cmdMark, screenshot: cmdScreenshot, collect: cmdCollect, report: cmdReport, help: cmdHelp };
 (commands[command] || cmdHelp)();
