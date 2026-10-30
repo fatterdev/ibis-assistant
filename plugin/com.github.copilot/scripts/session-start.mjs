@@ -8,11 +8,11 @@ const CONTRACT = [
   "4. Prefer why_changed / analyze_blast_radius / ask_project before guessing about the codebase.",
 ].join("\n");
 
-let event = {};
+// Drain the event payload from stdin (required before writing output).
 try {
-  event = JSON.parse(readFileSync(0, "utf8"));
+  readFileSync(0, "utf8");
 } catch {
-  event = {};
+  /* empty payload */
 }
 
-process.stdout.write(JSON.stringify({ additionalContext: CONTRACT, source: "ibis", event: event.event ?? "sessionStart" }));
+process.stdout.write(JSON.stringify({ additionalContext: CONTRACT }));

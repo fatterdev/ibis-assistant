@@ -53,5 +53,9 @@ Raccomandazione per team (nel repo del progetto):
 3. Nuova sessione: `/ibis status` risponde; le skill compaiono in `/` come `/ibis <nome>`; l'hook `sessionStart`
    inietta il contratto (verificare nei log/debug della sessione).
 
-Nota: gli hook e l'exact schema degli output vanno verificati contro la
-Copilot hooks reference (docs.github.com/copilot/reference/hooks-reference) — punto F2.3 di PLAN.md.
+Nota hooks (verificata contro la Copilot hooks reference, docs.github.com/copilot/reference/hooks-reference):
+`sessionStart` consuma solo `additionalContext` (contratto iniettato ad avvio/ripresa sessione);
+`agentStop` consuma solo la stop decision (`decision: "block"` + `reason`) — lo script
+`agent-stop.mjs` forza **una sola** continuazione (`stop_hook_active` guard) solo quando il
+turn ha prodotto lavoro di editing senza alcuna cattura (`capture_observation`/`memory_add`
+nel transcript); in tutti gli altri casi emette `{}` (stop consentito).

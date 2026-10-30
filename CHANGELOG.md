@@ -19,6 +19,17 @@ All notable changes to Ibis Assistant are documented here.
   `.github/copilot/settings.json` snippet. F2.1–F2.5 were already satisfied
   by the migrated plugin scaffold (plugin.json/mcp.json, 5 skills, session
   hooks, forensics/curator agents, ingest/consolidate automations).
+- **fix(plugin): conditional agent-stop capture reminder** — verified the hook
+  scripts against the Copilot hooks reference: `sessionStart` consumes only
+  `additionalContext` (output cleaned of ignored keys), while `agentStop`
+  consumes **only** the stop decision (`decision: "block"` + `reason`) — the
+  previous `additionalContext` reminder was silently dropped. `agent-stop.mjs`
+  now forces exactly one continuation (`stop_hook_active` guard) only when the
+  turn did editing work (`Write`/`Edit`/… signals in the transcript tail)
+  without any `capture_observation`/`memory_add`; otherwise `{}` (fail-open,
+  never blocks blindly). New `scripts/smoke-plugin.mjs` (Parte A R3/R4):
+  26 checks on plugin scaffold, hook contract, VSIX contributions and
+  distribution manifests — 26/26 PASS.
 
 ## [0.2.0] — 2026-10-30
 
