@@ -77,6 +77,14 @@
       {
         "command": "ibis.memory.openDetail",
         "title": "Ibis Assistant: Open Memory Detail"
+      },
+      {
+        "command": "ibis.rememberSelection",
+        "title": "Ibis Assistant: Remember Selection"
+      },
+      {
+        "command": "ibis.rememberFile",
+        "title": "Ibis Assistant: Remember File"
       }
     ],
     "viewsContainers": {
@@ -113,6 +121,24 @@
         {
           "command": "ibis.memory.openDetail",
           "when": "false"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "ibis.rememberSelection",
+          "when": "editorTextFocus && editorHasSelection",
+          "group": "9_ibis@1"
+        },
+        {
+          "command": "ibis.rememberFile",
+          "when": "editorTextFocus",
+          "group": "9_ibis@2"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "ibis.rememberFile",
+          "group": "9_ibis@1"
         }
       ]
     },

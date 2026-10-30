@@ -20,6 +20,11 @@ The runtime changelog lives in the [repository root](https://github.com/fatterde
   kinds (decision, fix, rule, constraint, gotcha, design, fact, ask) with
   entries via MCP `memory_search`, free-text semantic search, refresh, and a
   read-only detail editor filled from MCP `memory_expand`.
+- **Remember Selection / Remember File** — editor and Explorer context-menu
+  capture via MCP `memory_add` with git provenance (`source_path` +
+  `sha256:<hex>` `source_hash`, same scheme as HEAD ingest) so memories go
+  stale when the linked file changes; the selection variant records the
+  `file:start-end` range in the content.
 
 ## [0.2.0] — 2026-10-29
 

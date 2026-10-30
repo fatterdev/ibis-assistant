@@ -1,8 +1,20 @@
 const vscode = require("vscode");
 
 const { registerMemoryTree } = require("./memory-tree");
+const { registerRememberSelection } = require("./remember-selection");
 
 const EXTENSION_ID = "fatterdev.ibis-assistant";
+
+/** Shared kind quick-pick for Remember (command, selection, file). */
+const REMEMBER_KINDS = [
+  { label: "decision", description: "A choice the team should keep" },
+  { label: "fix", description: "What resolved a failure" },
+  { label: "rule", description: "A durable constraint or convention" },
+  { label: "constraint", description: "A hard boundary the project must respect" },
+  { label: "gotcha", description: "A trap future agents should avoid" },
+  { label: "design", description: "A design rationale worth keeping" },
+  { label: "fact", description: "A verifiable statement about the project" },
+];
 
 /** @type {vscode.OutputChannel | undefined} */
 let outputChannel;
@@ -110,6 +122,11 @@ async function activate(context) {
   registerMcpProvider(context, host);
   createStatusBarItem(context, host);
   registerMemoryTree(context, { getConfig, resolveBackend, logLine }, host);
+  registerRememberSelection(
+    context,
+    { getConfig, resolveBackend, logLine, kinds: REMEMBER_KINDS },
+    host,
+  );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("ibis.openSettings", async () => {
@@ -381,15 +398,7 @@ function registerMcpProvider(context, host) {
  * @param {vscode.WorkspaceConfiguration} cfg
  */
 async function rememberMemory(host, cfg) {
-  const kinds = [
-    { label: "decision", description: "A choice the team should keep" },
-    { label: "fix", description: "What resolved a failure" },
-    { label: "rule", description: "A durable constraint or convention" },
-    { label: "constraint", description: "A hard boundary the project must respect" },
-    { label: "gotcha", description: "A trap future agents should avoid" },
-    { label: "design", description: "A design rationale worth keeping" },
-    { label: "fact", description: "A verifiable statement about the project" },
-  ];
+  const kinds = REMEMBER_KINDS;
 
   let kind = cfg.get("memory.defaultKind", "ask");
   if (kind === "ask") {
