@@ -593,6 +593,12 @@ impl crate::search::SearchService {
         actor_ctx: &crate::ActorContext,
         params: MemorySearchParams,
     ) -> crate::Result<Vec<Memory>> {
+        let t0 = std::time::Instant::now();
+        tracing::info!(
+            "memory_search: start (query_len={}, kinds={:?})",
+            params.query.len(),
+            params.kinds
+        );
         let db = self.require_db()?;
         let ai = self
             .ai
@@ -601,7 +607,14 @@ impl crate::search::SearchService {
         let vector = ai
             .embed_text(&params.query)
             .await
-            .map_err(|e| SearchError::wrap("embedding failed", e))?;
+            .map_err(|e| {
+                tracing::warn!(
+                    "memory_search: embed_text failed after {:?}: {e}",
+                    t0.elapsed()
+                );
+                SearchError::wrap("embedding failed", e)
+            })?;
+        tracing::info!("memory_search: embedded in {:?}", t0.elapsed());
 
         let mut status = params.status.trim().to_string();
         if status.is_empty() {
@@ -686,6 +699,11 @@ impl crate::search::SearchService {
                 break;
             }
         }
+        tracing::info!(
+            "memory_search: done in {:?} hits={}",
+            t0.elapsed(),
+            boosted.len()
+        );
         Ok(boosted)
     }
 

@@ -32,7 +32,17 @@ impl Client {
 
     pub async fn embed_text(&self, text: &str) -> Result<Vec<f32>, AiError> {
         match &self.embedding {
-            Some(e) => e.embed_text(text).await,
+            Some(e) => {
+                let t0 = std::time::Instant::now();
+                let out = e.embed_text(text).await;
+                tracing::info!(
+                    "embed_text: provider={} dt={:?} ok={}",
+                    e.name(),
+                    t0.elapsed(),
+                    out.is_ok()
+                );
+                out
+            }
             None => Err(AiError::NoEmbeddingProvider),
         }
     }
