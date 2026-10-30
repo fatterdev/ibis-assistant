@@ -508,14 +508,10 @@ mod tests {
         if !cfg!(windows) {
             return;
         }
-        assert_eq!(
-            file_uri_to_path("file:///C:/work/ibis"),
-            "C:\\work\\ibis"
-        );
+        assert_eq!(file_uri_to_path("file:///C:/work/ibis"), "C:\\work\\ibis");
         // Scenario: test compares case-insensitively for the drive path input.
         assert!(
-            file_uri_to_path("c:\\work\\ibis")
-                .eq_ignore_ascii_case("C:\\work\\ibis"),
+            file_uri_to_path("c:\\work\\ibis").eq_ignore_ascii_case("C:\\work\\ibis"),
             "drive path got {:?}",
             file_uri_to_path("c:\\work\\ibis")
         );
@@ -526,10 +522,7 @@ mod tests {
         if cfg!(windows) {
             return;
         }
-        assert_eq!(
-            file_uri_to_path("file:///tmp/ibis"),
-            "/tmp/ibis"
-        );
+        assert_eq!(file_uri_to_path("file:///tmp/ibis"), "/tmp/ibis");
     }
 
     #[test]

@@ -18,6 +18,8 @@ thiserror.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 walkdir.workspace = true
+# Job Object FFI for the sidecar process tree (cfg(windows); see process_tree).
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [dev-dependencies]
 chrono.workspace = true

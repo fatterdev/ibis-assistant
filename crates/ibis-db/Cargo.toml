@@ -10,7 +10,10 @@ repository.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 flate2 = "1"
+ibis-core.workspace = true
 regex.workspace = true
+# Console ctrl events for a graceful SurrealDB shutdown on Windows.
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_System_Console"] }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

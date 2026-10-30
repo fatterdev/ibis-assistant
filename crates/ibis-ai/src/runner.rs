@@ -194,9 +194,18 @@ pub async fn start_ollama_daemon() -> Result<OllamaProcess, AiError> {
         "Starting local Ollama daemon: {} serve",
         exec_path.display()
     );
+    // Own the child tree: the daemon must die with this process on any exit
+    // path (OllamaProcess::stop covers only the graceful one).
+    ibis_core::process_tree::ensure_children_job();
     let child = cmd
         .spawn()
         .map_err(|e| AiError::other(format!("failed to start Ollama process: {e}")))?;
+    #[cfg(windows)]
+    if !ibis_core::process_tree::children_job_active() {
+        // Self-attach unavailable: assign this child explicitly.
+        use std::os::windows::io::AsRawHandle;
+        let _ = ibis_core::process_tree::attach_child(child.as_raw_handle() as isize);
+    }
     Ok(OllamaProcess {
         child: Mutex::new(Some(child)),
     })

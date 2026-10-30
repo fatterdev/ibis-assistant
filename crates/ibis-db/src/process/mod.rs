@@ -5,8 +5,10 @@
 //!   with stdout/stderr appended to `surreal.log` beside the ibis executable
 //!   (args are never logged — they contain the password).
 //! - Readiness: TCP dial every 500ms up to 30s; on timeout the process is killed.
-//! - Stop: SIGINT (non-Windows) then kill after 2s. On Windows there is no
-//!   SIGINT for detached processes — go straight to the kill-after-grace path.
+//! - Stop: console ctrl event for graceful flush where possible (Unix SIGINT;
+//!   Windows CTRL_BREAK_EVENT to the child's own process group), then kill
+//!   after the 2s grace. On pipe-spawned children without a shared console,
+//!   the ctrl event cannot be delivered and the kill-after-grace path applies.
 
 pub mod install;
 
@@ -71,6 +73,13 @@ impl ProcessManager {
         ])
         .arg(file_arg);
         apply_log_redirection(&mut cmd);
+        #[cfg(windows)]
+        {
+            // Own process group: lets stop() deliver CTRL_BREAK_EVENT so the
+            // server flushes its storage engine before exiting (when a console
+            // is shared; otherwise the kill-after-grace fallback applies).
+            cmd.creation_flags(windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP);
+        }
 
         // Do not log args: they include --pass <password>.
         tracing::info!(
@@ -78,9 +87,20 @@ impl ProcessManager {
             abs_bin_path.display(),
             abs_data_path.display()
         );
+        // Own the child tree: ensure the kill-on-close job exists before the spawn
+        // so the embedded database dies with this process on any exit path.
+        ibis_core::process_tree::ensure_children_job();
         let mut child = cmd
             .spawn()
             .map_err(|e| ProcessError::Spawn(e.to_string()))?;
+
+        #[cfg(windows)]
+        if !ibis_core::process_tree::children_job_active() {
+            // Self-attach unavailable: assign this child explicitly.
+            if let Some(handle) = child.raw_handle() {
+                let _ = ibis_core::process_tree::attach_child(handle as isize);
+            }
+        }
 
         if let Err(err) = wait_for_port(port, READY_TIMEOUT).await {
             // If timeout, kill and return error
@@ -105,6 +125,25 @@ impl ProcessManager {
     pub async fn stop(&mut self) -> Result<(), ProcessError> {
         tracing::info!("Stopping embedded database...");
 
+        #[cfg(windows)]
+        {
+            // Ask for a graceful shutdown first: `surreal start` handles
+            // console ctrl events and flushes the storage engine. Needs a
+            // shared console; when absent (pipe-spawned children) the event
+            // fails and the kill-after-grace fallback below still applies.
+            let pid = self.child.id();
+            if let Some(pid) = pid {
+                let sent = unsafe {
+                    windows_sys::Win32::System::Console::GenerateConsoleCtrlEvent(
+                        windows_sys::Win32::System::Console::CTRL_BREAK_EVENT,
+                        pid,
+                    )
+                };
+                if sent != 0 {
+                    tracing::info!("CTRL_BREAK_EVENT sent to the database process group");
+                }
+            }
+        }
         if !cfg!(windows) {
             send_sigint(self.child.id()).await;
         }
