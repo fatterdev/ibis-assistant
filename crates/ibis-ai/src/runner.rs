@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 use tokio::io::AsyncWriteExt as _;
+use tokio::process::Child;
 
 use crate::error::AiError;
 
@@ -17,6 +18,8 @@ use crate::error::AiError;
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
 /// Daemon readiness window (30s).
 const READY_WINDOW: Duration = Duration::from_secs(30);
+/// Grace window before the daemon is killed (shared stop policy).
+const STOP_GRACE: Duration = Duration::from_secs(2);
 const DEFAULT_API_URL: &str = "http://127.0.0.1:11434";
 #[cfg(target_os = "windows")]
 const OLLAMA_INSTALLER_URL: &str =
@@ -36,30 +39,36 @@ pub(crate) fn http_client(timeout: Duration) -> reqwest::Client {
 }
 
 /// Handle over the spawned `ollama serve` process. Dropping does NOT kill the
-/// daemon (`exec.Cmd semantics); call [`OllamaProcess::stop`].
+/// daemon (`exec.Cmd semantics); call [`OllamaProcess::stop`]. The daemon is
+/// spawned through the shared `process_tree` policy (kill-on-close job /
+/// PDEATHSIG / parent-death watchdog), so it dies with ibis on any exit path.
 #[derive(Debug)]
 pub struct OllamaProcess {
-    child: Mutex<Option<std::process::Child>>,
+    child: Mutex<Option<Child>>,
 }
 
 impl OllamaProcess {
     pub fn pid(&self) -> Option<u32> {
-        self.lock_child().as_ref().map(|c| c.id())
+        self.lock_child().as_ref().and_then(|c| c.id())
     }
 
-    fn lock_child(&self) -> std::sync::MutexGuard<'_, Option<std::process::Child>> {
+    fn lock_child(&self) -> std::sync::MutexGuard<'_, Option<Child>> {
         self.child
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// Terminates the Ollama daemon process.
+    /// Graceful stop via the shared process-tree policy (SIGINT / console
+    /// ctrl event, kill after the 2s grace — `ollama serve` flushes its
+    /// state on SIGINT where the plain kill did not).
     pub async fn stop(&self) -> std::io::Result<()> {
         tracing::info!("Stopping local Ollama daemon...");
-        match self.lock_child().take() {
-            Some(mut child) => child.kill(),
-            None => Ok(()),
-        }
+        // Take outside the match so the lock guard is never held across await.
+        let taken = self.lock_child().take();
+        let Some(mut child) = taken else {
+            return Ok(());
+        };
+        ibis_core::process_tree::graceful_stop(&mut child, STOP_GRACE).await
     }
 }
 
@@ -171,7 +180,7 @@ pub async fn start_ollama_daemon() -> Result<OllamaProcess, AiError> {
         .open(&log_path)
         .ok();
 
-    let mut cmd = std::process::Command::new(&exec_path);
+    let mut cmd = tokio::process::Command::new(&exec_path);
     cmd.arg("serve");
     match log_file {
         Some(file) => match file.try_clone() {
@@ -194,17 +203,26 @@ pub async fn start_ollama_daemon() -> Result<OllamaProcess, AiError> {
         "Starting local Ollama daemon: {} serve",
         exec_path.display()
     );
-    // Own the child tree: the daemon must die with this process on any exit
-    // path (OllamaProcess::stop covers only the graceful one).
-    ibis_core::process_tree::ensure_children_job();
+    // Own the child tree: per-OS spawn configuration (kill-on-close job +
+    // process group on Windows; process group + PDEATHSIG on Linux; process
+    // group + parent-death watchdog on macOS). stop() covers the graceful
+    // path, this covers any exit path of ibis.
+    ibis_core::process_tree::configure_spawn(&mut cmd)
+        .map_err(|e| AiError::other(format!("failed to configure Ollama process: {e}")))?;
     let child = cmd
         .spawn()
         .map_err(|e| AiError::other(format!("failed to start Ollama process: {e}")))?;
     #[cfg(windows)]
     if !ibis_core::process_tree::children_job_active() {
         // Self-attach unavailable: assign this child explicitly.
-        use std::os::windows::io::AsRawHandle;
-        let _ = ibis_core::process_tree::attach_child(child.as_raw_handle() as isize);
+        if let Some(handle) = child.raw_handle() {
+            let _ = ibis_core::process_tree::attach_child(handle as isize);
+        }
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(pid) = child.id() {
+        ibis_core::process_tree::arm_parent_death_watchdog(pid)
+            .map_err(|e| AiError::other(format!("failed to arm the parent-death watchdog: {e}")))?;
     }
     Ok(OllamaProcess {
         child: Mutex::new(Some(child)),
