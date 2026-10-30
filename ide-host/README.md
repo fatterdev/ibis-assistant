@@ -1,6 +1,6 @@
 # Threski IDE host
 
-Thin Node host shared by **Cursor** (primary) and **VS Code** (secondary).
+Thin Node host shared by **Cursor** and **VS Code**.
 
 It does **not** load Go in-process. Default behavior matches plugin `mcp.json`: spawn
 

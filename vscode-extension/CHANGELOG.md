@@ -12,7 +12,7 @@ The runtime changelog lives in the [repository root](https://github.com/fatterde
 
 ## [1.0.0] — Initial release
 
-VS Code packaging for the Threski Studio runtime (Cursor remains the primary IDE packaging).
+VS Code packaging for the Threski Studio runtime.
 
 - **MCP server provider** — registers `threski` for VS Code agent mode (VS Code 1.101+), spawning an isolated `threski -mode stdio -runtime-mode plugin` child or attaching to a shared personal runtime over Streamable HTTP.
 - **IDE LM bridge** — wires `vscode.lm` into the runtime's loopback bridge (`THRESKI_LM_BRIDGE_URL`, default port 39201) with optional model-family filter; embeddings stay on Ollama.

@@ -2,8 +2,6 @@
 
 **Date:** 2026-09-20  
 **Status:** Implemented across stacked PRs (ephemeral Settings, Cursor plugin surface, `ide-host`, LM bridge, VS Code extension)  
-**Primary IDE:** Cursor (`cursor-plugin/`)  
-**Secondary IDE:** VS Code (`vscode-extension/`)
 
 > **F0.5 update (2026-10-29):** the IDE-provided-models reasoning primary is
 > now MCP sampling (`sampling/createMessage` over the MCP session); the LM
@@ -75,9 +73,9 @@ Typed memory (`memory_*`, `load_session_context`, `capture_observation`, …) is
 
 | Path | Role |
 |------|------|
-| [`cursor-plugin/`](../cursor-plugin/) | Cursor primary: MCP, commands, rules, skill, hook, STATUS |
+| [`cursor-plugin/`](../cursor-plugin/) | Cursor: MCP, commands, rules, skill, hook, STATUS |
 | [`ide-host/`](../ide-host/) | Shared spawn / attach / LM RPC |
-| [`vscode-extension/`](../vscode-extension/) | VS Code secondary packaging |
+| [`vscode-extension/`](../vscode-extension/) | VS Code packaging |
 | [`internal/ai/cursor_lm.go`](../internal/ai/cursor_lm.go) | Go bridge client |
 
 ## Explicitly rejected / later

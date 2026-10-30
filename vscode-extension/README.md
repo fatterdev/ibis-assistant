@@ -6,7 +6,7 @@
 
 **Living project memory over MCP.** Threski turns a real codebase — Git history, polyglot AST structure, logs, tickets and PRs — into a queryable knowledge graph in SurrealDB, then keeps team decisions and session state on that same graph.
 
-This extension is the VS Code packaging: it spawns an isolated Threski Studio stdio child or attaches to a shared personal runtime, registers the MCP server for VS Code agent mode, and bridges IDE-provided language models back to the runtime. **Cursor remains the primary IDE packaging** ([`cursor-plugin/`](https://github.com/fatterdev/threski-studio/tree/master/cursor-plugin)).
+This extension is the VS Code packaging: it spawns an isolated Threski Studio stdio child or attaches to a shared personal runtime, registers the MCP server for VS Code agent mode, and bridges IDE-provided language models back to the runtime.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/fatterdev/threski-studio/blob/master/LICENSE)
 [![VS Code](https://img.shields.io/badge/VS%20Code-%E2%89%A51.101-007ACC.svg)](https://code.visualstudio.com/)
@@ -159,7 +159,6 @@ Memory is sharing-first, stored in the SurrealDB owned by the attached runtime: 
 - [Runtime modes](https://github.com/fatterdev/threski-studio/blob/master/docs/runtime_modes.md) — personal / plugin / server
 - [IDE host & LM bridge](https://github.com/fatterdev/threski-studio/blob/master/docs/ide_host_and_lm_bridge.md)
 - [Memory layer](https://github.com/fatterdev/threski-studio/blob/master/docs/memory_layer.md)
-- [Cursor plugin](https://github.com/fatterdev/threski-studio/tree/master/cursor-plugin) — primary IDE packaging
 
 ## License
 
