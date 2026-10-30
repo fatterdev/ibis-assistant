@@ -15,7 +15,7 @@
       "expected": [
         "Output channel named 'Ibis Assistant' exists",
         "activation line reads 'activated (ide-host: vendor, engine: 1.144.x)' (vendor in packaged install, package in dev)",
-        "no error entries about failing to load the runtime host"
+        "the info line 'ide-host package import failed ... using vendored copy' is EXPECTED in packaged installs (no-dependencies packaging, vendored fallback by design); a fatal 'could not load its runtime host' error is NOT"
       ],
       "evidence": "R3.1-01-output-channel.png"
     },
