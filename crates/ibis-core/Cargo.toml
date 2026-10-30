@@ -15,11 +15,18 @@ serde_json.workspace = true
 serde_yaml.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
+# Child lifecycle (configure_spawn/graceful_stop) — tokio Command + async stop.
+tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 walkdir.workspace = true
-# Job Object FFI for the sidecar process tree (cfg(windows); see process_tree).
-windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+# Job Object / Console FFI for the sidecar process tree (cfg(windows); see
+# process_tree).
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+[target.'cfg(unix)'.dependencies]
+# setpgid/prctl/killpg + the macOS parent-death watchdog (see process_tree).
+libc = "0.2"
 
 [dev-dependencies]
 chrono.workspace = true

@@ -30,6 +30,14 @@ use state::AppState;
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
 
+    // Parent-death watchdog mode (unix): the macOS arm path in
+    // `process_tree` re-enters this binary with `-sidecar-watchdog <pgid>`;
+    // it must short-circuit before any config/IO initialization.
+    #[cfg(unix)]
+    if let Some(code) = ibis_core::process_tree::watchdog_exit_code(&argv) {
+        std::process::exit(code);
+    }
+
     // Scenario: shouldRunWizard : interactive, non-plugin launch,
     // no config file, and not a service/wizard command.
     if should_run_wizard(&argv) {
