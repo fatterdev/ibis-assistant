@@ -45,7 +45,7 @@ const optValue = (name) => {
 
 function latestRun() {
   if (!existsSync(evidenceRoot)) return undefined;
-  const runs = readdirSync(evidenceRoot).filter((d) => /^\d{8}-\d{4}/.test(d)).sort();
+  const runs = readdirSync(evidenceRoot).filter((d) => /^\d{12}/.test(d)).sort();
   return runs.at(-1);
 }
 

@@ -14,8 +14,8 @@
       "instruction": "In VS Code (workspace C:\\devsrc\\ibis-assistant), open the Output panel (Ctrl+Shift+U), select the channel 'Ibis Assistant' from the dropdown, and read the most recent activation line.",
       "expected": [
         "Output channel named 'Ibis Assistant' exists",
-        "activation line matches /activated \\(ide-host: (package|vendor), engine: 1\\.144\\./",
-        "in a packaged install the ide-host source is 'vendor'; in dev it is 'package'"
+        "activation line reads 'activated (ide-host: vendor, engine: 1.144.x)' (vendor in packaged install, package in dev)",
+        "no error entries about failing to load the runtime host"
       ],
       "evidence": "R3.1-01-output-channel.png"
     },
