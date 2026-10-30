@@ -12,8 +12,6 @@ chrono.workspace = true
 flate2 = "1"
 ibis-core.workspace = true
 regex.workspace = true
-# Console ctrl events for a graceful SurrealDB shutdown on Windows.
-windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_System_Console"] }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -25,9 +23,6 @@ tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 zip = { version = "2", default-features = false, features = ["deflate"] }
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true

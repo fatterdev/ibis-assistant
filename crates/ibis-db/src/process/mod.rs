@@ -5,10 +5,13 @@
 //!   with stdout/stderr appended to `surreal.log` beside the ibis executable
 //!   (args are never logged — they contain the password).
 //! - Readiness: TCP dial every 500ms up to 30s; on timeout the process is killed.
-//! - Stop: console ctrl event for graceful flush where possible (Unix SIGINT;
-//!   Windows CTRL_BREAK_EVENT to the child's own process group), then kill
-//!   after the 2s grace. On pipe-spawned children without a shared console,
-//!   the ctrl event cannot be delivered and the kill-after-grace path applies.
+//! - Spawn/stop policy is the shared one in `ibis_core::process_tree`:
+//!   `configure_spawn` owns the child tree per OS (kill-on-close job + own
+//!   process group on Windows; own process group + PDEATHSIG on Linux; own
+//!   process group + parent-death watchdog on macOS) and `graceful_stop` asks
+//!   first (console ctrl event / SIGINT to the group) and kills after the
+//!   2s grace. On pipe-spawned children without a shared console the ctrl
+//!   event cannot be delivered and the kill-after-grace path applies.
 
 pub mod install;
 
@@ -73,13 +76,6 @@ impl ProcessManager {
         ])
         .arg(file_arg);
         apply_log_redirection(&mut cmd);
-        #[cfg(windows)]
-        {
-            // Own process group: lets stop() deliver CTRL_BREAK_EVENT so the
-            // server flushes its storage engine before exiting (when a console
-            // is shared; otherwise the kill-after-grace fallback applies).
-            cmd.creation_flags(windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP);
-        }
 
         // Do not log args: they include --pass <password>.
         tracing::info!(
@@ -87,9 +83,11 @@ impl ProcessManager {
             abs_bin_path.display(),
             abs_data_path.display()
         );
-        // Own the child tree: ensure the kill-on-close job exists before the spawn
-        // so the embedded database dies with this process on any exit path.
-        ibis_core::process_tree::ensure_children_job();
+        // Own the child tree: per-OS spawn configuration (kill-on-close job +
+        // process group on Windows; process group + PDEATHSIG on Linux;
+        // process group + parent-death watchdog on macOS).
+        ibis_core::process_tree::configure_spawn(&mut cmd)
+            .map_err(|e| ProcessError::Spawn(e.to_string()))?;
         let mut child = cmd
             .spawn()
             .map_err(|e| ProcessError::Spawn(e.to_string()))?;
@@ -100,6 +98,12 @@ impl ProcessManager {
             if let Some(handle) = child.raw_handle() {
                 let _ = ibis_core::process_tree::attach_child(handle as isize);
             }
+        }
+
+        #[cfg(target_os = "macos")]
+        if let Some(pid) = child.id() {
+            ibis_core::process_tree::arm_parent_death_watchdog(pid)
+                .map_err(|e| ProcessError::Spawn(e.to_string()))?;
         }
 
         if let Err(err) = wait_for_port(port, READY_TIMEOUT).await {
@@ -120,49 +124,14 @@ impl ProcessManager {
         self.port
     }
 
-    /// Attempts a graceful shutdown (SIGINT on Unix), then kills after the
-    /// 2s grace period.
+    /// Graceful shutdown via the shared process-tree policy: console ctrl
+    /// event / SIGINT to the child's process group first (flush of the
+    /// surrealkv journal), then kill after the 2s grace.
     pub async fn stop(&mut self) -> Result<(), ProcessError> {
         tracing::info!("Stopping embedded database...");
-
-        #[cfg(windows)]
-        {
-            // Ask for a graceful shutdown first: `surreal start` handles
-            // console ctrl events and flushes the storage engine. Needs a
-            // shared console; when absent (pipe-spawned children) the event
-            // fails and the kill-after-grace fallback below still applies.
-            let pid = self.child.id();
-            if let Some(pid) = pid {
-                let sent = unsafe {
-                    windows_sys::Win32::System::Console::GenerateConsoleCtrlEvent(
-                        windows_sys::Win32::System::Console::CTRL_BREAK_EVENT,
-                        pid,
-                    )
-                };
-                if sent != 0 {
-                    tracing::info!("CTRL_BREAK_EVENT sent to the database process group");
-                }
-            }
-        }
-        if !cfg!(windows) {
-            send_sigint(self.child.id()).await;
-        }
-        // On Windows there is no way to SIGINT a detached process; the wait
-        // below still gives it a grace window before the kill.
-
-        match tokio::time::timeout(STOP_GRACE, self.child.wait()).await {
-            Ok(Ok(_)) => {
-                tracing::info!("Embedded database stopped.");
-                Ok(())
-            }
-            Ok(Err(e)) => Err(ProcessError::Io(e)),
-            Err(_) => {
-                tracing::info!("Database did not stop in time, forcing kill...");
-                self.child.kill().await?;
-                self.child.wait().await?;
-                Ok(())
-            }
-        }
+        ibis_core::process_tree::graceful_stop(&mut self.child, STOP_GRACE)
+            .await
+            .map_err(ProcessError::Io)
     }
 }
 
@@ -210,20 +179,6 @@ pub async fn wait_for_port(port: u16, timeout: Duration) -> Result<(), ProcessEr
     }
     Err(ProcessError::NotReady { port, timeout })
 }
-
-#[cfg(unix)]
-async fn send_sigint(pid: Option<u32>) {
-    if let Some(pid) = pid {
-        // Graceful shutdown via SIGINT (Process.Signal(os.Interrupt)).
-        let rc = unsafe { libc::kill(pid as i32, libc::SIGINT) };
-        if rc != 0 {
-            tracing::warn!("Failed to signal database (pid {pid})");
-        }
-    }
-}
-
-#[cfg(not(unix))]
-async fn send_sigint(_pid: Option<u32>) {}
 
 /// Normalizes a path to its absolute form.
 fn absolute(path: &Path) -> std::io::Result<PathBuf> {
