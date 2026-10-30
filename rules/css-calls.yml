@@ -4,4 +4,4 @@
 id: css-calls
 language: css
 rule:
-  pattern: __threski_disabled_css_calls__
+  pattern: __ibis_disabled_css_calls__

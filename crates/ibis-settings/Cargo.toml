@@ -1,0 +1,32 @@
+[package]
+name = "ibis-settings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+ibis-core.workspace = true
+ibis-search.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+include_dir.workspace = true
+reqwest = { workspace = true, features = ["cookies"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tokio-util = "0.7"
+tower = { version = "0.5", features = ["util"] }
+tracing.workspace = true
+uuid.workspace = true
+
+# F-003: 64-bit VRAM probe reads the Windows registry directly (no WMI spawn).
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
+
+[dev-dependencies]
+ibis-httpserver.workspace = true
+rmcp = { version = "3.7.0", features = ["server", "macros", "transport-async-rw", "transport-streamable-http-server", "transport-streamable-http-server-session", "transport-worker"] }
+tempfile.workspace = true

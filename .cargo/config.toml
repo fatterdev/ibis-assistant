@@ -1,6 +1,6 @@
 [alias]
 xtask = "run --package xtask --release --"
-build-threski = "build --release -p threski-server"
+build-ibis = "build --release -p ibis-server"
 build-mcp = "build --release -p mcp-bridge"
 dist = "run --package xtask --release -- dist"
 test-all = "test --workspace"

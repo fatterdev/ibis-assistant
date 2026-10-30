@@ -1,0 +1,32 @@
+[package]
+name = "ibis-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+rmcp = { version = "3.7.0", features = [
+    "client",
+    "transport-async-rw",
+    "transport-streamable-http-client",
+    "__reqwest",
+    "transport-streamable-http-client-reqwest",
+] }
+
+[dev-dependencies]
+axum.workspace = true
+tempfile.workspace = true
+# Test stub server: same rmcp version line as the production client (H0 spike pairing).
+rmcp = { version = "3.7.0", features = [
+    "server",
+    "transport-streamable-http-server",
+    "transport-streamable-http-server-session",
+    "transport-worker",
+] }

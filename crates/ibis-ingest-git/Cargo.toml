@@ -1,0 +1,23 @@
+[package]
+name = "ibis-ingest-git"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+ibis-db.workspace = true
+ibis-git.workspace = true
+ibis-ticketing.workspace = true
+chrono.workspace = true
+regex.workspace = true
+surrealdb.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+tempfile.workspace = true
+uuid.workspace = true

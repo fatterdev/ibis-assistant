@@ -2,4 +2,4 @@
 id: scss-calls
 language: css
 rule:
-  pattern: __threski_disabled_scss_calls__
+  pattern: __ibis_disabled_scss_calls__

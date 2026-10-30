@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// D-INSIGHTS: import Microsoft Scope insights into Threski typed memory.
+// D-INSIGHTS: import Microsoft Scope insights into Ibis typed memory.
 // Pull (GET /api/v1/insights) -> classify -> memory_add over Streamable HTTP MCP.
 // Dedup via source_hash; --sync reconciles lifecycle (blocked/downvoted -> memory_delete).
-// Tool arg names must be verified against the live Threski registry at D4 (see PLAN.md).
+// Tool arg names must be verified against the live Ibis registry at D4 (see PLAN.md).
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { randomUUID } from "node:crypto";
@@ -23,7 +23,7 @@ const env = existsSync("evaluations/scope/.env")
   : {};
 const SCOPE_URL = args["scope-url"] ?? process.env.SCOPE_URL ?? env.SCOPE_URL;
 const SCOPE_KEY = args["scope-key"] ?? process.env.SCOPE_API_KEY ?? env.SCOPE_API_KEY;
-const MCP_URL = args["mcp-url"] ?? process.env.THRESKI_MCP_URL ?? env.THRESKI_MCP_URL ?? "http://127.0.0.1:3030/mcp";
+const MCP_URL = args["mcp-url"] ?? process.env.IBIS_MCP_URL ?? env.IBIS_MCP_URL ?? "http://127.0.0.1:3030/mcp";
 const MIN_UPVOTES = Number(args["min-upvotes"] ?? 1);
 const VISIBILITY = args.visibility ?? "team";
 const KIND_OVERRIDE = args.kind ?? null;
@@ -81,7 +81,7 @@ async function mcpInit() {
   await mcp("initialize", {
     protocolVersion: "2024-11-05",
     capabilities: {},
-    clientInfo: { name: "threski-scope-import", version: "0.1.0" },
+    clientInfo: { name: "ibis-scope-import", version: "0.1.0" },
   });
   await mcp("notifications/initialized", undefined, true);
 }

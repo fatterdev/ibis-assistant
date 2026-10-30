@@ -1781,6 +1781,392 @@ dependencies = [
 ]
 
 [[package]]
+name = "ibis-ai"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "chrono",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "ibis-cli"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "clap",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "ibis-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
+name = "ibis-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "flate2",
+ "libc",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "surrealdb",
+ "tar",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zip",
+]
+
+[[package]]
+name = "ibis-git"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "ibis-httpserver"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "bytes",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "ibis-ai",
+ "ibis-core",
+ "ibis-db",
+ "ibis-ingest-logs",
+ "reqwest 0.12.28",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tracing",
+]
+
+[[package]]
+name = "ibis-ingest-code"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "flate2",
+ "ibis-ai",
+ "ibis-core",
+ "ibis-db",
+ "ibis-git",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "surrealdb",
+ "tar",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "walkdir",
+ "zip",
+]
+
+[[package]]
+name = "ibis-ingest-dynamic"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "ibis-core",
+ "ibis-db",
+ "ibis-git",
+ "serde_json",
+ "surrealdb",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ibis-ingest-git"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "ibis-db",
+ "ibis-git",
+ "ibis-ticketing",
+ "regex",
+ "surrealdb",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ibis-ingest-logs"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "ibis-ai",
+ "ibis-core",
+ "ibis-db",
+ "ibis-git",
+ "notify",
+ "regex",
+ "russh",
+ "russh-sftp",
+ "rustls",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "suppaftp",
+ "surrealdb",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "uuid",
+ "walkdir",
+ "webpki-roots 0.26.11",
+]
+
+[[package]]
+name = "ibis-ingest-redmine"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "chrono",
+ "ibis-db",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "ibis-logger"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "ibis-optimization"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "ibis-ai",
+ "ibis-db",
+ "ibis-search",
+ "serde",
+ "serde_json",
+ "surrealdb",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "ibis-repopr"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "ibis-search"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "futures",
+ "ibis-ai",
+ "ibis-core",
+ "ibis-db",
+ "ibis-git",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ibis-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "clap",
+ "futures",
+ "ibis-ai",
+ "ibis-cli",
+ "ibis-core",
+ "ibis-db",
+ "ibis-git",
+ "ibis-httpserver",
+ "ibis-ingest-code",
+ "ibis-ingest-dynamic",
+ "ibis-ingest-git",
+ "ibis-ingest-logs",
+ "ibis-ingest-redmine",
+ "ibis-logger",
+ "ibis-optimization",
+ "ibis-repopr",
+ "ibis-search",
+ "ibis-settings",
+ "ibis-ticketing",
+ "ibis-wizard",
+ "reqwest 0.12.28",
+ "rmcp",
+ "schemars",
+ "serde",
+ "serde_json",
+ "surrealdb",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "windows-service",
+]
+
+[[package]]
+name = "ibis-settings"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "ibis-core",
+ "ibis-httpserver",
+ "ibis-search",
+ "include_dir",
+ "reqwest 0.12.28",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tracing",
+ "uuid",
+ "winreg",
+]
+
+[[package]]
+name = "ibis-ticketing"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "ibis-db",
+ "ibis-ingest-redmine",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ibis-wizard"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "ibis-core",
+ "ibis-settings",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "icu_collections"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4510,392 +4896,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070"
 dependencies = [
  "cfg-if",
-]
-
-[[package]]
-name = "threski-ai"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "chrono",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "threski-cli"
-version = "0.1.0"
-dependencies = [
- "axum",
- "clap",
- "rmcp",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "threski-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "regex",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2 0.10.9",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
- "uuid",
- "walkdir",
-]
-
-[[package]]
-name = "threski-db"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "flate2",
- "libc",
- "regex",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "surrealdb",
- "tar",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
- "uuid",
- "zip",
-]
-
-[[package]]
-name = "threski-git"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "regex",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "threski-httpserver"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "bytes",
- "http-body",
- "http-body-util",
- "hyper",
- "hyper-util",
- "reqwest 0.12.28",
- "rmcp",
- "serde",
- "serde_json",
- "threski-ai",
- "threski-core",
- "threski-db",
- "threski-ingest-logs",
- "tokio",
- "tokio-util",
- "tower",
- "tracing",
-]
-
-[[package]]
-name = "threski-ingest-code"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "flate2",
- "regex",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "surrealdb",
- "tar",
- "tempfile",
- "thiserror",
- "threski-ai",
- "threski-core",
- "threski-db",
- "threski-git",
- "tokio",
- "tracing",
- "walkdir",
- "zip",
-]
-
-[[package]]
-name = "threski-ingest-dynamic"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde_json",
- "surrealdb",
- "tempfile",
- "thiserror",
- "threski-core",
- "threski-db",
- "threski-git",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "threski-ingest-git"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "regex",
- "surrealdb",
- "tempfile",
- "thiserror",
- "threski-db",
- "threski-git",
- "threski-ticketing",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "threski-ingest-logs"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "notify",
- "regex",
- "russh",
- "russh-sftp",
- "rustls",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "suppaftp",
- "surrealdb",
- "tempfile",
- "thiserror",
- "threski-ai",
- "threski-core",
- "threski-db",
- "threski-git",
- "tokio",
- "tokio-rustls",
- "tracing",
- "uuid",
- "walkdir",
- "webpki-roots 0.26.11",
-]
-
-[[package]]
-name = "threski-ingest-redmine"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "chrono",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror",
- "threski-db",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "threski-logger"
-version = "0.1.0"
-dependencies = [
- "tempfile",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "threski-optimization"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "serde",
- "serde_json",
- "surrealdb",
- "threski-ai",
- "threski-db",
- "threski-search",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "threski-repopr"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "base64 0.22.1",
- "regex",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "threski-search"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "futures",
- "regex",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror",
- "threski-ai",
- "threski-core",
- "threski-db",
- "threski-git",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "threski-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "base64 0.22.1",
- "chrono",
- "clap",
- "futures",
- "reqwest 0.12.28",
- "rmcp",
- "schemars",
- "serde",
- "serde_json",
- "surrealdb",
- "tempfile",
- "thiserror",
- "threski-ai",
- "threski-cli",
- "threski-core",
- "threski-db",
- "threski-git",
- "threski-httpserver",
- "threski-ingest-code",
- "threski-ingest-dynamic",
- "threski-ingest-git",
- "threski-ingest-logs",
- "threski-ingest-redmine",
- "threski-logger",
- "threski-optimization",
- "threski-repopr",
- "threski-search",
- "threski-settings",
- "threski-ticketing",
- "threski-wizard",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "windows-service",
-]
-
-[[package]]
-name = "threski-settings"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "include_dir",
- "reqwest 0.12.28",
- "rmcp",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "threski-core",
- "threski-httpserver",
- "threski-search",
- "tokio",
- "tokio-util",
- "tower",
- "tracing",
- "uuid",
- "winreg",
-]
-
-[[package]]
-name = "threski-ticketing"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "base64 0.22.1",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror",
- "threski-db",
- "threski-ingest-redmine",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "threski-wizard"
-version = "0.1.0"
-dependencies = [
- "clap",
- "serde_json",
- "tempfile",
- "thiserror",
- "threski-core",
- "threski-settings",
 ]
 
 [[package]]

@@ -1,0 +1,65 @@
+[package]
+name = "ibis-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "ibis"
+path = "src/main.rs"
+
+[dependencies]
+rmcp = { version = "3.7.0", features = ["server", "macros", "schemars", "transport-async-rw", "transport-io", "transport-streamable-http-server", "transport-streamable-http-server-session", "transport-worker", "client", "transport-streamable-http-client", "__reqwest", "transport-streamable-http-client-reqwest"] }
+schemars = "1.2.3"
+
+ibis-core.workspace = true
+ibis-logger.workspace = true
+ibis-git.workspace = true
+ibis-db.workspace = true
+ibis-ai.workspace = true
+ibis-ingest-git.workspace = true
+ibis-ingest-code.workspace = true
+ibis-ingest-logs.workspace = true
+ibis-ingest-dynamic.workspace = true
+ibis-ingest-redmine.workspace = true
+ibis-search.workspace = true
+ibis-ticketing.workspace = true
+ibis-repopr.workspace = true
+ibis-optimization.workspace = true
+ibis-settings.workspace = true
+ibis-wizard.workspace = true
+ibis-cli.workspace = true
+ibis-httpserver.workspace = true
+
+tokio.workspace = true
+tokio-util = "0.7"
+axum.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+tempfile.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+reqwest.workspace = true
+base64.workspace = true
+# Row decoding + typed datetime bindings (SurrealValue derive expands
+# `surrealdb::` paths, so the crate must be in scope — same pattern as
+# ibis-db).
+surrealdb = { version = "3.3.4", features = ["protocol-ws"] }
+
+# Windows SCM service lifecycle (D10)
+windows-service = "0.8"
+
+[dev-dependencies]
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["full"] }

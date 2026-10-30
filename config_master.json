@@ -3,7 +3,7 @@
   "runtime_mode": "personal",
   "mode": "sse",
   "db_url": "ws://127.0.0.1:8000/rpc",
-  "db_namespace": "threski",
+  "db_namespace": "ibis",
   "db_database": "analysis",
   "db_user": "root",
   "db_password": "root",

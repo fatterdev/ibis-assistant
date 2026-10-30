@@ -2,4 +2,4 @@
 id: html-calls
 language: html
 rule:
-  pattern: __threski_disabled_html_calls__
+  pattern: __ibis_disabled_html_calls__

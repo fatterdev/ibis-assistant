@@ -26,7 +26,7 @@ fn run(cmd: Option<String>) -> Result<()> {
     match cmd.as_str() {
         "build" => cargo(
             &workspace_root,
-            &["build", "--release", "-p", "threski-server"],
+            &["build", "--release", "-p", "ibis-server"],
         ),
         "build-mcp" => cargo(&workspace_root, &["build", "--release", "-p", "mcp-bridge"]),
         "dist" => dist(&workspace_root),
@@ -93,7 +93,7 @@ fn dist(root: &Path) -> Result<()> {
             "build",
             "--release",
             "-p",
-            "threski-server",
+            "ibis-server",
             "-p",
             "mcp-bridge",
         ],
@@ -103,10 +103,10 @@ fn dist(root: &Path) -> Result<()> {
     fs::create_dir_all(&dist_dir).context("creating dist/")?;
 
     fs::copy(
-        target_profile_exe(root, "threski"),
-        dist_dir.join(exe_name("threski")),
+        target_profile_exe(root, "ibis"),
+        dist_dir.join(exe_name("ibis")),
     )
-    .context("copying threski")?;
+    .context("copying ibis")?;
     fs::copy(
         target_profile_exe(root, "mcp-bridge"),
         dist_dir.join(exe_name("mcp-bridge")),

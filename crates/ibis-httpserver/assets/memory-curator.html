@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<!--
+  Ibis Assistant Memory Curator — MCP App (SEP-1865, extension
+  io.modelcontextprotocol/ui). Served as the ui://ibis/memory-curator
+  resource with mimeType text/html;profile=mcp-app.
+
+  The document is fully self-contained (no external script/style/font/image
+  fetches) and speaks the MCP Apps wire contract directly over postMessage —
+  the JSON-RPC 2.0 bridge below mirrors the @modelcontextprotocol/ext-apps
+  AppBridge protocol (ui/initialize, ui/notifications/initialized,
+  ui/notifications/tool-input, ui/notifications/tool-result,
+  ui/notifications/size-changed, tools/call), so no bundler step is needed
+  to embed it in the Rust binary. The embedded CSP is loopback-only: the app
+  never talks to the network, everything flows through the host bridge.
+
+  Textual degradation is guaranteed at both layers: hosts without MCP Apps
+  support never fetch this resource (the memory tools keep their plain-text
+  output), and inside the app a static fallback panel explains the surface
+  when the host bridge never answers.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src http://localhost:* http://127.0.0.1:* http://[::1]:*; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Ibis Assistant Memory Curator</title>
+<style>
+  :root {
+    --color-background-primary: light-dark(#faf8f2, #17151f);
+    --color-background-secondary: light-dark(#f0ece1, #221e2e);
+    --color-text-primary: light-dark(#1f1b2e, #e8e4f4);
+    --color-text-secondary: light-dark(#5a5470, #a49dbd);
+    --color-border-primary: light-dark(#d8d2c4, #3a3450);
+    --color-accent: light-dark(#6d28d9, #a78bfa);
+    --radius: 10px;
+    color-scheme: light dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 14px;
+    background: var(--color-background-primary);
+    color: var(--color-text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+  header h1 { font-size: 15px; margin: 0; letter-spacing: 0.01em; }
+  header .sub { color: var(--color-text-secondary); font-size: 11px; }
+  .ibis-mark {
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--color-accent); margin-right: 2px;
+  }
+  #fallback {
+    border: 1px solid var(--color-border-primary);
+    border-radius: var(--radius);
+    background: var(--color-background-secondary);
+    padding: 12px;
+  }
+  #fallback p { margin: 6px 0; }
+  #fallback code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  #fallback .muted { color: var(--color-text-secondary); }
+  #app[hidden] { display: none; }
+  form#search { display: flex; gap: 6px; margin-bottom: 8px; }
+  form#search input {
+    flex: 1; padding: 7px 10px; border-radius: var(--radius);
+    border: 1px solid var(--color-border-primary);
+    background: var(--color-background-secondary); color: var(--color-text-primary);
+  }
+  form#search button {
+    padding: 7px 12px; border-radius: var(--radius); border: none;
+    background: var(--color-accent); color: #fff; cursor: pointer;
+  }
+  #status { color: var(--color-text-secondary); min-height: 16px; margin-bottom: 6px; }
+  .card {
+    border: 1px solid var(--color-border-primary);
+    border-radius: var(--radius);
+    background: var(--color-background-secondary);
+    padding: 9px 11px; margin-bottom: 7px;
+  }
+  .card .kind {
+    display: inline-block; font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--color-accent); border: 1px solid var(--color-border-primary);
+    border-radius: 999px; padding: 1px 8px; margin-right: 6px;
+  }
+  .card .title { font-weight: 600; }
+  .card .body { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .card .meta { margin-top: 5px; color: var(--color-text-secondary); font-size: 11px; }
+  .card .meta button {
+    background: none; border: none; color: var(--color-accent); cursor: pointer;
+    padding: 0; font-size: 11px; text-decoration: underline;
+  }
+  .card pre {
+    margin: 6px 0 0; padding: 8px; border-radius: 6px;
+    background: var(--color-background-primary);
+    font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+    overflow-wrap: anywhere; white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+<header>
+  <span class="ibis-mark" aria-hidden="true"></span>
+  <h1>Memory Curator</h1>
+  <span class="sub">Ibis Assistant &mdash; living project memory</span>
+</header>
+
+<section id="fallback">
+  <p><strong>Ibis Assistant Memory Curator.</strong> Interactive view over the
+  project's typed memory (decision, fix, rule, constraint, gotcha, design,
+  fact, observation).</p>
+  <p>The memory tools
+  <code>memory_search</code>, <code>memory_expand</code> and
+  <code>memory_add</code> return this app alongside their textual output
+  (<code>_meta.ui.resourceUri &rarr; ui://ibis/memory-curator</code>).</p>
+  <p class="muted" id="fallback-reason">This host did not complete the MCP Apps
+  bridge handshake, so only this static description is shown. The textual tool
+  output remains the guaranteed degradation path.</p>
+</section>
+
+<main id="app" hidden>
+  <form id="search">
+    <input id="query" type="search" placeholder="Search project memory&hellip;" autocomplete="off">
+    <button type="submit">Search</button>
+  </form>
+  <div id="status" role="status" aria-live="polite"></div>
+  <section id="results"></section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var nextId = 1;
+  var pending = Object.create(null);
+  var notifications = Object.create(null);
+  var hostContext = null;
+
+  function post(message) {
+    window.parent.postMessage(message, "*");
+  }
+
+  function sendRequest(method, params) {
+    var id = nextId++;
+    return new Promise(function (resolve, reject) {
+      pending[id] = { resolve: resolve, reject: reject };
+      post({ jsonrpc: "2.0", id: id, method: method, params: params });
+      window.setTimeout(function () {
+        if (pending[id]) {
+          delete pending[id];
+          reject(new Error(method + " timed out"));
+        }
+      }, 15000);
+    });
+  }
+
+  function sendNotification(method, params) {
+    post({ jsonrpc: "2.0", method: method, params: params });
+  }
+
+  window.addEventListener("message", function (event) {
+    var data = event.data;
+    if (!data || data.jsonrpc !== "2.0") { return; }
+    if (data.id !== undefined && data.id !== null && pending[data.id]) {
+      var waiter = pending[data.id];
+      delete pending[data.id];
+      if (data.error) {
+        waiter.reject(new Error(data.error.message || "request failed"));
+      } else {
+        waiter.resolve(data.result);
+      }
+      return;
+    }
+    if (data.method && notifications[data.method]) {
+      notifications[data.method](data.params || {});
+    }
+  });
+
+  var $ = function (id) { return document.getElementById(id); };
+  var results = $("results");
+
+  function status(text) { $("status").textContent = text || ""; }
+
+  function esc(text) {
+    var d = document.createElement("div");
+    d.textContent = String(text == null ? "" : text);
+    return d.innerHTML;
+  }
+
+  function showFallback(reason) {
+    $("app").hidden = true;
+    $("fallback").hidden = false;
+    $("fallback-reason").textContent = reason;
+  }
+
+  function applyTheme() {
+    var theme = hostContext && hostContext.theme;
+    if (theme === "light" || theme === "dark") {
+      document.documentElement.style.colorScheme = theme;
+    }
+  }
+
+  // Tool results arrive both as host notifications (ui/notifications/
+  // tool-result) and as our own tools/call responses; both are
+  // CallToolResult shapes whose first text block is the JSON payload the
+  // server guarantees (textual output is always present).
+  function renderResult(result) {
+    if (!result) { status("Empty result."); return; }
+    if (result.isError) {
+      var first = (result.content || [])[0] || {};
+      status("Tool error: " + (first.text || "unknown"));
+      return;
+    }
+    var blocks = result.content || [];
+    var text = blocks.filter(function (b) { return b.type === "text"; })
+      .map(function (b) { return b.text; }).join("\n");
+    var data;
+    try { data = JSON.parse(text); } catch (e) { data = null; }
+    results.innerHTML = "";
+    if (Array.isArray(data)) {
+      if (!data.length) { status("No memories matched."); }
+      data.forEach(renderMemoryCard);
+      status(data.length + " memor" + (data.length === 1 ? "y" : "ies") + ".");
+    } else if (data && data.id) {
+      renderCreatedCard(data);
+      status("Memory " + data.id + " " + (data.status || "created") + ".");
+    } else if (data && (data.memory || data.links)) {
+      renderMemoryCard(data.memory || data);
+      if (Array.isArray(data.links)) {
+        data.links.forEach(function (l) { renderLinkRow(l); });
+      }
+      status("Expanded " + ((data.memory || data).id || "memory") + ".");
+    } else if (text) {
+      renderRaw(text);
+      status("");
+    } else {
+      status("No content.");
+    }
+    reportSize();
+  }
+
+  function renderMemoryCard(m) {
+    var card = document.createElement("div");
+    card.className = "card";
+    var head = "<span class=\"kind\">" + esc(m.kind || "memory") + "</span>"
+      + "<span class=\"title\">" + esc(m.title || m.id || "(untitled)") + "</span>";
+    var metaBits = [];
+    if (m.status) { metaBits.push(esc(m.status)); }
+    if (m.score !== undefined) { metaBits.push("score " + Number(m.score).toFixed(3)); }
+    if (m.updated_at) { metaBits.push(esc(m.updated_at)); }
+    if (m.id) {
+      metaBits.push("<button type=\"button\" data-id=\"" + esc(m.id) + "\">expand</button>");
+    }
+    card.innerHTML = head
+      + "<div class=\"body\">" + esc(m.content || "") + "</div>"
+      + "<div class=\"meta\">" + metaBits.join(" &middot; ") + "</div>";
+    var btn = card.querySelector("button[data-id]");
+    if (btn) {
+      btn.addEventListener("click", function () { expandMemory(btn.getAttribute("data-id")); });
+    }
+    results.appendChild(card);
+  }
+
+  function renderLinkRow(l) {
+    var row = document.createElement("div");
+    row.className = "card";
+    var rel = l && (l.rel || l.edge_type || l.kind) || "link";
+    var target = l && (l.target || l.to || l.id) || l;
+    row.innerHTML = "<span class=\"kind\">" + esc(rel) + "</span>"
+      + "<span class=\"title\">" + esc(typeof target === "object" ? (target.title || target.id) : target) + "</span>";
+    results.appendChild(row);
+  }
+
+  function renderCreatedCard(d) {
+    var card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = "<span class=\"kind\">created</span>"
+      + "<span class=\"title\">" + esc(d.id) + "</span>"
+      + "<div class=\"meta\">status " + esc(d.status || "created")
+      + " &middot; stored in the project memory graph</div>";
+    results.appendChild(card);
+  }
+
+  function renderRaw(text) {
+    var card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = "<pre>" + esc(text) + "</pre>";
+    results.appendChild(card);
+  }
+
+  function expandMemory(id) {
+    status("Expanding " + id + "&hellip;");
+    sendRequest("tools/call", {
+      name: "memory_expand",
+      arguments: { id: id, depth: 1 }
+    }).then(renderResult, function (err) {
+      status("Expand failed: " + err.message);
+    });
+  }
+
+  $("search").addEventListener("submit", function (event) {
+    event.preventDefault();
+    var q = $("query").value.trim();
+    if (!q) { return; }
+    status("Searching memory&hellip;");
+    sendRequest("tools/call", {
+      name: "memory_search",
+      arguments: { query: q, limit: 10 }
+    }).then(renderResult, function (err) {
+      status("Search failed: " + err.message);
+    });
+  });
+
+  notifications["ui/notifications/tool-input"] = function (params) {
+    var keys = Object.keys(params.arguments || {});
+    if (keys.length) {
+      status("Tool input: " + keys.join(", "));
+    }
+  };
+  notifications["ui/notifications/tool-result"] = renderResult;
+  notifications["ui/notifications/tool-cancelled"] = function (params) {
+    status("Tool cancelled" + (params.reason ? ": " + params.reason : "."));
+  };
+  notifications["ui/notifications/host-context-changed"] = function (params) {
+    hostContext = Object.assign({}, hostContext || {}, params);
+    applyTheme();
+  };
+
+  // MCP Apps size reporting keeps flexible-height hosts sized to the content.
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver(function () { reportSize(); }).observe(document.body);
+  }
+  function reportSize() {
+    var rect = document.body.getBoundingClientRect();
+    sendNotification("ui/notifications/size-changed", {
+      width: Math.ceil(rect.width),
+      height: Math.ceil(document.body.scrollHeight)
+    });
+  }
+
+  // ui/initialize per SEP-1865: capabilities first, initialized notification
+  // after the host answers. If the bridge never answers (host without MCP
+  // Apps support, plain preview, etc.) the static fallback panel stays up.
+  var handshakeTimer = window.setTimeout(function () {
+    showFallback("The host did not answer the MCP Apps bridge handshake "
+      + "(ui/initialize timed out), so only this static description is shown. "
+      + "The textual tool output remains the guaranteed degradation path.");
+  }, 3000);
+
+  sendRequest("ui/initialize", {
+    protocolVersion: "2026-01-26",
+    clientInfo: { name: "ibis-memory-curator", version: "0.2.0" },
+    appCapabilities: { availableDisplayModes: ["inline"] }
+  }).then(function (result) {
+    window.clearTimeout(handshakeTimer);
+    hostContext = (result && result.hostContext) || null;
+    applyTheme();
+    sendNotification("ui/notifications/initialized", {});
+    $("fallback").hidden = true;
+    $("app").hidden = false;
+    status("Bridge ready" + (result && result.hostInfo
+      ? " (" + result.hostInfo.name + ")" : "") + ".");
+    reportSize();
+  }, function (err) {
+    window.clearTimeout(handshakeTimer);
+    showFallback("The MCP Apps bridge handshake failed (" + err.message
+      + "), so only this static description is shown. The textual tool output "
+      + "remains the guaranteed degradation path.");
+  });
+})();
+</script>
+</body>
+</html>

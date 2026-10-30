@@ -1,25 +1,25 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/threski-core",
-    "crates/threski-logger",
-    "crates/threski-git",
-    "crates/threski-db",
-    "crates/threski-ai",
-    "crates/threski-ingest-git",
-    "crates/threski-ingest-code",
-    "crates/threski-ingest-logs",
-    "crates/threski-ingest-dynamic",
-    "crates/threski-ingest-redmine",
-    "crates/threski-search",
-    "crates/threski-ticketing",
-    "crates/threski-repopr",
-    "crates/threski-optimization",
-    "crates/threski-settings",
-    "crates/threski-wizard",
-    "crates/threski-cli",
-    "crates/threski-httpserver",
-    "crates/threski-server",
+    "crates/ibis-core",
+    "crates/ibis-logger",
+    "crates/ibis-git",
+    "crates/ibis-db",
+    "crates/ibis-ai",
+    "crates/ibis-ingest-git",
+    "crates/ibis-ingest-code",
+    "crates/ibis-ingest-logs",
+    "crates/ibis-ingest-dynamic",
+    "crates/ibis-ingest-redmine",
+    "crates/ibis-search",
+    "crates/ibis-ticketing",
+    "crates/ibis-repopr",
+    "crates/ibis-optimization",
+    "crates/ibis-settings",
+    "crates/ibis-wizard",
+    "crates/ibis-cli",
+    "crates/ibis-httpserver",
+    "crates/ibis-server",
     "crates/mcp-bridge",
     "crates/xtask",
 ]
@@ -29,28 +29,28 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["fatterdev <dev@fatter.dev>"]
-repository = "https://github.com/fatterdev/threski-studio"
+repository = "https://github.com/fatterdev/ibis-assistant"
 
 [workspace.dependencies]
-threski-core = { path = "crates/threski-core" }
-threski-logger = { path = "crates/threski-logger" }
-threski-git = { path = "crates/threski-git" }
-threski-db = { path = "crates/threski-db" }
-threski-ai = { path = "crates/threski-ai" }
-threski-ingest-git = { path = "crates/threski-ingest-git" }
-threski-ingest-code = { path = "crates/threski-ingest-code" }
-threski-ingest-logs = { path = "crates/threski-ingest-logs" }
-threski-ingest-dynamic = { path = "crates/threski-ingest-dynamic" }
-threski-ingest-redmine = { path = "crates/threski-ingest-redmine" }
-threski-search = { path = "crates/threski-search" }
-threski-ticketing = { path = "crates/threski-ticketing" }
-threski-repopr = { path = "crates/threski-repopr" }
-threski-optimization = { path = "crates/threski-optimization" }
-threski-settings = { path = "crates/threski-settings" }
-threski-wizard = { path = "crates/threski-wizard" }
-threski-cli = { path = "crates/threski-cli" }
-threski-httpserver = { path = "crates/threski-httpserver" }
-threski-server = { path = "crates/threski-server" }
+ibis-core = { path = "crates/ibis-core" }
+ibis-logger = { path = "crates/ibis-logger" }
+ibis-git = { path = "crates/ibis-git" }
+ibis-db = { path = "crates/ibis-db" }
+ibis-ai = { path = "crates/ibis-ai" }
+ibis-ingest-git = { path = "crates/ibis-ingest-git" }
+ibis-ingest-code = { path = "crates/ibis-ingest-code" }
+ibis-ingest-logs = { path = "crates/ibis-ingest-logs" }
+ibis-ingest-dynamic = { path = "crates/ibis-ingest-dynamic" }
+ibis-ingest-redmine = { path = "crates/ibis-ingest-redmine" }
+ibis-search = { path = "crates/ibis-search" }
+ibis-ticketing = { path = "crates/ibis-ticketing" }
+ibis-repopr = { path = "crates/ibis-repopr" }
+ibis-optimization = { path = "crates/ibis-optimization" }
+ibis-settings = { path = "crates/ibis-settings" }
+ibis-wizard = { path = "crates/ibis-wizard" }
+ibis-cli = { path = "crates/ibis-cli" }
+ibis-httpserver = { path = "crates/ibis-httpserver" }
+ibis-server = { path = "crates/ibis-server" }
 
 tokio = { version = "1", features = ["full"] }
 axum = "0.8"
