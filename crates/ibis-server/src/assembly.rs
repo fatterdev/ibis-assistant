@@ -15,7 +15,7 @@ use ibis_ai::batch_manager::{BatchManager, DiscoveryRootProbe, GitPatchSource};
 use ibis_core::config::Config;
 use ibis_db::executor::{Executor, SurrealDbExecutor, Vars};
 use ibis_db::process::ProcessManager;
-use ibis_db::value::{SurrealValue, Value};
+use ibis_db::value::{RecordId, SurrealValue, Value};
 use ibis_ingest_dynamic::queue::{IngestionJob, ProcessJobFn, ProjectIngestionManager};
 use ibis_repopr::service::Service as RepoprService;
 use ibis_search::search::SearchService;
@@ -459,8 +459,22 @@ pub struct DbChunkStore(pub Arc<dyn Executor>);
 
 #[derive(Debug, SurrealValue)]
 struct IdContentRow {
-    id: Option<String>,
+    /// Record ids decode as driver `RecordId` values, not strings (the
+    /// `SurrealValue` codec keeps native shapes) — normalized via
+    /// [`ibis_db::ids::record_id_to_plain`] before use.
+    id: Option<RecordId>,
     content: Option<String>,
+}
+
+/// `SELECT id, hash, date, repo.name as repo_name, message FROM commit …`
+/// row projection (record ids decode like [`IdContentRow::id`]).
+#[derive(Debug, SurrealValue)]
+struct CommitRow {
+    id: Option<RecordId>,
+    hash: Option<String>,
+    date: Option<String>,
+    repo_name: Option<String>,
+    message: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -486,9 +500,7 @@ impl ibis_ai::ChunkStore for DbChunkStore {
         Ok(rows
             .into_iter()
             .map(|r| ibis_ai::PendingChunkRow {
-                id: r
-                    .id
-                    .map(|id| ibis_db::ids::coerce_record_id(&Value::from_t(id))),
+                id: r.id.map(|rid| ibis_db::ids::record_id_to_plain(&rid)),
                 content: r.content,
             })
             .collect())
@@ -506,14 +518,6 @@ impl ibis_ai::ChunkStore for DbChunkStore {
             .execute(&sql)
             .await
             .map_err(|e| ibis_ai::AiError::other(e.to_string()))?;
-        #[derive(Debug, SurrealValue)]
-        struct CommitRow {
-            id: Option<String>,
-            hash: Option<String>,
-            date: Option<String>,
-            repo_name: Option<String>,
-            message: Option<String>,
-        }
         let rows = ibis_db::value::decode_row_list::<CommitRow>(
             outcome.first().unwrap_or(&Value::None),
             &sql,
@@ -522,9 +526,7 @@ impl ibis_ai::ChunkStore for DbChunkStore {
         Ok(rows
             .into_iter()
             .map(|r| ibis_ai::PendingCommitRow {
-                id: r
-                    .id
-                    .map(|id| ibis_db::ids::coerce_record_id(&Value::from_t(id))),
+                id: r.id.map(|rid| ibis_db::ids::record_id_to_plain(&rid)),
                 hash: r.hash.unwrap_or_default(),
                 repo_name: r.repo_name.unwrap_or_default(),
                 message: r.message.unwrap_or_default(),
@@ -726,4 +728,98 @@ pub fn trigger_background_indexing(
         }
         tracing::info!("Background: Initial indexing complete.");
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ibis_db::value::Object;
+    use surrealdb::types::{RecordIdKey, ToSql};
+
+    /// Regression: the BatchManager pending-row projections decode the `id`
+    /// column as a driver `RecordId` (SurrealDB returns record ids natively),
+    /// not as a string — a string field made every poll fail with
+    /// "Failed to convert to none | string: Expected string, got record".
+    fn row_object(pairs: Vec<(&str, Value)>) -> Value {
+        let mut obj = Object::new();
+        for (k, v) in pairs {
+            obj.insert(k.to_string(), v);
+        }
+        Value::Object(obj)
+    }
+
+    #[test]
+    fn pending_chunk_row_decodes_record_ids() {
+        let raw = row_object(vec![
+            (
+                "id",
+                Value::RecordId(surrealdb::types::RecordId::new(
+                    "file_chunk",
+                    "chunk-1",
+                )),
+            ),
+            ("content", Value::String("chunk body".into())),
+        ]);
+        let sql = "SELECT id, content FROM file_chunk WHERE batch_status = 'pending' LIMIT 100;";
+        let rows = ibis_db::value::decode_row_list::<IdContentRow>(&raw, sql).expect("decode");
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row.content.as_deref(), Some("chunk body"));
+        let id = row
+            .id
+            .as_ref()
+            .map(ibis_db::ids::record_id_to_plain)
+            .expect("record id decoded");
+        assert_eq!(id, "file_chunk:chunk-1");
+        // The normalized form must round-trip as a valid record id for the
+        // interpolated `UPDATE {id} SET batch_status = 'completed'` writes.
+        assert!(
+            ibis_db::ids::is_safe_record_id(&id),
+            "normalized id must pass the write guard: {id}"
+        );
+    }
+
+    #[test]
+    fn pending_commit_row_decodes_record_ids() {
+        let raw = row_object(vec![
+            (
+                "id",
+                Value::RecordId(surrealdb::types::RecordId::new("commit", "abc123")),
+            ),
+            ("hash", Value::String("abc123".into())),
+            ("date", Value::String("2026-10-30T00:00:00Z".into())),
+            ("repo_name", Value::String("ibis-assistant".into())),
+            ("message", Value::String("feat: x".into())),
+        ]);
+        let sql = "SELECT id, hash, date, repo.name as repo_name, message FROM commit \
+                   WHERE batch_status = 'pending' LIMIT 100;";
+        let rows = ibis_db::value::decode_row_list::<CommitRow>(&raw, sql).expect("decode");
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row.hash.as_deref(), Some("abc123"));
+        assert_eq!(row.repo_name.as_deref(), Some("ibis-assistant"));
+        let id = row
+            .id
+            .as_ref()
+            .map(ibis_db::ids::record_id_to_plain)
+            .expect("record id decoded");
+        assert_eq!(id, "commit:abc123");
+    }
+
+    /// Ingest-carried keys (hashes/sanitized ids) keep the unwrapped plain
+    /// form valid as a record id. Driver `to_sql` renders string keys with
+    /// backticks — the project-canonical guillemet form comes from
+    /// [`ibis_db::ids::format_record`], not from the driver.
+    #[test]
+    fn record_id_to_plain_keys_stay_valid_record_ids() {
+        let record = surrealdb::types::RecordId {
+            table: "file_chunk".into(),
+            key: RecordIdKey::String("aB3_x-9".into()),
+        };
+        let plain = ibis_db::ids::record_id_to_plain(&record);
+        assert_eq!(plain, "file_chunk:aB3_x-9");
+        assert!(ibis_db::ids::is_safe_record_id(&plain), "{plain}");
+        assert_eq!(Value::RecordId(record.clone()).to_sql(), "file_chunk:`aB3_x-9`");
+        assert_eq!(ibis_db::ids::format_record(&record), "file_chunk:⟨aB3_x-9⟩");
+    }
 }
