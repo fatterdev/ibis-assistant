@@ -224,6 +224,43 @@ fn is_plugin_launch(args: &[String]) -> bool {
     threski_core::config::is_plugin_runtime(&peek_flag(args, &["-runtime-mode", "--runtime-mode"]))
 }
 
+/// The server long flags (matches the [`ServerFlags`] surface).
+const SERVER_LONG_FLAGS: &[&str] = &[
+    "port",
+    "mode",
+    "scan",
+    "root",
+    "log-file",
+    "log-level",
+    "runtime-mode",
+    "workspace",
+    "config",
+];
+
+/// Go `flag` parity: the spawn contract everywhere (ide-host, the VSIX MCP
+/// provider, `plugin/mcp.json`, `cursor-plugin/mcp.json`, evaluation
+/// profiles, the install guides) passes single-dash long flags
+/// (`threski -mode stdio -runtime-mode plugin`), which Go accepted as
+/// `--flag`; clap only accepts the double-dash form. Normalize the known
+/// server flags before the clap parse — value tokens never matching a flag
+/// name pass through untouched, so only the flag style is rewritten.
+fn normalize_flag_style(args: &[String]) -> Vec<String> {
+    args.iter()
+        .map(|arg| {
+            let bare = arg.split('=').next().unwrap_or(arg);
+            if let Some(name) = bare.strip_prefix('-') {
+                if !name.is_empty()
+                    && !name.starts_with('-')
+                    && SERVER_LONG_FLAGS.contains(&name)
+                {
+                    return format!("-{arg}");
+                }
+            }
+            arg.clone()
+        })
+        .collect()
+}
+
 /// `shouldRunWizard
 fn should_run_wizard(args: &[String]) -> bool {
     use std::io::IsTerminal as _;
@@ -299,6 +336,10 @@ fn run_server(args: &[String]) -> ! {
 }
 
 async fn run_server_async(args: Vec<String>) -> i32 {
+    // 0. Go-style single-dash flags (`-mode stdio`) normalized to clap's
+    // `--mode stdio` before any consumer.
+    let args = normalize_flag_style(&args);
+
     // 1. Pre-flag config/workspace handling
     let config_path = peek_flag(&args, &["-config", "--config"]);
     if is_plugin_launch(&args) && std::env::var("RUNTIME_MODE").unwrap_or_default().is_empty() {
@@ -727,5 +768,88 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+#[cfg(test)]
+mod flag_parity_tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> ServerFlags {
+        let normalized = normalize_flag_style(
+            &args.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+        );
+        ServerFlags::try_parse_from(std::iter::once("threski".to_string()).chain(normalized))
+            .expect("normalized spawn args parse")
+    }
+
+    /// The exact spawn vectors every IDE surface uses (`-mode stdio
+    /// -runtime-mode plugin`) parse like Go's flag package accepted them.
+    #[test]
+    fn ide_spawn_args_parse_with_single_dash() {
+        let flags = parse(&["-mode", "stdio", "-runtime-mode", "plugin"]);
+        assert_eq!(flags.mode.as_deref(), Some("stdio"));
+        assert_eq!(flags.runtime_mode.as_deref(), Some("plugin"));
+    }
+
+    /// `-flag=value` (single dash) and `--flag value` (double dash) keep
+    /// working; a `--flag=value` form is untouched.
+    #[test]
+    fn equals_form_and_double_dash_are_preserved() {
+        let flags = parse(&["-mode=stdio", "--runtime-mode", "personal", "-port=3999"]);
+        assert_eq!(flags.mode.as_deref(), Some("stdio"));
+        assert_eq!(flags.runtime_mode.as_deref(), Some("personal"));
+        assert_eq!(flags.port, Some(3999));
+        let flags = parse(&["--mode", "sse", "--log-level", "DEBUG"]);
+        assert_eq!(flags.mode.as_deref(), Some("sse"));
+        assert_eq!(flags.log_level.as_deref(), Some("DEBUG"));
+    }
+
+    /// Value tokens that begin with `-` (unknown names) pass through
+    /// untouched — only the known server flags are rewritten.
+    #[test]
+    fn unknown_dashed_values_pass_through() {
+        let args = normalize_flag_style(
+            &["-root", "-mydir", "-log-level", "-debug", "-h"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(args, ["--root", "-mydir", "--log-level", "-debug", "-h"]);
+    }
+
+    /// Every long flag of the [`ServerFlags`] surface round-trips through
+    /// the single-dash spelling.
+    #[test]
+    fn all_server_flags_accept_the_single_dash_form() {
+        let cases: Vec<(&str, &str)> = vec![
+            ("-port", "4123"),
+            ("-mode", "sse"),
+            ("-scan", "true"),
+            ("-root", "C:/repos"),
+            ("-log-file", "server.log"),
+            ("-log-level", "INFO"),
+            ("-runtime-mode", "plugin"),
+            ("-workspace", "C:/dev/repo"),
+            ("-config", "config.json"),
+        ];
+        let raw: Vec<String> = cases
+            .iter()
+            .flat_map(|(flag, value)| vec![flag.to_string(), value.to_string()])
+            .collect();
+        let normalized = normalize_flag_style(&raw);
+        let flags = ServerFlags::try_parse_from(
+            std::iter::once(String::from("threski")).chain(normalized),
+        )
+        .expect("all single-dash flags parse");
+        assert_eq!(flags.port, Some(4123));
+        assert_eq!(flags.mode.as_deref(), Some("sse"));
+        assert_eq!(flags.scan, Some(true));
+        assert_eq!(flags.root.as_deref(), Some("C:/repos"));
+        assert_eq!(flags.log_file.as_deref(), Some("server.log"));
+        assert_eq!(flags.log_level.as_deref(), Some("INFO"));
+        assert_eq!(flags.runtime_mode.as_deref(), Some("plugin"));
+        assert_eq!(flags.workspace.as_deref(), Some("C:/dev/repo"));
+        assert_eq!(flags.config.as_deref(), Some("config.json"));
     }
 }

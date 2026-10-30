@@ -4,6 +4,19 @@ All notable changes to Threski Studio are documented here.
 
 ## [Unreleased]
 
+- **fix(cli): accept go-style single-dash flags for ide spawns** - the spawn
+  contract used by every IDE surface (ide-host, the VSIX MCP provider,
+  `plugin/mcp.json`, `cursor-plugin/mcp.json`, evaluation profiles) passes
+  Go-flavored long flags (`threski -mode stdio -runtime-mode plugin`), which
+  clap rejected with a usage error and exit code 2 - the child died before
+  the MCP `initialize` response ("child exited before MCP response id=1").
+  The server launcher now normalizes the known server long flags from the
+  single-dash spelling (and `-flag=value`) to clap's form before parsing;
+  unknown dashed values pass through untouched. Verify: flag-parity unit
+  tests (exact IDE spawn vectors, equals/double-dash forms, all nine flags),
+  live stdio handshake with `-mode stdio -runtime-mode plugin` answering
+  `id=1`.
+
 - **feat(server): memory curator mcp app with text fallback** - the MCP App
   "Threski Studio Memory Curator" (SEP-1865, extension
   `io.modelcontextprotocol/ui`): the httpserver embeds a self-contained app
