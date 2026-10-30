@@ -35,6 +35,13 @@ All notable changes to Ibis Assistant are documented here.
   provenance, chat instruction, walkthrough, MCP provider) and the plugin
   (install from source, skills, MCP server, hooks, agents, automations),
   plus the publish-gate steps (②③⑤, workflow dispatch, marketplace push).
+- **chore(evals): computer-use ui test runner for r3/r4** —
+  `scripts/ui-test/` (tasks.json + `run-ui-tests.mjs` + README): machine
+  readable task pack (R3.1–R3.8, P4.1–P4.6) driven by paste-ready prompts for
+  UI-TARS Desktop (installed via winget, `ByteDance.UI-TARS` 0.2.4), with
+  evidence runs under `artifacts/ui-tests/` (gitignored) and
+  results.json/results.md collection — Parte B of the R3/R4 checklist can now
+  be executed (and evidenced) by a GUI agent instead of hand-only clicks.
 
 ## [0.2.0] — 2026-10-30
 

@@ -11,6 +11,7 @@ node_modules/
 *.vsix
 evaluations/scope/.state/
 .ruff_cache/
+artifacts/
 surreal
 surreal.exe
 sg

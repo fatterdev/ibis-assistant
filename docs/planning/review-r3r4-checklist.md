@@ -30,6 +30,16 @@ Integrazione continua del packaging: `npm run package` in `vscode-extension/` �
 
 ## Parte B — R3: VSIX installata in VS Code 1.144 (runbook owner)
 
+> **Automazione disponibile**: `node scripts/ui-test/run-ui-tests.mjs`
+> (guida in [scripts/ui-test/README.md](../../scripts/ui-test/README.md)) —
+> genera i task paste-ready per **UI-TARS Desktop** (computer-use, winget
+> `ByteDance.UI-TARS` v0.2.4, `%LOCALAPPDATA%\UiTars\UI-TARS.exe`, con VLM
+> configurato nelle sue Settings) da `scripts/ui-test/tasks.json`
+> (R3.1–R3.8 + P4.1–P4.6), raccoglie le evidenze in
+> `artifacts/ui-tests/<run>/` e produce `results.json`/`results.md`
+> pronti per questa checklist. Usabile anche senza agente: il prompt di
+> ogni task guida l'owner passo-passo.
+
 Pre-flight: binario `ibis` sul PATH (o `ibis.runtime.binaryPath`), Ollama
 attivo su `11434` con `nomic-embed-text` (serve a `memory_search` nella tree
 view), account VS Code con Copilot agent mode.

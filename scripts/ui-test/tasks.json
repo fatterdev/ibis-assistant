@@ -1,0 +1,160 @@
+{
+  "version": "0.3.0",
+  "checklist": "docs/planning/review-r3r4-checklist.md",
+  "evidenceDir": "artifacts/ui-tests",
+  "notes": [
+    "Tasks are computer-use instructions for UI-TARS Desktop (or any GUI agent).",
+    "Evidence convention: <taskId>-<NN>-<slug>.png inside the run folder.",
+    "VSIX under test: vscode-extension/ibis-assistant-1.0.0.vsix (fatterdev.ibis-assistant)."
+  ],
+  "tasks": [
+    {
+      "id": "R3.1",
+      "title": "VSIX installed and activated",
+      "instruction": "In VS Code (workspace C:\\devsrc\\ibis-assistant), open the Output panel (Ctrl+Shift+U), select the channel 'Ibis Assistant' from the dropdown, and read the most recent activation line.",
+      "expected": [
+        "Output channel named 'Ibis Assistant' exists",
+        "activation line matches /activated \\(ide-host: (package|vendor), engine: 1\\.144\\./",
+        "in a packaged install the ide-host source is 'vendor'; in dev it is 'package'"
+      ],
+      "evidence": "R3.1-01-output-channel.png"
+    },
+    {
+      "id": "R3.2",
+      "title": "Status bar item",
+      "instruction": "Look at the bottom-right status bar of VS Code. Find the item whose label contains 'Ibis'. Note its icon and text (spawn or attach), then click it and observe the notification/output that opens.",
+      "expected": [
+        "status bar shows 'Ibis spawn' or 'Ibis attach' with a terminal or cloud icon",
+        "optional glyphs: lightning (LM bridge listening), check (MCP provider registered)",
+        "clicking runs Ibis Assistant: Status (toast and/or output channel per ibis.status.outputMode)"
+      ],
+      "evidence": "R3.2-01-status-bar.png, R3.2-02-status-click.png"
+    },
+    {
+      "id": "R3.3",
+      "title": "Memory tree view",
+      "instruction": "Open the activity bar, click the Ibis Assistant icon, and in the 'Memory' view expand the 'decision' kind. Then run the search (magnifier icon in the view title) with query 'settings' and read one entry by clicking it.",
+      "expected": [
+        "view shows 8 kinds: decision, fix, rule, constraint, gotcha, design, fact, ask",
+        "expanding a kind lists entries from MCP memory_search (requires Ollama/embedding provider up)",
+        "clicking an entry opens a read-only 'ibis-memory:' document with metadata header and content",
+        "search adds a 'search: \"...\"' root node with matches; refresh icon reloads expanded nodes"
+      ],
+      "evidence": "R3.3-01-tree-kinds.png, R3.3-02-tree-entries.png, R3.3-03-detail-doc.png, R3.3-04-search.png"
+    },
+    {
+      "id": "R3.4",
+      "title": "Remember Selection with provenance",
+      "instruction": "Select 3-5 lines of code in any file of the workspace, right-click the selection, choose 'Ibis Assistant: Remember Selection', pick kind 'fact' in the quick pick, type title 'UI smoke provenance check', and confirm. Read the final toast.",
+      "expected": [
+        "quick pick shows the 7 kinds (decision, fix, rule, constraint, gotcha, design, fact)",
+        "final toast contains 'Ibis Remembered (fact, team)' and the file:start-end range",
+        "the stored memory content ends with 'Source: <relative-path>:<start>-<end>' (verify via tree view detail)"
+      ],
+      "evidence": "R3.4-01-context-menu.png, R3.4-02-kind-pick.png, R3.4-03-toast.png, R3.4-04-memory-detail.png"
+    },
+    {
+      "id": "R3.5",
+      "title": "Remember File from editor and explorer",
+      "instruction": "Right-click a file in the VS Code Explorer, choose 'Ibis Assistant: Remember File', pick kind 'fact', type title 'UI smoke file check', and type content 'This file exists at UI smoke time'. Repeat once from an open editor without selection using the Command Palette.",
+      "expected": [
+        "both entry points complete with a toast 'Ibis Remembered (fact, team) for <relative-path>'",
+        "memory content ends with 'Source: <relative-path>:1-<N> (whole file)'"
+      ],
+      "evidence": "R3.5-01-explorer-menu.png, R3.5-02-toast.png"
+    },
+    {
+      "id": "R3.6",
+      "title": "Chat instruction session contract",
+      "instruction": "In Copilot Chat (agent mode), type '/', find 'ibis-session-contract' in the instructions picker, attach it, then ask the agent to start working on a small task and watch whether it calls load_session_context exactly once at the start.",
+      "expected": [
+        "instruction 'ibis-session-contract' is attachable from the '/' picker",
+        "the agent calls load_session_context once per session and avoids memory_* spam",
+        "the contract does NOT appear as a slash skill (no duplicates across VSIX/plugin)"
+      ],
+      "evidence": "R3.6-01-instruction-picker.png, R3.6-02-agent-session.png"
+    },
+    {
+      "id": "R3.7",
+      "title": "Onboarding walkthrough",
+      "instruction": "Open Help > Welcome, go to the 'Get Started with Ibis Assistant' walkthrough, and click through all 4 steps. Click the command links in step 1 and step 4.",
+      "expected": [
+        "4 steps present: install-binary, choose-backend, browse-memory, remember-with-provenance",
+        "command links open extension settings / the Ibis Assistant view / Remember commands",
+        "steps get checked by their completion events (onView, onSettingChanged, onCommand)"
+      ],
+      "evidence": "R3.7-01-walkthrough.png"
+    },
+    {
+      "id": "R3.8",
+      "title": "MCP provider confirmations",
+      "instruction": "In Copilot Chat agent mode send: 'Use the Ibis MCP server to call load_session_context and get_working_state for this workspace.' Then send: 'Use memory_add to store a fact titled \"R3 smoke\" with content \"R3 ui smoke entry\".' Watch for confirmation dialogs.",
+      "expected": [
+        "read-only tools (load_session_context, get_working_state) execute with ZERO confirmation dialogs",
+        "memory_add (readOnlyHint: false) shows a confirmation dialog before executing"
+      ],
+      "evidence": "R3.8-01-readonly-run.png, R3.8-02-mutant-confirm.png"
+    },
+    {
+      "id": "P4.1",
+      "title": "Plugin skills as slash commands",
+      "instruction": "In Copilot Chat, type '/ibis' in the prompt box and list every completion shown. Then run '/ibis status' and read the reply.",
+      "expected": [
+        "5 skills appear: /ibis usage, /ibis readiness, /ibis status, /ibis remember, /ibis set-working-state",
+        "/ibis status returns backend/AI/ticketing status via settings_get"
+      ],
+      "evidence": "P4.1-01-skill-picker.png, P4.1-02-status-reply.png"
+    },
+    {
+      "id": "P4.2",
+      "title": "Plugin MCP server started",
+      "instruction": "Open Command Palette, run 'MCP: List Servers', and check the entry named 'ibis' contributed by the plugin (spawn child). Read its state.",
+      "expected": [
+        "an 'ibis' MCP server is listed and startable (spawn: ibis -mode stdio -runtime-mode plugin)",
+        "tools become available in agent mode after start"
+      ],
+      "evidence": "P4.2-01-mcp-list.png"
+    },
+    {
+      "id": "P4.3",
+      "title": "sessionStart hook injects contract",
+      "instruction": "Start a NEW agent session in chat. Ask: 'What instructions were injected at session start about Ibis?' and check the GitHub Copilot Chat Hooks output log for a sessionStart command hook run of session-start.mjs.",
+      "expected": [
+        "the agent received the Ibis session contract (load_session_context once; memory hygiene)",
+        "the hook log shows the sessionStart hook for the ibis plugin executed successfully"
+      ],
+      "evidence": "P4.3-01-agent-reply.png, P4.3-02-hooks-log.png"
+    },
+    {
+      "id": "P4.4",
+      "title": "agentStop hook conditional reminder",
+      "instruction": "Ask the agent to make a small code edit (e.g. add a comment line to a scratch file) and end the turn WITHOUT capturing any memory. Observe whether the turn is extended once with a reminder about capture_observation/memory_add. Then let the agent capture a memory and end the turn again.",
+      "expected": [
+        "first stop: exactly ONE forced continuation with the Ibis end-of-turn reminder",
+        "second stop (after a capture): turn ends normally, no reminder loop",
+        "no runaway loops (max one forced continuation per turn)"
+      ],
+      "evidence": "P4.4-01-forced-reminder.png, P4.4-02-quiet-stop.png"
+    },
+    {
+      "id": "P4.5",
+      "title": "Forensics agent output format",
+      "instruction": "In chat, select the '@ibis-forensics' agent and ask: 'Why does scripts/sync-ide-host.mjs exist in this repo?' Wait for the final answer.",
+      "expected": [
+        "answer contains Finding / Evidence / Confidence sections",
+        "only read-only Ibis tools were used (why_changed, memory_search, ask_project...); no file edits"
+      ],
+      "evidence": "P4.5-01-forensics-answer.png"
+    },
+    {
+      "id": "P4.6",
+      "title": "Automations declared",
+      "instruction": "Open the plugin view where automations are listed (Customizations / Plugins > ibis > automations) and verify the two scheduled automations exist.",
+      "expected": [
+        "nightly-ingest (cron 0 3 * * *) and weekly-consolidate (cron ven 10:30) are declared",
+        "no run expected during the gate; only declaration is verified"
+      ],
+      "evidence": "P4.6-01-automations.png"
+    }
+  ]
+}
