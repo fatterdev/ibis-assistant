@@ -21,4 +21,4 @@ vscode-extension/vendor/
 
 # Local-only agent instructions (never commit)
 AGENTS.md
-.cursor/
+vscode-extension/LICENSE
