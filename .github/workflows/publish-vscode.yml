@@ -1,0 +1,77 @@
+name: publish-vscode
+
+# F1.6 — full-distribution pipeline for the Ibis Assistant VSIX.
+# Manual gate: the owner dispatches it after REVIEW R3 (actions ② ③ are
+# prerequisites: Trusted Publishing on publisher `fatterdev`, Open VSX account).
+# VS Marketplace + MCP registry use GitHub OIDC (`id-token: write`); Open VSX
+# still requires a PAT in the `OPEN_VSX_TOKEN` secret.
+
+on:
+  workflow_dispatch:
+    inputs:
+      marketplace:
+        description: Publish the VSIX to the VS Marketplace (OIDC trusted publishing)
+        type: boolean
+        default: true
+      openvsx:
+        description: Publish the VSIX to Open VSX (needs OPEN_VSX_TOKEN secret)
+        type: boolean
+        default: true
+      registry:
+        description: Publish server.json to the MCP registry (GitHub OIDC)
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: publish-vscode
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: vscode-extension
+
+      - name: Package VSIX
+        run: npm run package
+        working-directory: vscode-extension
+
+      - name: Publish to VS Marketplace (OIDC trusted publishing)
+        if: ${{ inputs.marketplace }}
+        run: npx --yes @vscode/vsce@4.1.0 publish --oidc --no-dependencies
+        working-directory: vscode-extension
+
+      - name: Publish to Open VSX
+        if: ${{ inputs.openvsx }}
+        env:
+          OPEN_VSX_TOKEN: ${{ secrets.OPEN_VSX_TOKEN }}
+        run: npx --yes ovsx@latest publish --no-dependencies
+        working-directory: vscode-extension
+
+      # Registry publisher CLI (modelcontextprotocol/registry). Pin the version
+      # once the owner validates the flow at REVIEW R3.
+      - name: Install mcp-publisher
+        if: ${{ inputs.registry }}
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/modelcontextprotocol/registry/main/scripts/install.sh | bash
+          mcp-publisher --version
+
+      - name: Publish to MCP registry (GitHub OIDC)
+        if: ${{ inputs.registry }}
+        run: |
+          mcp-publisher login github-oidc
+          mcp-publisher publish

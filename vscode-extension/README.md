@@ -10,6 +10,7 @@ This extension is the VS Code packaging: it spawns an isolated Ibis Assistant st
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/fatterdev/ibis-assistant/blob/main/LICENSE)
 [![VS Code](https://img.shields.io/badge/VS%20Code-%E2%89%A51.144-007ACC.svg)](https://code.visualstudio.com/)
+[![Install MCP Server in VS Code](https://img.shields.io/badge/VS_Code-Install_MCP_Server-0098FF)](vscode:mcp/install?%7B%22name%22%3A%22ibis%22%2C%22command%22%3A%22ibis%22%2C%22args%22%3A%5B%22-mode%22%2C%22stdio%22%2C%22-runtime-mode%22%2C%22plugin%22%5D%7D "One click registers the Ibis MCP server (spawn mode) in VS Code")
 
 ## What you get
 

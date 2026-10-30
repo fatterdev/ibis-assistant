@@ -32,6 +32,11 @@ The runtime changelog lives in the [repository root](https://github.com/fatterde
 - **Onboarding walkthrough** — 4-step "Get Started with Ibis Assistant":
   install the binary, choose spawn/attach, browse memory, remember with
   provenance.
+- **Publishing pipeline** — manual `publish-vscode.yml` GitHub Actions workflow:
+  VS Marketplace via OIDC trusted publishing (`vsce publish --oidc`), Open VSX
+  via `ovsx` (`OPEN_VSX_TOKEN` secret), and the MCP registry listing from root
+  `server.json`; `vscode:mcp/install` badge in this README registers the Ibis
+  MCP server in one click.
 
 ## [0.2.0] — 2026-10-29
 

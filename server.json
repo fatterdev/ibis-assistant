@@ -1,0 +1,20 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
+  "name": "io.github.fatterdev/ibis",
+  "display_name": "Ibis Assistant",
+  "title": "Ibis Assistant",
+  "description": "Living project memory for real codebases: typed team memory with git provenance, change forensics, log analysis and tickets over MCP. Runs as a local stdio child (`ibis -mode stdio`) or attaches to a shared personal runtime over Streamable HTTP; VS Code users can install it from the Ibis Assistant VSIX.",
+  "version": "0.2.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:3030/mcp",
+      "description": "Personal daemon started with `ibis run` (loopback; shared between IDEs).",
+      "headers": []
+    }
+  ],
+  "repository": {
+    "url": "https://github.com/fatterdev/ibis-assistant",
+    "source": "github"
+  }
+}

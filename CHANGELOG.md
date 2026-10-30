@@ -2,6 +2,16 @@
 
 All notable changes to Ibis Assistant are documented here.
 
+## [Unreleased]
+
+- **build(vscode): oidc publishing, open vsx and mcp registry listing** (F1.6)
+  — manual `publish-vscode.yml` workflow (dispatch toggles per target): VSIX
+  packaging, VS Marketplace publish via OIDC trusted publishing (`id-token:
+  write`), Open VSX via `ovsx` + `OPEN_VSX_TOKEN` secret, MCP registry listing
+  via `mcp-publisher` GitHub OIDC from root `server.json`
+  (`io.github.fatterdev/ibis`, loopback Streamable HTTP personal runtime);
+  `vscode:mcp/install` badge in the VSIX README.
+
 ## [0.2.0] — 2026-10-30
 
 - **chore(release): runtime 0.2.0** - workspace version `0.1.0` -> `0.2.0`
