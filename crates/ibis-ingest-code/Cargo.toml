@@ -10,10 +10,10 @@ repository.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 flate2 = "1"
-ibis-ai = { version = "0.1.0", path = "../ibis-ai" }
-ibis-core = { version = "0.1.0", path = "../ibis-core" }
-ibis-db = { version = "0.1.0", path = "../ibis-db" }
-ibis-git = { version = "0.1.0", path = "../ibis-git" }
+ibis-ai = { version = "0.2.0", path = "../ibis-ai" }
+ibis-core = { version = "0.2.0", path = "../ibis-core" }
+ibis-db = { version = "0.2.0", path = "../ibis-db" }
+ibis-git = { version = "0.2.0", path = "../ibis-git" }
 regex.workspace = true
 reqwest.workspace = true
 serde.workspace = true

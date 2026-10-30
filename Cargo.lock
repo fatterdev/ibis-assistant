@@ -1782,7 +1782,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-ai"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -1799,7 +1799,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "clap",
@@ -1813,7 +1813,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1832,7 +1832,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-db"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1855,7 +1855,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-git"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1871,7 +1871,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-httpserver"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -1896,7 +1896,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-ingest-code"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1922,7 +1922,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-ingest-dynamic"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "ibis-core",
@@ -1939,7 +1939,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-ingest-git"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1957,7 +1957,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-ingest-logs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1989,7 +1989,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-ingest-redmine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2005,7 +2005,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-logger"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tempfile",
  "tracing",
@@ -2014,7 +2014,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-optimization"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2030,7 +2030,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-repopr"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2046,7 +2046,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-search"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2069,7 +2069,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2114,7 +2114,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-settings"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2138,7 +2138,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-ticketing"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2156,7 +2156,7 @@ dependencies = [
 
 [[package]]
 name = "ibis-wizard"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "ibis-core",
@@ -2594,7 +2594,7 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "mcp-bridge"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "futures",
@@ -5817,7 +5817,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
 ]

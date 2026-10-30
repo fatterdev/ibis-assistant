@@ -7,10 +7,10 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-ibis-ai = { version = "0.1.0", path = "../ibis-ai" }
-ibis-core = { version = "0.1.0", path = "../ibis-core" }
-ibis-db = { version = "0.1.0", path = "../ibis-db" }
-ibis-git = { version = "0.1.0", path = "../ibis-git" }
+ibis-ai = { version = "0.2.0", path = "../ibis-ai" }
+ibis-core = { version = "0.2.0", path = "../ibis-core" }
+ibis-db = { version = "0.2.0", path = "../ibis-db" }
+ibis-git = { version = "0.2.0", path = "../ibis-git" }
 
 async-trait.workspace = true
 base64.workspace = true

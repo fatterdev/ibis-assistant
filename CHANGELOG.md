@@ -2,7 +2,38 @@
 
 All notable changes to Ibis Assistant are documented here.
 
-## [Unreleased]
+## [0.2.0] — 2026-10-30
+
+- **chore(release): runtime 0.2.0** - workspace version `0.1.0` -> `0.2.0`
+  (Fase 0 complete; gate R1 29/10, gate R2 30/10). The VSIX stays `1.0.0`
+  until first publish, the agent plugin stays `0.1.0`.
+
+- **fix(server): batch-manager pending rows decode record ids** - the
+  `BatchManager` pending chunk/commit projections typed the `id` column as a
+  string while SurrealDB returns native record ids, so every 10s poll failed
+  with `Expected string, got record` once ingest produced pending rows
+  (plugin.log error loop). The rows now decode `Option<RecordId>` and
+  normalize via `record_id_to_plain` (Go `CoerceRecordID` parity); regression
+  tests pin chunk/commit decode and the write-guard round-trip, and document
+  that driver `to_sql` renders string keys backticked while the project
+  canonical form comes from `format_record`. Verify: `cargo test -p
+  ibis-server` green, `clippy -D warnings` clean.
+
+- **test: gate R2 closed with the MCP protocol smoke and review checklist** -
+  `scripts/smoke-mcp.mjs` drives the real `ibis` binary over stdio and
+  verifies the whole F0 surface in one run (handshake, F0.2 annotations with
+  the exact read-only set, F0.3 prompts + argument completions, F0.4
+  resources/templates/live updates, F0.5 sampling round-trip, F0.7 MCP App
+  resource + `_meta.ui` + guaranteed text fallback): 23/23 PASS against
+  `target/debug` and `dist`. Owner-side smoke in VS Code 1.144 evidenced in
+  `docs/planning/review-r2-checklist.md`: zero confirmations on read-only
+  tools, `/ibis.*` prompts in chat, resources in Add Context, sampling served
+  by the chat model (`chat.mcp.serverSampling` authorized; 15 runtime
+  rule-generation requests answered by `copilot/auto`), Memory Curator app
+  rendered inline with the text fallback. Non-blocking findings recorded:
+  VS Code renders prompt-argument completions without suggestions (protocol
+  verified), AI-generated sg rules declare non-built-in `language: markdown`
+  (ingest-lane quality, D-CLAIMS candidate).
 
 - **fix: post-revert release workflow, vsix extension id and docs alignment** -
   `.github/workflows/release.yml` now packages the actual `ibis` (`ibis.exe`)
