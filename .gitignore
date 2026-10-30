@@ -22,5 +22,7 @@ vscode-extension/vendor/
 # Local-only agent instructions and IDE / smoke state (never commit)
 AGENTS.md
 .cursor/
+.vscode/
+.mcp.json
 .r2-smoke-data/
 vscode-extension/LICENSE
