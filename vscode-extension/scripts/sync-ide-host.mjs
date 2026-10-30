@@ -3,7 +3,7 @@
  *
  * `file:` dependencies are not reliably packaged by vsce (the VSIX ships with
  * `--no-dependencies`), so the extension falls back to this generated copy when
- * the @threski/ide-host package import is unavailable.
+ * the @ibis/ide-host package import is unavailable.
  * Runs automatically via the vscode:prepublish npm script.
  */
 
@@ -25,7 +25,7 @@ for (const file of files) {
 }
 writeFileSync(
   join(vendorRoot, "package.json"),
-  `${JSON.stringify({ name: "@threski/ide-host-vendor", private: true, type: "module" }, null, 2)}\n`,
+  `${JSON.stringify({ name: "@ibis/ide-host-vendor", private: true, type: "module" }, null, 2)}\n`,
 );
 writeFileSync(
   join(vendorRoot, "README.md"),
@@ -38,5 +38,5 @@ writeFileSync(
 cpSync(join(extensionRoot, "..", "LICENSE"), join(extensionRoot, "LICENSE"));
 
 console.log(
-  `[threski] vendored ide-host (${files.join(", ")}) -> ${vendorRoot}; LICENSE copied from repo root`,
+  `[ibis] vendored ide-host (${files.join(", ")}) -> ${vendorRoot}; LICENSE copied from repo root`,
 );

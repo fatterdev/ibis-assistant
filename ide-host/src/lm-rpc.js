@@ -13,7 +13,7 @@ const DEFAULT_PORT = 39201;
  * @returns {Promise<http.Server>}
  */
 export function startLmRpcServer(opts = {}) {
-  const port = opts.port ?? Number(process.env.THRESKI_LM_BRIDGE_PORT || DEFAULT_PORT);
+  const port = opts.port ?? Number(process.env.IBIS_LM_BRIDGE_PORT || DEFAULT_PORT);
   const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && req.url === "/health") {
       const ok = isLmBridgeAvailable();
@@ -74,7 +74,7 @@ export async function attachVscodeLm(vscode, options = {}) {
     });
     const tokenSource = new vscode.CancellationTokenSource();
     const response = await model.sendRequest(messages, {
-      justification: "Threski Studio reasoning via IDE-provided models",
+      justification: "Ibis Assistant reasoning via IDE-provided models",
     }, tokenSource.token);
     let out = "";
     for await (const chunk of response.text) {

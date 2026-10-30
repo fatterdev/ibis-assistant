@@ -2,31 +2,31 @@
   "note": "workerType and API field names must be verified against the live Scope instance at D1 (see README). extensions are accepted only by the VS Code Copilot worker.",
   "mcpServers": [
     {
-      "slug": "threski",
-      "label": "Threski",
+      "slug": "ibis",
+      "label": "Ibis",
       "transport": "stdio",
-      "command": "threski",
+      "command": "ibis",
       "args": ["-mode", "stdio", "-runtime-mode", "plugin"],
       "env": { "RUNTIME_MODE": "plugin" }
     }
   ],
   "skills": [
     {
-      "slug": "threski-usage",
-      "source": "github/fatterdev/threski-studio/plugin/skills/usage"
+      "slug": "ibis-usage",
+      "source": "github/fatterdev/ibis-assistant/plugin/skills/usage"
     },
     {
-      "slug": "threski-readiness",
-      "source": "github/fatterdev/threski-studio/plugin/skills/readiness"
+      "slug": "ibis-readiness",
+      "source": "github/fatterdev/ibis-assistant/plugin/skills/readiness"
     },
     {
-      "slug": "threski-remember",
-      "source": "github/fatterdev/threski-studio/plugin/skills/remember"
+      "slug": "ibis-remember",
+      "source": "github/fatterdev/ibis-assistant/plugin/skills/remember"
     }
   ],
   "profiles": [
     {
-      "name": "base-no-threski",
+      "name": "base-no-ibis",
       "workerType": "TODO-verify-worker-type",
       "model": "TODO-verify-model-id",
       "mcpServers": [],
@@ -34,24 +34,24 @@
       "extensions": []
     },
     {
-      "name": "threski-mcp",
+      "name": "ibis-mcp",
       "workerType": "TODO-verify-worker-type",
       "model": "TODO-verify-model-id",
-      "mcpServers": ["threski"],
+      "mcpServers": ["ibis"],
       "skillRevisions": [],
       "extensions": []
     },
     {
-      "name": "threski-studio-full",
+      "name": "ibis-assistant-full",
       "workerType": "TODO-verify-worker-type",
       "model": "TODO-verify-model-id",
-      "mcpServers": ["threski"],
+      "mcpServers": ["ibis"],
       "skillRevisions": [
-        "github/fatterdev/threski-studio/plugin/skills/usage",
-        "github/fatterdev/threski-studio/plugin/skills/readiness",
-        "github/fatterdev/threski-studio/plugin/skills/remember"
+        "github/fatterdev/ibis-assistant/plugin/skills/usage",
+        "github/fatterdev/ibis-assistant/plugin/skills/readiness",
+        "github/fatterdev/ibis-assistant/plugin/skills/remember"
       ],
-      "extensions": ["fatterdev.threski-studio"]
+      "extensions": ["fatterdev.ibis-assistant"]
     }
   ],
   "workers": [

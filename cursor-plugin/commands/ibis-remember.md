@@ -1,14 +1,14 @@
 ---
-description: Remember a durable decision, fix, or rule in Threski project memory
+description: Remember a durable decision, fix, or rule in Ibis project memory
 ---
 
-# Threski: Remember
+# Ibis: Remember
 
 Capture a durable project memory the team (or future-you) should reuse.
 
 1. Ask the user which kind to store: `decision`, `fix`, or `rule` (default `decision` if they do not choose).
 2. Ask for a short title and the full content (what was decided, what fixed the failure, or the rule to follow).
-3. Call MCP `memory_add` on the `threski` server with:
+3. Call MCP `memory_add` on the `ibis` server with:
    - `kind` = the chosen kind
    - `title` = short label
    - `content` = full text

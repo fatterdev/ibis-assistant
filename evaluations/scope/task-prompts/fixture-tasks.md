@@ -1,8 +1,8 @@
 # Task prompts (fixture repo)
 
 Task prompts per il benchmark D-CLAIMS. Ogni task è eseguito da ogni profilo
-(base / threski-mcp / threski-studio-full) sugli stessi criteri (criteria.json).
-Il fixture è un repo OSS piccolo; una variante replica i task sul repo threski stesso.
+(base / ibis-mcp / ibis-assistant-full) sugli stessi criteri (criteria.json).
+Il fixture è un repo OSS piccolo; una variante replica i task sul repo ibis stesso.
 
 ## T1 — Fix a failing test
 
@@ -11,7 +11,7 @@ The test <test-name> in this repository fails on <branch>. Reproduce it, identif
 root cause, fix it minimally, and make the whole suite pass. Do not change public APIs.
 ```
 
-Criteri primari: c-task-completed, c-build-succeeds, c-tests-pass, c-threski-grounded-answers.
+Criteri primari: c-task-completed, c-build-succeeds, c-tests-pass, c-ibis-grounded-answers.
 
 ## T2 — Add a small feature following conventions
 
@@ -20,7 +20,7 @@ Add <small-feature> (e.g. a `--json` output flag to the CLI command <cmd>) follo
 the existing conventions of this codebase. Include tests. Update the changelog.
 ```
 
-Criteri primari: c-task-completed, c-build-succeeds, c-tests-pass, c-threski-memory-hygiene.
+Criteri primari: c-task-completed, c-build-succeeds, c-tests-pass, c-ibis-memory-hygiene.
 
 ## T3 — Change forensics before refactor
 
@@ -30,7 +30,7 @@ its current form, which areas are impacted by the rename, and any known constrai
 Then perform the rename with tests green.
 ```
 
-Criteri primari: c-threski-session-contract, c-threski-grounded-answers, c-task-completed, c-tests-pass.
+Criteri primari: c-ibis-session-contract, c-ibis-grounded-answers, c-task-completed, c-tests-pass.
 
 ## T4 — Close the loop with memory
 
@@ -39,9 +39,9 @@ Complete <task>. When done, record in project memory the durable lesson a teamma
 would need (decision, fix, constraint or gotcha) — nothing more.
 ```
 
-Criteri primari: c-threski-memory-hygiene, c-threski-session-contract, c-task-completed.
+Criteri primari: c-ibis-memory-hygiene, c-ibis-session-contract, c-task-completed.
 
-## Varianti per il repo threski stesso
+## Varianti per il repo ibis stesso
 
 - F0/T3: "Why does the MCP registry announce tools this way?" (forensics sul crate server)
 - F2/T1: fix di un test reale del runtime, con criteri Build/Test del workspace Cargo.
@@ -50,4 +50,4 @@ Criteri primari: c-threski-memory-hygiene, c-threski-session-contract, c-task-co
 
 - Token totali e durata per profilo (da Scope).
 - Numero di chiamate per tool: `load_session_context` (target 1), `settings_get` (target 0 fuori diagnosi), `memory_add` con kind valido.
-- Conferme utente richieste per tool read-only Threski (target 0).
+- Conferme utente richieste per tool read-only Ibis (target 0).

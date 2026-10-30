@@ -4,7 +4,7 @@
     "sessionStart": [
       {
         "type": "prompt",
-        "prompt": "Threski Studio plugin is available. Temporal contract: load_session_context ONCE for durable current team truth (working state, rules, fixes, decisions); ask_project for hybrid HEAD code + commit_chunk change meaning + current memory; why_changed for focused why/when forensics. Do not call memory_* on every turn. Use capture_observation sparingly for genuinely new reusable findings. Prefer Threski: Status / STATUS.md for setup — not settings_get / ticket_get_capabilities unless diagnosing missing AI keys or ticketing."
+        "prompt": "Ibis Assistant plugin is available. Temporal contract: load_session_context ONCE for durable current team truth (working state, rules, fixes, decisions); ask_project for hybrid HEAD code + commit_chunk change meaning + current memory; why_changed for focused why/when forensics. Do not call memory_* on every turn. Use capture_observation sparingly for genuinely new reusable findings. Prefer Ibis: Status / STATUS.md for setup — not settings_get / ticket_get_capabilities unless diagnosing missing AI keys or ticketing."
       }
     ],
     "stop": [

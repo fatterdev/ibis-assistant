@@ -1,8 +1,8 @@
 /**
- * Resolve how the IDE should reach Threski MCP.
+ * Resolve how the IDE should reach Ibis MCP.
  *
- * Default: spawn an isolated `threski` stdio child (RUNTIME_MODE=plugin).
- * Shared runtime: set THRESKI_MCP_URL (e.g. http://127.0.0.1:3030/mcp) to attach to
+ * Default: spawn an isolated `ibis` stdio child (RUNTIME_MODE=plugin).
+ * Shared runtime: set IBIS_MCP_URL (e.g. http://127.0.0.1:3030/mcp) to attach to
  * a personal HTTP daemon instead of spawning. Never silently share one SurrealDB
  * across two plugin stdio children.
  *
@@ -27,13 +27,13 @@ const CRLFCRLF = Buffer.from("\r\n\r\n");
  * @returns {Backend}
  */
 export function resolveBackend(env = process.env) {
-  const url = (env.THRESKI_MCP_URL || "").trim();
+  const url = (env.IBIS_MCP_URL || "").trim();
   if (url) {
     return { mode: "http", url };
   }
   return {
     mode: "spawn",
-    command: env.THRESKI_BIN || "threski",
+    command: env.IBIS_BIN || "ibis",
     args: ["-mode", "stdio", "-runtime-mode", "plugin"],
     env: {
       ...env,
@@ -49,7 +49,7 @@ export function resolveBackend(env = process.env) {
  */
 export function spawnStdioChild(backend = resolveBackend()) {
   if (backend.mode !== "spawn") {
-    throw new Error("spawnStdioChild requires mode=spawn; use THRESKI_MCP_URL unset");
+    throw new Error("spawnStdioChild requires mode=spawn; use IBIS_MCP_URL unset");
   }
   const child = spawn(backend.command, backend.args, {
     env: backend.env,
@@ -74,7 +74,7 @@ export function runStdioPassthrough(backend = resolveBackend()) {
   process.stdin.pipe(child.stdin);
   child.stdout.pipe(process.stdout);
   child.on("error", (err) => {
-    process.stderr.write(`[threski-mcp-host] spawn failed: ${err.message}\n`);
+    process.stderr.write(`[ibis-mcp-host] spawn failed: ${err.message}\n`);
     process.exit(1);
   });
   child.on("exit", (code, signal) => {
@@ -197,7 +197,7 @@ function writeNdjson(message) {
  */
 export async function runHttpStdioBridge(url) {
   process.stderr.write(
-    `[threski-mcp-host] attaching to shared runtime ${url} (THRESKI_MCP_URL); not spawning a plugin child\n`,
+    `[ibis-mcp-host] attaching to shared runtime ${url} (IBIS_MCP_URL); not spawning a plugin child\n`,
   );
 
   /** @type {string | null} */
@@ -241,14 +241,14 @@ export async function runHttpStdioBridge(url) {
       }
       const text = await res.text();
       if (!res.ok) {
-        process.stderr.write(`[threski-mcp-host] HTTP ${res.status}: ${text.slice(0, 200)}\n`);
+        process.stderr.write(`[ibis-mcp-host] HTTP ${res.status}: ${text.slice(0, 200)}\n`);
       }
       const ct = res.headers.get("content-type") || "";
       for (const msg of decodeHttpMcpResponse(ct, text)) {
         writeNdjson(msg);
       }
     } catch (err) {
-      process.stderr.write(`[threski-mcp-host] bridge error: ${err}\n`);
+      process.stderr.write(`[ibis-mcp-host] bridge error: ${err}\n`);
     }
   }
 }
@@ -284,7 +284,7 @@ async function callMcpToolHttp(url, toolName, args) {
     params: {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "threski-ide-host", version: "1.0.0" },
+      clientInfo: { name: "ibis-ide-host", version: "1.0.0" },
     },
   }, session);
   if (init.error) {
@@ -391,7 +391,7 @@ async function callMcpToolStdio(backend, toolName, args, { keepAliveMs = 0 } = {
       params: {
         protocolVersion: "2024-11-05",
         capabilities: {},
-        clientInfo: { name: "threski-ide-host", version: "1.0.0" },
+        clientInfo: { name: "ibis-ide-host", version: "1.0.0" },
       },
     });
     const init = await waitFor(1);
@@ -499,6 +499,6 @@ export function extractSettingsURL(text) {
 
 export function warnDualPluginChildren() {
   process.stderr.write(
-    "[threski-mcp-host] warning: two IDE plugin stdio children must not share one SurrealDB; use THRESKI_MCP_URL + personal daemon for a unique shared runtime\n",
+    "[ibis-mcp-host] warning: two IDE plugin stdio children must not share one SurrealDB; use IBIS_MCP_URL + personal daemon for a unique shared runtime\n",
   );
 }

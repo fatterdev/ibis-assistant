@@ -37,7 +37,7 @@ for (const row of submitted) {
   }
 }
 
-const baseKey = Object.keys(summary).find((k) => k.endsWith("/base-no-threski"));
+const baseKey = Object.keys(summary).find((k) => k.endsWith("/base-no-ibis"));
 const baseRate = baseKey && summary[baseKey].total ? summary[baseKey].passed / summary[baseKey].total : null;
 const rows = Object.entries(summary).map(([key, s]) => {
   const passRate = s.total ? s.passed / s.total : 0;

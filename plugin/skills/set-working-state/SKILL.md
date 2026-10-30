@@ -1,9 +1,9 @@
 ---
 name: set-working-state
-description: Record or update the current working state (what is in progress, blockers, next step) via set_working_state. Use when the user switches tasks, ends a work block, or asks Threski to keep track of the current job.
+description: Record or update the current working state (what is in progress, blockers, next step) via set_working_state. Use when the user switches tasks, ends a work block, or asks Ibis to keep track of the current job.
 ---
 
-# Threski set working state
+# Ibis set working state
 
 Call `set_working_state` with:
 

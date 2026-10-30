@@ -1,12 +1,12 @@
 {
-  "name": "@threski/ide-host",
+  "name": "@ibis/ide-host",
   "version": "1.0.0",
-  "description": "Thin IDE host for Threski Studio: spawn plugin stdio or attach to a shared personal HTTP MCP runtime",
+  "description": "Thin IDE host for Ibis Assistant: spawn plugin stdio or attach to a shared personal HTTP MCP runtime",
   "type": "module",
   "main": "src/index.js",
   "types": "src/index.d.ts",
   "bin": {
-    "threski-mcp-host": "bin/threski-mcp-host.mjs"
+    "ibis-mcp-host": "bin/ibis-mcp-host.mjs"
   },
   "exports": {
     ".": "./src/index.js",
@@ -24,7 +24,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/fatterdev/threski-studio.git",
+    "url": "https://github.com/fatterdev/ibis-assistant.git",
     "directory": "ide-host"
   }
 }

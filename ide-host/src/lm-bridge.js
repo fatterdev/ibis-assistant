@@ -29,7 +29,7 @@ export function isLmBridgeAvailable() {
 export async function generateContent(contents, config = {}) {
   if (!handler) {
     const err = new Error("IDE LM bridge unavailable");
-    err.code = "THRESKI_LM_UNAVAILABLE";
+    err.code = "IBIS_LM_UNAVAILABLE";
     throw err;
   }
   return handler(contents, config);

@@ -1,6 +1,6 @@
 const vscode = require("vscode");
 
-const EXTENSION_ID = "fatterdev.threski";
+const EXTENSION_ID = "fatterdev.ibis";
 
 /** @type {vscode.OutputChannel | undefined} */
 let outputChannel;
@@ -16,8 +16,8 @@ let mcpProviderRegistered = false;
  */
 async function loadIdeHost() {
   try {
-    const host = await import("@threski/ide-host");
-    const lmRpc = await import("@threski/ide-host/lm-rpc");
+    const host = await import("@ibis/ide-host");
+    const lmRpc = await import("@ibis/ide-host/lm-rpc");
     return { ...host, ...lmRpc, source: "package" };
   } catch (err) {
     logLine(
@@ -43,7 +43,7 @@ function logVerbose(cfg, message) {
 }
 
 function getConfig() {
-  return vscode.workspace.getConfiguration("threskiStudio");
+  return vscode.workspace.getConfiguration("ibis");
 }
 
 /**
@@ -83,7 +83,7 @@ function settingOrEnv(cfg, key, envName, fallback) {
  * @param {vscode.ExtensionContext} context
  */
 async function activate(context) {
-  outputChannel = vscode.window.createOutputChannel("Threski Studio");
+  outputChannel = vscode.window.createOutputChannel("Ibis Assistant");
   context.subscriptions.push(outputChannel);
 
   let host;
@@ -92,7 +92,7 @@ async function activate(context) {
   } catch (err) {
     const message = err && err.message ? err.message : err;
     logLine(`ide-host unavailable: ${message}`);
-    vscode.window.showErrorMessage(`Threski Studio could not load its runtime host: ${message}`);
+    vscode.window.showErrorMessage(`Ibis Assistant could not load its runtime host: ${message}`);
     return;
   }
 
@@ -105,65 +105,65 @@ async function activate(context) {
   registerMcpProvider(context, host);
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("threskiStudio.openSettings", async () => {
+    vscode.commands.registerCommand("ibis.openSettings", async () => {
       try {
         const url = await resolveSettingsURL(host, await resolveBackend(host, getConfig()), getConfig());
         await vscode.env.openExternal(vscode.Uri.parse(url));
       } catch (err) {
         vscode.window.showErrorMessage(
-          `Threski Settings unavailable: ${err && err.message ? err.message : err}`,
+          `Ibis Settings unavailable: ${err && err.message ? err.message : err}`,
         );
       }
     }),
-    vscode.commands.registerCommand("threskiStudio.openExtensionSettings", async () => {
+    vscode.commands.registerCommand("ibis.openExtensionSettings", async () => {
       await vscode.commands.executeCommand(
         "workbench.action.openSettings",
         `@ext:${EXTENSION_ID}`,
       );
     }),
-    vscode.commands.registerCommand("threskiStudio.showOutput", () => {
+    vscode.commands.registerCommand("ibis.showOutput", () => {
       outputChannel.show(true);
     }),
-    vscode.commands.registerCommand("threskiStudio.status", async () => {
+    vscode.commands.registerCommand("ibis.status", async () => {
       const live = getConfig();
       const message = await buildStatus(host, live);
       reportStatus(live, message);
     }),
-    vscode.commands.registerCommand("threskiStudio.remember", async () => {
+    vscode.commands.registerCommand("ibis.remember", async () => {
       try {
         await rememberMemory(host, getConfig());
       } catch (err) {
         vscode.window.showErrorMessage(
-          `Threski Remember failed: ${err && err.message ? err.message : err}`,
+          `Ibis Remember failed: ${err && err.message ? err.message : err}`,
         );
       }
     }),
-    vscode.commands.registerCommand("threskiStudio.setWorkingState", async () => {
+    vscode.commands.registerCommand("ibis.setWorkingState", async () => {
       try {
         await setWorkingState(host, getConfig());
       } catch (err) {
         vscode.window.showErrorMessage(
-          `Threski Set working state failed: ${err && err.message ? err.message : err}`,
+          `Ibis Set working state failed: ${err && err.message ? err.message : err}`,
         );
       }
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       const reloadKeys = [
-        "threskiStudio.lmBridge.enabled",
-        "threskiStudio.lmBridge.port",
-        "threskiStudio.lmBridge.url",
-        "threskiStudio.mcp.registerProvider",
+        "ibis.lmBridge.enabled",
+        "ibis.lmBridge.port",
+        "ibis.lmBridge.url",
+        "ibis.mcp.registerProvider",
       ];
       if (reloadKeys.some((key) => event.affectsConfiguration(key))) {
         vscode.window.showInformationMessage(
-          "Threski Studio: reload the window to apply the changed Threski settings.",
+          "Ibis Assistant: reload the window to apply the changed Ibis settings.",
         );
       }
     }),
   );
 
   logLine(
-    `activated (ide-host: ${host.source}, engine: ${vscode.version}); run "Threski: Status" for the effective backend`,
+    `activated (ide-host: ${host.source}, engine: ${vscode.version}); run "Ibis: Status" for the effective backend`,
   );
   logVerbose(
     cfg,
@@ -174,17 +174,17 @@ async function activate(context) {
 }
 
 /**
- * Attach decision without probing: explicit `attach` mode, or `THRESKI_MCP_URL`
- * while `threskiStudio.runtime.mode` was never set explicitly.
+ * Attach decision without probing: explicit `attach` mode, or `IBIS_MCP_URL`
+ * while `ibis.runtime.mode` was never set explicitly.
  * @param {vscode.WorkspaceConfiguration} cfg
  * @param {{ DEFAULT_MCP_URL: string }} host
  */
 function configuredAttach(cfg, host) {
   const mode = cfg.get("runtime.mode", "spawn");
-  const envUrl = (process.env.THRESKI_MCP_URL || "").trim();
+  const envUrl = (process.env.IBIS_MCP_URL || "").trim();
   if (mode === "attach") {
     const url = String(
-      settingOrEnv(cfg, "runtime.mcpUrl", "THRESKI_MCP_URL", "") || host.DEFAULT_MCP_URL,
+      settingOrEnv(cfg, "runtime.mcpUrl", "IBIS_MCP_URL", "") || host.DEFAULT_MCP_URL,
     ).trim();
     return { attach: true, url: url || host.DEFAULT_MCP_URL };
   }
@@ -208,21 +208,21 @@ async function probeReachable(url, timeoutMs) {
 }
 
 /**
- * Environment handed to a spawned child, derived from Threski settings + env.
+ * Environment handed to a spawned child, derived from Ibis settings + env.
  * @param {vscode.WorkspaceConfiguration} cfg
  */
 function buildSpawnEnv(cfg) {
   const env = { ...process.env };
-  const binary = String(settingOrEnv(cfg, "runtime.binaryPath", "THRESKI_BIN", "")).trim();
+  const binary = String(settingOrEnv(cfg, "runtime.binaryPath", "IBIS_BIN", "")).trim();
   if (binary) {
-    env.THRESKI_BIN = binary;
+    env.IBIS_BIN = binary;
   }
-  const dataDir = String(settingOrEnv(cfg, "runtime.dataDir", "THRESKI_DATA_DIR", "")).trim();
+  const dataDir = String(settingOrEnv(cfg, "runtime.dataDir", "IBIS_DATA_DIR", "")).trim();
   if (dataDir) {
-    env.THRESKI_DATA_DIR = dataDir;
+    env.IBIS_DATA_DIR = dataDir;
   }
   let workspace = String(
-    settingOrEnv(cfg, "runtime.workspaceOverride", "THRESKI_WORKSPACE", ""),
+    settingOrEnv(cfg, "runtime.workspaceOverride", "IBIS_WORKSPACE", ""),
   ).trim();
   if (!workspace) {
     const folder = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
@@ -231,7 +231,7 @@ function buildSpawnEnv(cfg) {
     }
   }
   if (workspace) {
-    env.THRESKI_WORKSPACE = workspace;
+    env.IBIS_WORKSPACE = workspace;
   }
   return env;
 }
@@ -280,7 +280,7 @@ async function resolveBackend(host, cfg) {
  */
 async function startLmBridge(host, cfg) {
   if (!cfg.get("lmBridge.enabled", true)) {
-    logLine("LM bridge disabled by threskiStudio.lmBridge.enabled");
+    logLine("LM bridge disabled by ibis.lmBridge.enabled");
     return;
   }
   try {
@@ -292,12 +292,12 @@ async function startLmBridge(host, cfg) {
     }
     const explicitPort = isExplicitlyConfigured(cfg, "lmBridge.port")
       ? cfg.get("lmBridge.port", host.LM_BRIDGE_DEFAULT_PORT)
-      : Number(process.env.THRESKI_LM_BRIDGE_PORT || cfg.get("lmBridge.port", host.LM_BRIDGE_DEFAULT_PORT));
+      : Number(process.env.IBIS_LM_BRIDGE_PORT || cfg.get("lmBridge.port", host.LM_BRIDGE_DEFAULT_PORT));
     const port = explicitPort || host.LM_BRIDGE_DEFAULT_PORT;
     lmServer = await host.startLmRpcServer({ port });
-    const url = String(settingOrEnv(cfg, "lmBridge.url", "THRESKI_LM_BRIDGE_URL", "")).trim() ||
+    const url = String(settingOrEnv(cfg, "lmBridge.url", "IBIS_LM_BRIDGE_URL", "")).trim() ||
       `http://127.0.0.1:${port}`;
-    process.env.THRESKI_LM_BRIDGE_URL = url;
+    process.env.IBIS_LM_BRIDGE_URL = url;
     logLine(`LM bridge listening on ${url}${family ? ` (model family: ${family})` : ""}`);
   } catch (err) {
     logLine(`LM bridge not started: ${err && err.message ? err.message : err}`);
@@ -313,7 +313,7 @@ async function startLmBridge(host, cfg) {
 function registerMcpProvider(context, host) {
   const cfg = getConfig();
   if (!cfg.get("mcp.registerProvider", true)) {
-    logLine("MCP server definition provider disabled by threskiStudio.mcp.registerProvider");
+    logLine("MCP server definition provider disabled by ibis.mcp.registerProvider");
     return;
   }
   const lm = vscode.lm;
@@ -334,16 +334,16 @@ function registerMcpProvider(context, host) {
       }
       if (backend.mode === "http" && backend.url) {
         if (typeof vscode.McpHttpServerDefinition === "function") {
-          defs.push(new vscode.McpHttpServerDefinition("Threski", vscode.Uri.parse(backend.url)));
+          defs.push(new vscode.McpHttpServerDefinition("Ibis", vscode.Uri.parse(backend.url)));
         } else if (typeof vscode.McpServerDefinition === "function") {
-          defs.push({ label: "Threski", uri: vscode.Uri.parse(backend.url) });
+          defs.push({ label: "Ibis", uri: vscode.Uri.parse(backend.url) });
         }
         return defs;
       }
       if (typeof vscode.McpStdioServerDefinition === "function") {
         defs.push(
           new vscode.McpStdioServerDefinition(
-            "Threski",
+            "Ibis",
             backend.command,
             backend.args,
             { ...(backend.env || {}) },
@@ -355,7 +355,7 @@ function registerMcpProvider(context, host) {
   };
 
   try {
-    context.subscriptions.push(lm.registerMcpServerDefinitionProvider("threski", provider));
+    context.subscriptions.push(lm.registerMcpServerDefinitionProvider("ibis", provider));
     mcpProviderRegistered = true;
     logLine("MCP server definition provider registered");
   } catch (err) {
@@ -385,7 +385,7 @@ async function rememberMemory(host, cfg) {
   if (kind === "ask") {
     const kindPick = await vscode.window.showQuickPick(kinds, {
       placeHolder: "Memory kind",
-      title: "Threski: Remember",
+      title: "Ibis: Remember",
     });
     if (!kindPick) {
       return;
@@ -394,7 +394,7 @@ async function rememberMemory(host, cfg) {
   }
 
   const title = await vscode.window.showInputBox({
-    title: "Threski: Remember",
+    title: "Ibis: Remember",
     prompt: `Short title (${kind})`,
     placeHolder: "e.g. Prefer Streamable HTTP for MCP",
   });
@@ -402,7 +402,7 @@ async function rememberMemory(host, cfg) {
     return;
   }
   const content = await vscode.window.showInputBox({
-    title: "Threski: Remember",
+    title: "Ibis: Remember",
     prompt: "Full memory content",
     placeHolder: "What should future agents and teammates reuse?",
     ignoreFocusOut: true,
@@ -420,7 +420,7 @@ async function rememberMemory(host, cfg) {
     visibility,
   });
   logLine(`memory_add (${kind}, ${visibility}): ${text}`);
-  vscode.window.showInformationMessage(`Threski Remembered (${kind}, ${visibility}): ${text}`);
+  vscode.window.showInformationMessage(`Ibis Remembered (${kind}, ${visibility}): ${text}`);
 }
 
 /**
@@ -430,7 +430,7 @@ async function rememberMemory(host, cfg) {
  */
 async function setWorkingState(host, cfg) {
   const content = await vscode.window.showInputBox({
-    title: "Threski: Set working state",
+    title: "Ibis: Set working state",
     prompt: "What are you working on right now?",
     placeHolder: "Current task, open files, next steps",
     ignoreFocusOut: true,
@@ -449,18 +449,18 @@ async function setWorkingState(host, cfg) {
   const backend = await resolveBackend(host, cfg);
   const text = await host.callMcpTool(backend, "set_working_state", args);
   logLine(`set_working_state${args.project_name ? ` (${args.project_name})` : ""}: ${text}`);
-  vscode.window.showInformationMessage(`Threski working state set: ${text}`);
+  vscode.window.showInformationMessage(`Ibis working state set: ${text}`);
 }
 
 /**
- * Prefer threskiStudio.settings.url / THRESKI_SETTINGS_URL, then personal HTTP probes,
+ * Prefer ibis.settings.url / IBIS_SETTINGS_URL, then personal HTTP probes,
  * else MCP settings_open_ui.
  * @param {Awaited<ReturnType<typeof loadIdeHost>>} host
  * @param {{ mode: string, url?: string, command?: string, args?: string[], env?: NodeJS.ProcessEnv }} backend
  * @param {vscode.WorkspaceConfiguration} [cfg]
  */
 async function resolveSettingsURL(host, backend, cfg = getConfig()) {
-  const explicit = String(settingOrEnv(cfg, "settings.url", "THRESKI_SETTINGS_URL", "")).trim();
+  const explicit = String(settingOrEnv(cfg, "settings.url", "IBIS_SETTINGS_URL", "")).trim();
   if (explicit) {
     return explicit;
   }
@@ -494,7 +494,7 @@ async function resolveSettingsURL(host, backend, cfg = getConfig()) {
 }
 
 /**
- * Human-readable status for the Threski: Status command.
+ * Human-readable status for the Ibis: Status command.
  * @param {Awaited<ReturnType<typeof loadIdeHost>>} host
  * @param {vscode.WorkspaceConfiguration} cfg
  */
@@ -506,13 +506,13 @@ async function buildStatus(host, cfg) {
   } else {
     lines.push(`Backend: spawn ${backend.command} ${backend.args.join(" ")} (isolated child)`);
   }
-  lines.push(`Plugin data dir: ${(backend.mode === "spawn" && backend.env.THRESKI_DATA_DIR) || "default"}`);
-  lines.push(`Workspace: ${(backend.mode === "spawn" && backend.env.THRESKI_WORKSPACE) || "not bound"}`);
+  lines.push(`Plugin data dir: ${(backend.mode === "spawn" && backend.env.IBIS_DATA_DIR) || "default"}`);
+  lines.push(`Workspace: ${(backend.mode === "spawn" && backend.env.IBIS_WORKSPACE) || "not bound"}`);
   if (!cfg.get("lmBridge.enabled", true)) {
-    lines.push("IDE LM bridge: disabled (threskiStudio.lmBridge.enabled)");
+    lines.push("IDE LM bridge: disabled (ibis.lmBridge.enabled)");
   } else {
     lines.push(
-      `IDE LM bridge: ${lmServer ? `listening (${process.env.THRESKI_LM_BRIDGE_URL})` : "unavailable"}`,
+      `IDE LM bridge: ${lmServer ? `listening (${process.env.IBIS_LM_BRIDGE_URL})` : "unavailable"}`,
     );
   }
   lines.push(
@@ -552,11 +552,11 @@ function reportStatus(cfg, message) {
  */
 function sharedRuntimeMcpConfig(backend) {
   if (backend.mode === "http") {
-    return { threski: { url: backend.url } };
+    return { ibis: { url: backend.url } };
   }
   return {
-    threski: {
-      command: backend.command || "threski",
+    ibis: {
+      command: backend.command || "ibis",
       args: backend.args || ["-mode", "stdio", "-runtime-mode", "plugin"],
       env: { RUNTIME_MODE: "plugin" },
     },

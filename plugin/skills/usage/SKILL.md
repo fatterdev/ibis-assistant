@@ -1,11 +1,11 @@
 ---
 name: usage
-description: How to use Threski correctly in a session: the session contract (load session context once), the tool selection map (why_changed vs ask_project vs memory_search), and memory hygiene rules (kinds, capture_observation, visibility). Use at session start and whenever unsure which Threski tool fits the task.
+description: How to use Ibis correctly in a session: the session contract (load session context once), the tool selection map (why_changed vs ask_project vs memory_search), and memory hygiene rules (kinds, capture_observation, visibility). Use at session start and whenever unsure which Ibis tool fits the task.
 ---
 
-# Threski usage — session contract
+# Ibis usage — session contract
 
-Threski is the project memory and knowledge graph. Follow this contract; it keeps
+Ibis is the project memory and knowledge graph. Follow this contract; it keeps
 contexts small and memory trustworthy.
 
 ## Session contract

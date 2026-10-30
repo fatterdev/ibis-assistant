@@ -1,17 +1,17 @@
 ---
 name: readiness
-description: First-use and empty-window readiness checklist for Threski. Use when session context is empty, tools fail unexpectedly, or the user asks whether Threski is set up. Produces a structured readiness table and the next concrete step.
+description: First-use and empty-window readiness checklist for Ibis. Use when session context is empty, tools fail unexpectedly, or the user asks whether Ibis is set up. Produces a structured readiness table and the next concrete step.
 ---
 
-# Threski readiness
+# Ibis readiness
 
 Run this checklist only when the session context is empty or something fails.
 In a healthy session you should already have called `load_session_context` once.
 
 ## Checklist
 
-1. Probe the MCP surface: is the `threski` MCP server reachable? If spawned, is the
-   `threski` binary on PATH? If attached, is `THRESKI_MCP_URL` reachable?
+1. Probe the MCP surface: is the `ibis` MCP server reachable? If spawned, is the
+   `ibis` binary on PATH? If attached, is `IBIS_MCP_URL` reachable?
 2. Call `load_session_context` once for the workspace project.
 3. If AI answers look degraded, check `settings_get` → `ai.reasoning.provider`
    (sampling / lm_bridge / ollama) and report, do not fix silently.
@@ -29,5 +29,5 @@ End with exactly this table and a single next step:
 | Ticketing | configured / off | capabilities summary |
 | Workspace | bound / missing | folder path |
 
-Next step: one concrete action (e.g. "run `threski run`", "ingest code with
-`threski ingest code --path <folder>`", "ask the user for THRESKI_MCP_URL").
+Next step: one concrete action (e.g. "run `ibis run`", "ingest code with
+`ibis ingest code --path <folder>`", "ask the user for IBIS_MCP_URL").

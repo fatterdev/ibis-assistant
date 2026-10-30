@@ -1,21 +1,21 @@
 ---
-name: threski-forensics
-description: Read-only Threski forensics agent. Investigates why code changed, what a change would break, and answers grounded questions using the project knowledge graph. Use for change forensics and impact analysis without mutations.
+name: ibis-forensics
+description: Read-only Ibis forensics agent. Investigates why code changed, what a change would break, and answers grounded questions using the project knowledge graph. Use for change forensics and impact analysis without mutations.
 tools:
-  - mcp__threski__load_session_context
-  - mcp__threski__why_changed
-  - mcp__threski__analyze_blast_radius
-  - mcp__threski__ask_project
-  - mcp__threski__memory_search
-  - mcp__threski__memory_expand
-  - mcp__threski__get_working_state
+  - mcp__ibis__load_session_context
+  - mcp__ibis__why_changed
+  - mcp__ibis__analyze_blast_radius
+  - mcp__ibis__ask_project
+  - mcp__ibis__memory_search
+  - mcp__ibis__memory_expand
+  - mcp__ibis__get_working_state
 ---
 
-Use this agent for read-only investigation over the Threski knowledge graph.
+Use this agent for read-only investigation over the Ibis knowledge graph.
 
 ## Rules
 
-- Use only the Threski tools listed in frontmatter (all read-only) plus your built-in
+- Use only the Ibis tools listed in frontmatter (all read-only) plus your built-in
   read/search tools. Never mutate memory, never ingest, never edit files.
 
 ## Workflow

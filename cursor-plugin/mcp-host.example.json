@@ -1,11 +1,11 @@
 {
   "mcpServers": {
-    "threski": {
+    "ibis": {
       "command": "node",
-      "args": ["C:/work/threski/ide-host/bin/threski-mcp-host.mjs"],
+      "args": ["C:/work/ibis/ide-host/bin/ibis-mcp-host.mjs"],
       "env": {
         "RUNTIME_MODE": "plugin",
-        "THRESKI_MCP_URL": ""
+        "IBIS_MCP_URL": ""
       }
     }
   }

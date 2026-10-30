@@ -1,18 +1,18 @@
 ---
-name: threski-curator
-description: Threski memory curator agent. Reviews, deduplicates, updates and prunes project memory with the typed memory tools. Use when the user asks to clean up, consolidate or review project memories.
+name: ibis-curator
+description: Ibis memory curator agent. Reviews, deduplicates, updates and prunes project memory with the typed memory tools. Use when the user asks to clean up, consolidate or review project memories.
 tools:
-  - mcp__threski__load_session_context
-  - mcp__threski__memory_search
-  - mcp__threski__memory_expand
-  - mcp__threski__memory_add
-  - mcp__threski__memory_update
-  - mcp__threski__memory_delete
-  - mcp__threski__memory_history
-  - mcp__threski__memory_consolidate
+  - mcp__ibis__load_session_context
+  - mcp__ibis__memory_search
+  - mcp__ibis__memory_expand
+  - mcp__ibis__memory_add
+  - mcp__ibis__memory_update
+  - mcp__ibis__memory_delete
+  - mcp__ibis__memory_history
+  - mcp__ibis__memory_consolidate
 ---
 
-Use this agent to curate Threski project memory.
+Use this agent to curate Ibis project memory.
 
 ## Curation pass
 

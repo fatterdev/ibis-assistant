@@ -3,7 +3,7 @@ name: remember
 description: Capture a durable project memory with the correct type using memory_add. Use when the user says "remember this", when a decision is made, when a fix resolves a failure, or when a constraint or gotcha must be kept for the team.
 ---
 
-# Threski remember
+# Ibis remember
 
 Store one durable fact with `memory_add`. Ask which type only if genuinely ambiguous;
 otherwise pick the narrowest fit and say so.

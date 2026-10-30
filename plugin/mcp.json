@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "threski": {
+    "ibis": {
       "type": "stdio",
-      "command": "threski",
+      "command": "ibis",
       "args": ["-mode", "stdio", "-runtime-mode", "plugin"],
       "env": {
         "RUNTIME_MODE": "plugin"

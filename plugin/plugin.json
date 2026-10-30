@@ -1,20 +1,20 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "threski",
-  "description": "Threski agent plugin: living project memory skills, session hooks, forensic agents and automations over the Threski MCP runtime.",
+  "name": "ibis",
+  "description": "Ibis agent plugin: living project memory skills, session hooks, forensic agents and automations over the Ibis MCP runtime.",
   "version": "0.1.0",
   "author": {
     "name": "fatterdev",
     "url": "https://github.com/fatterdev"
   },
-  "repository": "https://github.com/fatterdev/threski-studio",
+  "repository": "https://github.com/fatterdev/ibis-assistant",
   "license": "Apache-2.0",
   "keywords": [
     "mcp",
     "memory",
     "knowledge-graph",
     "project-memory",
-    "threski",
+    "ibis",
     "copilot",
     "claude",
     "automations"
