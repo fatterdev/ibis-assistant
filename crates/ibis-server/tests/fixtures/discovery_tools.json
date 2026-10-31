@@ -647,6 +647,36 @@
       "name": "memory_insights"
     },
     {
+      "description": "Browse memories by kind/status/visibility without embeddings (metadata list, most recent first). Use memory_search for semantic queries.",
+      "input_schema": {
+        "properties": {
+          "actor": {
+            "description": "Optional identity fallback",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Optional comma-separated kind filter",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Optional max results (default 100)",
+            "type": "number"
+          },
+          "status": {
+            "description": "Optional status filter (empty = all)",
+            "type": "string"
+          },
+          "visibility": {
+            "description": "team|personal|all (default: team + caller's own personal)",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "memory_list"
+    },
+    {
       "description": "Claim store addendum §6: rebuild refs/notes/ibis-claims from the Surreal claim index — one `claim=<id>` pointer note per historical commit anchored to a git-owned claim (introduced_in/invalidated_at). Notes are cross-links enriching commit meaning: pointers only, never claim storage, never required for correctness, rebuildable from the DB. Idempotent reconcile: missing notes added, mismatched rewritten, stale notes removed; anchors absent from the object database are skipped and counted.",
       "input_schema": {
         "properties": {

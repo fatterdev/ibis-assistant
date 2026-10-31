@@ -1,5 +1,5 @@
 //! Discovery snapshot gate (D3) — `GET /` with `Accept: application/json`
-//! must serve the committed `tools[]` fixture: 56 rows `{name, description,
+//! must serve the committed `tools[]` fixture: 57 rows `{name, description,
 //! input_schema}` sorted by name, matching the D3 registry byte-for-byte.
 //!
 //! The fixture was produced by the live discovery handler (see the
@@ -63,7 +63,7 @@ fn fixture_path() -> std::path::PathBuf {
         .join("discovery_tools.json")
 }
 
-/// The assembled discovery app: the real mux with the real 56-tool
+/// The assembled discovery app: the real mux with the real 57-tool
 /// `registry::discovery_tools` provider (D3).
 fn app() -> Router {
     let cfg = Arc::new(Config {
@@ -109,13 +109,13 @@ fn tools_of(doc: &Value) -> Vec<Value> {
 }
 
 fn assert_tools_shape(tools: &[Value]) {
-    assert_eq!(tools.len(), 56, "the D3 registry has exactly 56 tools");
+    assert_eq!(tools.len(), 57, "the D3 registry has exactly 57 tools");
     let mut names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     let sorted = names.clone();
     names.sort_unstable();
     assert_eq!(names, sorted, "tools[] must be sorted by name");
     names.dedup();
-    assert_eq!(names.len(), 56, "tool names are unique");
+    assert_eq!(names.len(), 57, "tool names are unique");
     for tool in tools {
         let row = tool.as_object().expect("tool row object");
         assert_eq!(

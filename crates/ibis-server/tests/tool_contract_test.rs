@@ -1,17 +1,17 @@
 //! Contract gate:
-//! all 56 tool names present in the registry, the back-compat memory tools
+//! all 57 tool names present in the registry, the back-compat memory tools
 //! registered, export/import describe the runtime transfer, and the legacy
 //! `redmine_*` names forbidden. Data-driven against the D3 registry
 //! (name + description + schema) instead of grepping a source file.
 
-use serde_json::{json, Value};
 use ibis_server::registry::{schemas, spec_of, TOOL_ANNOTATIONS, TOOL_SPECS};
+use serde_json::{json, Value};
 
 /// `TestToolContracts_TicketAndPRNamesPresent + the
-/// authoritative list: every one of the 56 tools must be registered.
+/// authoritative list: every one of the 57 tools must be registered.
 #[test]
-fn tool_contracts_all_56_names_present() {
-    let required: [&str; 56] = [
+fn tool_contracts_all_57_names_present() {
+    let required: [&str; 57] = [
         // Project session & ingest (4)
         "init_project",
         "update_project_status",
@@ -27,6 +27,7 @@ fn tool_contracts_all_56_names_present() {
         "memory_rebuild_git_notes",
         "as_of_project",
         "memory_search",
+        "memory_list",
         "memory_expand",
         "memory_update",
         "memory_delete",
@@ -78,11 +79,11 @@ fn tool_contracts_all_56_names_present() {
         // Logs (1)
         "analyze_logs",
     ];
-    assert_eq!(required.len(), 56, "the authoritative list has 56 tools");
+    assert_eq!(required.len(), 57, "the authoritative list has 57 tools");
     assert_eq!(
         TOOL_SPECS.len(),
-        56,
-        "registry registers exactly 56 tools (found {})",
+        57,
+        "registry registers exactly 57 tools (found {})",
         TOOL_SPECS.len()
     );
     for name in required {
@@ -292,13 +293,14 @@ fn tool_annotations_complete_and_pinned() {
 
     // The read-only set is exactly the pure-read surface; everything else
     // is an explicit mutator (readOnlyHint: false).
-    let read_only: [&str; 22] = [
+    let read_only: [&str; 23] = [
         // Code search & analysis
         "ask_project",
         "analyze_blast_radius",
         "find_dead_code",
         // Memory reads
         "memory_search",
+        "memory_list",
         "memory_expand",
         "memory_history",
         "memory_insights",

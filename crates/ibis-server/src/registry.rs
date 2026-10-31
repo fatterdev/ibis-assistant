@@ -217,6 +217,17 @@ pub static TOOL_SPECS: &[ToolSpec] = &[
         ],
     },
     ToolSpec {
+        name: "memory_list",
+        description: "Browse memories by kind/status/visibility without embeddings (metadata list, most recent first). Use memory_search for semantic queries.",
+        properties: &[
+            p!("kind", "Optional comma-separated kind filter", String),
+            p!("status", "Optional status filter (empty = all)", String),
+            p!("visibility", "team|personal|all (default: team + caller's own personal)", String),
+            p!("limit", "Optional max results (default 100)", Number),
+            p!("actor", "Optional identity fallback", String),
+        ],
+    },
+    ToolSpec {
         name: "memory_expand",
         description: "Expand one memory with its supersession lineage, derived_from sources, and workstream.",
         properties: &[
@@ -771,6 +782,11 @@ pub static TOOL_ANNOTATIONS: &[ToolAnnotation] = &[
     ToolAnnotation {
         name: "memory_search",
         title: "Search Memories",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "memory_list",
+        title: "List Memories",
         read_only: true,
     },
     ToolAnnotation {

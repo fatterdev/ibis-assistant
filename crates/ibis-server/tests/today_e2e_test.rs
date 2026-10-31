@@ -10,7 +10,7 @@
 //! - `TestTodayE2EPluginBinary` (decoy): plugin launched with a workspace
 //!   must not write into the CWD `db` (plugin isolation remap);
 //! - #4 (no counterpart — bound roots only implicitly):
-//!   handshake-only mode serves `tools/list` (56 tools) while workspace/DB
+//!   handshake-only mode serves `tools/list` (57 tools) while workspace/DB
 //!   tool calls degrade exactly like the nil `dbClient`
 //!   (`get_working_state failed: database not connected`,
 //!   ), then bind via roots and serve a real memory read.
@@ -48,11 +48,7 @@ fn assistant_exe() -> PathBuf {
         .nth(2)
         .expect("manifest sits at <root>/crates/ibis-server")
         .to_path_buf();
-    let bin_name = if cfg!(windows) {
-        "ibis.exe"
-    } else {
-        "ibis"
-    };
+    let bin_name = if cfg!(windows) { "ibis.exe" } else { "ibis" };
     let candidate = workspace_root.join("target").join("debug").join(bin_name);
     assert!(
         candidate.exists(),
@@ -126,11 +122,7 @@ fn seed_sidecar_binaries(exe: &Path) {
     if !surreal.exists() {
         if let Some(src) = locate_on_path("surreal").or_else(spike_surreal) {
             std::fs::copy(&src, &surreal).unwrap_or_else(|e| {
-                panic!(
-                    "seed {} from {}: {e}",
-                    surreal.display(),
-                    src.display()
-                )
+                panic!("seed {} from {}: {e}", surreal.display(), src.display())
             });
         } else {
             block_on_download("surreal", async {
@@ -148,9 +140,8 @@ fn seed_sidecar_binaries(exe: &Path) {
     let sg = dir.join(sidecar_bin_name("sg"));
     if !sg.exists() {
         if let Some(src) = locate_on_path("sg") {
-            std::fs::copy(&src, &sg).unwrap_or_else(|e| {
-                panic!("seed {} from {}: {e}", sg.display(), src.display())
-            });
+            std::fs::copy(&src, &sg)
+                .unwrap_or_else(|e| panic!("seed {} from {}: {e}", sg.display(), src.display()));
         } else {
             block_on_download("ast-grep (sg)", async {
                 let release = ibis_ingest_code::install::latest_release().await?;
@@ -536,7 +527,7 @@ fn plugin_with_workspace_does_not_write_into_cwd_db() {
 }
 
 /// `06` DoD #4 — the full plugin session: handshake-only mode serves
-/// `tools/list` (56 tools) while workspace/DB tool calls degrade likewise's
+/// `tools/list` (57 tools) while workspace/DB tool calls degrade likewise's
 /// nil `dbClient`; the plugin ListRoots hook binds the workspace; the same
 /// memory tool then serves a real read; stdin close terminates cleanly.
 #[test]
@@ -604,7 +595,7 @@ fn plugin_session_binds_roots_and_serves_memory_tool() {
     // --- handshake-only mode (before the workspace binds) ---
     // F0.6 dynamic tool discovery: the isolated e2e environment configures
     // no ticketing provider, so the config-gated `ticket_*` group is hidden
-    // and the core 41-tool surface is announced.
+    // and the core 42-tool surface is announced.
     let tools = child.request(2, "tools/list", json!({}), Duration::from_secs(10));
     let names: Vec<&str> = tools["result"]["tools"]
         .as_array()
@@ -614,8 +605,8 @@ fn plugin_session_binds_roots_and_serves_memory_tool() {
         .collect();
     assert_eq!(
         names.len(),
-        41,
-        "handshake-only mode lists the core 41-tool registry (ticket group hidden)"
+        42,
+        "handshake-only mode lists the core 42-tool registry (ticket group hidden)"
     );
     assert!(
         !names.iter().any(|n| n.starts_with("ticket_")),

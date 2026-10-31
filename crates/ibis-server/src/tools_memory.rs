@@ -16,7 +16,7 @@ use ibis_search::memory::add::AddMemoryParams;
 use ibis_search::memory::capture::CaptureObservationParams;
 use ibis_search::memory::export::MemoryExportParams;
 use ibis_search::memory::insights::MemoryInsightsParams;
-use ibis_search::memory::{MemorySearchParams, MemoryUpdateParams};
+use ibis_search::memory::{MemoryListParams, MemorySearchParams, MemoryUpdateParams};
 use ibis_search::ActorContext;
 
 /// Memory-tool dispatch (called from [`crate::tools::dispatch`] for the
@@ -35,6 +35,7 @@ pub async fn dispatch(
         "memory_rebuild_git_notes" => memory_rebuild_git_notes(state, &args).await,
         "as_of_project" => as_of_project(state, &args).await,
         "memory_search" => memory_search(state, &args, actor).await,
+        "memory_list" => memory_list(state, &args, actor).await,
         "memory_expand" => memory_expand(state, &args, actor).await,
         "memory_update" => memory_update(state, &args, actor).await,
         "memory_delete" => memory_delete(state, &args, actor).await,
@@ -269,7 +270,9 @@ async fn memory_add(
     fire_memory_changed(state, &id, kind, &params.title).await;
     // F0.7: the Memory Curator app rides along (`_meta.ui.resourceUri`);
     // the JSON text block stays the guaranteed degradation path.
-    with_ui_meta(text_result(json!({ "id": id, "status": "created" }).to_string()))
+    with_ui_meta(text_result(
+        json!({ "id": id, "status": "created" }).to_string(),
+    ))
 }
 
 /// Scenario: memory_bootstrap_git_store
@@ -466,6 +469,45 @@ async fn memory_search(
         // F0.7: textual JSON output stays, the app linkage rides in `_meta`.
         Ok(results) => with_ui_meta(json_result(&results)),
         Err(e) => error_result(format!("memory_search failed: {e}")),
+    }
+}
+
+/// Scenario: memory_list — metadata browse without embeddings (the memory
+/// tree expands kind nodes with this instead of paying one Ollama embedding
+/// per kind; browse is a list, not a semantic search).
+async fn memory_list(
+    state: &Arc<AppState>,
+    args: &serde_json::Map<String, Value>,
+    actor: &ActorContext,
+) -> ToolResult {
+    let mut kinds = Vec::new();
+    if !get_string_arg(args, "kind").is_empty() {
+        kinds = get_string_arg(args, "kind")
+            .split(',')
+            .map(String::from)
+            .collect();
+    }
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_f64)
+        .map(|v| v as usize)
+        .unwrap_or(0);
+    let service = state.search();
+    match service
+        .list_memories(
+            actor,
+            MemoryListParams {
+                kinds,
+                status: get_string_arg(args, "status"),
+                visibility: get_string_arg(args, "visibility"),
+                limit,
+                actor: get_string_arg(args, "actor"),
+            },
+        )
+        .await
+    {
+        Ok(results) => json_result(&results),
+        Err(e) => error_result(format!("memory_list failed: {e}")),
     }
 }
 
@@ -1222,8 +1264,7 @@ async fn analyze_blast_radius(
     let Some(db) = state.db() else {
         return error_result("Blast radius analysis failed: database not connected");
     };
-    match ibis_search::graph::analyze_blast_radius(&db, &repo_name, &file_path, &symbol_name)
-        .await
+    match ibis_search::graph::analyze_blast_radius(&db, &repo_name, &file_path, &symbol_name).await
     {
         Ok(res) => json_result(&res),
         Err(e) => error_result(format!("Blast radius analysis failed: {e}")),
