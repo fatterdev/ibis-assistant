@@ -151,7 +151,7 @@ async function activate(context) {
     vscode.commands.registerCommand("ibis.status", async () => {
       const live = getConfig();
       const message = await buildStatus(host, live);
-      reportStatus(live, message);
+      await reportStatus(live, message);
     }),
     vscode.commands.registerCommand("ibis.remember", async () => {
       try {
@@ -569,7 +569,8 @@ async function buildStatus(host, cfg) {
   if (backend.mode === "http") {
     lines.push(`Backend: attach ${backend.url} (shared runtime)`);
   } else {
-    lines.push(`Backend: spawn ${backend.command} ${backend.args.join(" ")} (isolated child)`);
+    lines.push(`Backend: spawn ${backend.command} (isolated child)`);
+    lines.push(`Runtime args: ${backend.args.join(" ")}`);
   }
   lines.push(`Plugin data dir: ${(backend.mode === "spawn" && backend.env.IBIS_DATA_DIR) || "default"}`);
   lines.push(`Workspace: ${(backend.mode === "spawn" && backend.env.IBIS_WORKSPACE) || "not bound"}`);
@@ -590,24 +591,42 @@ async function buildStatus(host, cfg) {
     }`,
   );
   lines.push(`Memory default: ${cfg.get("memory.defaultKind", "ask")}/${cfg.get("memory.defaultVisibility", "team")}`);
-  lines.push("Memory: call load_session_context once per session; capture only genuinely new, reusable observations.");
-  lines.push("Call MCP ticket_get_capabilities / settings_get for full readiness.");
+  lines.push(
+    "For agents: call load_session_context once per session; capture only genuinely new, reusable observations. Call MCP ticket_get_capabilities / settings_get for full readiness.",
+  );
   return lines.join("\n");
 }
 
 /**
+ * Toast shows only the compact summary (first line) with actions; the full
+ * structured status always lands in the output channel (the toast cannot
+ * render line breaks — it was a wall of text).
  * @param {vscode.WorkspaceConfiguration} cfg
  * @param {string} message
  */
-function reportStatus(cfg, message) {
+async function reportStatus(cfg, message) {
   const mode = cfg.get("status.outputMode", "toast");
-  if (mode === "toast" || mode === "both") {
-    vscode.window.showInformationMessage(message);
-  }
+  const full = "status:\n" + message;
   if (mode === "output" || mode === "both") {
-    logLine("status:\n" + message);
+    logLine(full);
     if (outputChannel) {
       outputChannel.show(true);
+    }
+  }
+  if (mode === "toast" || mode === "both") {
+    const summary = message.split("\n").filter(Boolean)[0] || "Ibis Assistant";
+    const pick = await vscode.window.showInformationMessage(
+      summary,
+      "Details",
+      "Open Settings",
+    );
+    if (pick === "Details") {
+      logLine(full);
+      if (outputChannel) {
+        outputChannel.show(true);
+      }
+    } else if (pick === "Open Settings") {
+      await vscode.commands.executeCommand("ibis.openExtensionSettings");
     }
   }
 }

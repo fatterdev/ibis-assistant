@@ -176,15 +176,19 @@ class MemoryTreeDataProvider {
       } catch (err) {
         const message = err && err.message ? err.message : String(err);
         this.api.logLine(`memory tree fetch failed: ${message}`);
-        return [new MemoryNode(`error: ${message}`, { icon: "error" })];
+        const short = message
+          .replace(/^unexpected memory_search output:\s*/, "")
+          .replace(/\s+/g, " ")
+          .slice(0, 140);
+        return [new MemoryNode(`error: ${short}`, { icon: "error" })];
       }
     }
     return [];
   }
 
   /**
-   * MCP memory_search; kinds browse with the kind as semantic seed, search
-   * uses the free-text query.
+   * Kind browse uses `memory_list` (metadata, no embedding — instant);
+   * free-text search keeps `memory_search` (semantic, one call).
    * @param {string} query
    * @param {string} kind
    * @returns {Promise<Array<Record<string, any>>>}
@@ -192,11 +196,9 @@ class MemoryTreeDataProvider {
   async fetchEntries(query, kind) {
     const cfg = this.api.getConfig();
     const backend = await this.api.resolveBackend(this.host, cfg);
-    const args = { query, limit: SEARCH_LIMIT };
-    if (kind) {
-      args.kind = kind;
-    }
-    const text = await this.host.callMcpTool(backend, "memory_search", args);
+    const text = kind
+      ? await this.host.callMcpTool(backend, "memory_list", { kind, limit: 100 })
+      : await this.host.callMcpTool(backend, "memory_search", { query, limit: SEARCH_LIMIT });
     return parseMemoryArray(text);
   }
 
