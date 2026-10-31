@@ -604,16 +604,13 @@ impl crate::search::SearchService {
             .ai
             .as_ref()
             .ok_or_else(|| SearchError::Embedding("AI provider not configured".into()))?;
-        let vector = ai
-            .embed_text(&params.query)
-            .await
-            .map_err(|e| {
-                tracing::warn!(
-                    "memory_search: embed_text failed after {:?}: {e}",
-                    t0.elapsed()
-                );
-                SearchError::wrap("embedding failed", e)
-            })?;
+        let vector = ai.embed_text(&params.query).await.map_err(|e| {
+            tracing::warn!(
+                "memory_search: embed_text failed after {:?}: {e}",
+                t0.elapsed()
+            );
+            SearchError::wrap("embedding failed", e)
+        })?;
         tracing::info!("memory_search: embedded in {:?}", t0.elapsed());
 
         let mut status = params.status.trim().to_string();
@@ -652,8 +649,11 @@ impl crate::search::SearchService {
         }
 
         // Wider candidate pool so keyword/entity re-ranking can surface
-        // lexical matches just outside the pure vector top-K.
-        let fetch_limit = (limit * 3).clamp(limit, 45);
+        // lexical matches just outside the pure vector top-K. Never below the
+        // caller's limit: `clamp(limit, 45)` panics with min > max when the
+        // requested limit exceeds the cap (regression: limit=50 from the IDE
+        // tree view killed the handler task and hung the tool call).
+        let fetch_limit = (limit * 3).min(45).max(limit);
 
         let sql = format!(
             "SELECT id, kind, title, string::slice(content, 0, {MEMORY_SEARCH_SUMMARY_RUNES}) AS content, status, confidence, visibility, owner, tags, branch, valid_from, valid_until, created_at, updated_at, vector::similarity::cosine(embedding, $vec) AS score FROM memory WHERE {} ORDER BY score DESC LIMIT {fetch_limit};",
@@ -672,7 +672,11 @@ impl crate::search::SearchService {
         tracing::info!("memory_search: db query returned in {:?}", t0.elapsed());
         let rows_values = rows::normalize_rows(&outcome).unwrap_or_default();
         let mut memories = memories_from_rows(&rows_values);
-        tracing::info!("memory_search: rows={} elapsed={:?}", memories.len(), t0.elapsed());
+        tracing::info!(
+            "memory_search: rows={} elapsed={:?}",
+            memories.len(),
+            t0.elapsed()
+        );
         let (keywords, entities) = crate::retrieval_boost::tokenize_query(&params.query);
         tracing::info!("memory_search: boosting (elapsed={:?})", t0.elapsed());
         let linked_symbols =
@@ -1043,5 +1047,84 @@ mod tests {
             240
         );
         assert_eq!(shorten_memory_content("short"), "short");
+    }
+
+    fn search_service_with_one_memory() -> (
+        std::sync::Arc<crate::test_support::FakeDb>,
+        crate::search::SearchService,
+    ) {
+        use crate::test_support::{fake_ai, obj, rows_of, FakeDb};
+        use ibis_db::value::Value;
+
+        let fake = std::sync::Arc::new(FakeDb::new(vec![(
+            "FROM memory",
+            rows_of(vec![obj(vec![
+                ("id", Value::from_t("memory:1")),
+                ("kind", Value::from_t("fact")),
+                ("title", Value::from_t("clamp cap")),
+                ("content", Value::from_t("regression row")),
+                ("status", Value::from_t("current")),
+                ("visibility", Value::from_t("team")),
+                ("score", Value::from_t(0.9f64)),
+            ])]),
+        )]));
+        let svc = crate::search::SearchService::new(Some(fake.clone()), Some(fake_ai()));
+        (fake, svc)
+    }
+
+    /// Regression: `(limit * 3).clamp(limit, 45)` panicked with `min > max`
+    /// when the IDE memory tree asked for `limit=50`; the panic killed the
+    /// handler task and the MCP call hung until timeout.
+    #[tokio::test]
+    async fn search_memory_limit_above_fetch_cap_does_not_panic() {
+        let (fake, svc) = search_service_with_one_memory();
+        let hits = svc
+            .search_memory(
+                &crate::ActorContext::LOCAL,
+                MemorySearchParams {
+                    query: "regression".into(),
+                    limit: 50,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("limit=50 must not panic the fetch-limit clamp");
+        assert_eq!(hits.len(), 1);
+
+        let smart = fake.smart_calls.lock().unwrap().clone();
+        let sql = smart
+            .iter()
+            .find(|q| q.contains("FROM memory"))
+            .expect("memory query");
+        assert!(
+            sql.contains("LIMIT 50"),
+            "fetch pool must never drop below the requested limit: {sql}"
+        );
+    }
+
+    /// The wider candidate pool still applies for limits below the cap.
+    #[tokio::test]
+    async fn search_memory_widens_fetch_pool_below_cap() {
+        let (fake, svc) = search_service_with_one_memory();
+        svc.search_memory(
+            &crate::ActorContext::LOCAL,
+            MemorySearchParams {
+                query: "regression".into(),
+                limit: 5,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("limit=5");
+
+        let smart = fake.smart_calls.lock().unwrap().clone();
+        let sql = smart
+            .iter()
+            .find(|q| q.contains("FROM memory"))
+            .expect("memory query");
+        assert!(
+            sql.contains("LIMIT 15"),
+            "expected 3x widening below the cap: {sql}"
+        );
     }
 }
