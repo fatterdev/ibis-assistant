@@ -150,7 +150,9 @@ mod tests {
             Ok(Candidate {
                 content: Content {
                     role: "model".into(),
-                    parts: vec![Part { text: self.text.clone() }],
+                    parts: vec![Part {
+                        text: self.text.clone(),
+                    }],
                 },
                 finish_reason: String::new(),
                 usage_metadata: None,
@@ -224,9 +226,17 @@ mod tests {
     async fn all_failed_joins_errors_in_order() {
         let chain = FallbackChain::new(
             vec![
-                Arc::new(Stub::failing("mcp_sampling", "declined", Default::default())),
+                Arc::new(Stub::failing(
+                    "mcp_sampling",
+                    "declined",
+                    Default::default(),
+                )),
                 Arc::new(Stub::nonfunctional("cursor", Default::default())),
-                Arc::new(Stub::failing("ollama_chat", "daemon down", Default::default())),
+                Arc::new(Stub::failing(
+                    "ollama_chat",
+                    "daemon down",
+                    Default::default(),
+                )),
             ],
             false,
         );

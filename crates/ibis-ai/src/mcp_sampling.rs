@@ -90,7 +90,12 @@ impl McpSamplingProvider {
             .iter()
             .filter(|c| !c.joined_text().trim().is_empty())
             .map(|c| SamplingMessage {
-                role: if c.role == "model" { "assistant" } else { "user" }.to_string(),
+                role: if c.role == "model" {
+                    "assistant"
+                } else {
+                    "user"
+                }
+                .to_string(),
                 text: c.joined_text(),
             })
             .collect()
@@ -130,7 +135,9 @@ impl AIProvider for McpSamplingProvider {
         Ok(Candidate {
             content: Content {
                 role: "model".into(),
-                parts: vec![crate::types::Part { text: response.text }],
+                parts: vec![crate::types::Part {
+                    text: response.text,
+                }],
             },
             finish_reason: response.stop_reason.unwrap_or_else(|| "stop".to_string()),
             usage_metadata: None,
@@ -173,7 +180,10 @@ mod tests {
             self.connected
         }
 
-        async fn create_message(&self, request: SamplingRequest) -> Result<SamplingResponse, AiError> {
+        async fn create_message(
+            &self,
+            request: SamplingRequest,
+        ) -> Result<SamplingResponse, AiError> {
             self.seen.lock().unwrap().push(request);
             if let Some(err) = &self.fail_with {
                 return Err(AiError::other(err.clone()));
@@ -190,7 +200,9 @@ mod tests {
     fn content(role: &str, text: &str) -> Content {
         Content {
             role: role.to_string(),
-            parts: vec![Part { text: text.to_string() }],
+            parts: vec![Part {
+                text: text.to_string(),
+            }],
         }
     }
 
@@ -246,12 +258,9 @@ mod tests {
     async fn empty_generation_uses_default_max_tokens_and_no_temperature() {
         let mock = Arc::new(MockTransport::connected());
         let p = McpSamplingProvider::new(mock.clone());
-        p.generate_content(
-            &[content("user", "hi")],
-            GenerationConfig::default(),
-        )
-        .await
-        .unwrap();
+        p.generate_content(&[content("user", "hi")], GenerationConfig::default())
+            .await
+            .unwrap();
         let seen = mock.seen.lock().unwrap();
         assert_eq!(seen[0].max_tokens, DEFAULT_SAMPLING_MAX_TOKENS);
         assert_eq!(seen[0].temperature, None);
@@ -269,7 +278,10 @@ mod tests {
                         role: "user".into(),
                         parts: vec![Part { text: "   ".into() }],
                     },
-                    Content { role: String::new(), parts: vec![] },
+                    Content {
+                        role: String::new(),
+                        parts: vec![],
+                    },
                 ],
                 GenerationConfig::default(),
             )
