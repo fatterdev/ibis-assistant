@@ -4,6 +4,47 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **fix(search): `memory_search` no longer panics when limit exceeds the
+  fetch cap** - `(limit * 3).clamp(limit, 45)` panicked with `min > max` when
+  the IDE memory tree sent `limit=50`, killing the handler task and hanging
+  the MCP call until the client timeout; the clamp now never drops below the
+  requested limit (`(limit * 3).min(45).max(limit)`), regression tests pin
+  both directions (50 → `LIMIT 50`, 5 → `LIMIT 15`).
+- **feat(server): panics land in the log file and tool calls fail fast** -
+  `install_panic_hook` routes panics through `tracing` (payload, thread,
+  location, forced backtrace) so stdio/plugin runs record them in the log
+  file instead of an unread stderr; `tools/call` dispatch wraps the router in
+  `catch_unwind` and returns an `isError` result carrying the panic payload
+  instead of leaving the request hanging.
+- **feat(server): `memory_list` MCP tool** - embedding-free metadata browse
+  (kind/status/visibility filters, most recent first) backing the memory tree
+  kind nodes; tool surface is now 57 (contract tests, read-only annotation
+  set and discovery fixture updated).
+- **feat(ai): local embed pipeline guards** - `keep_alive` on `/api/embed`
+  (default `"30m"`, `IBIS_OLLAMA_KEEP_ALIVE` override; a cold model reload
+  costs ~4s and the API parameter overrides the server `OLLAMA_KEEP_ALIVE`),
+  in-process query-embedding cache (cap 1024) and a process-wide FIFO
+  queue/limiter (default 1 permit, `IBIS_OLLAMA_EMBED_CONCURRENCY`) that
+  removes the concurrent-request transport failures observed on the AMD/ROCm
+  Ollama bundle (`OLLAMA_MAX_QUEUE` was never the cause: those were
+  connection-level errors, not 503s).
+- **feat(vscode): instant memory tree + structured status** - kind nodes
+  browse via `memory_list` (~2 ms, no embedding) instead of one semantic
+  search per kind (8 concurrent Ollama embeds at ~4s, source of the
+  "ollama API request failed" errors); the Status toast shows the compact
+  summary with **Details**/**Open Settings** actions while the full
+  structured report lands in the output channel (the toast cannot render
+  line breaks).
+- **chore(vscode): activity bar icon refresh** - pre-existing uncommitted
+  asset swap committed with the rest of the pending work.
+- **docs: memory layer tool table + local embedding pipeline** -
+  `memory_list` documented in `docs/memory_layer.md`; the Ollama embed guards
+  (keep_alive / cache / queue, env overrides) documented in
+  `docs/ai_and_settings.md`.
+- **chore(ui-test): SendKeys driver (Parte B)** - `scripts/ui-test/keys.mjs`
+  drives deterministic palette/tree/chat flows for the R3/R4 computer-use
+  pack (window activate via WScript.Shell, clipboard paste, optional wait).
+
 - **build(vscode): oidc publishing, open vsx and mcp registry listing** (F1.6)
   — manual `publish-vscode.yml` workflow (dispatch toggles per target): VSIX
   packaging, VS Marketplace publish via OIDC trusted publishing (`id-token:

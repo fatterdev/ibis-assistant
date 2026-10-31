@@ -20,6 +20,22 @@ Operator guide for embeddings, hybrid reasoning, multi-cloud keys, hardware auto
 
 AMD and NVIDIA are both supported for tier detection (Ollama ROCm/CUDA/Vulkan report + WMI). If a discrete GPU is present but Ollama runs on CPU, tier S is used and a diagnostic is logged.
 
+### Local embedding pipeline (Ollama)
+
+`POST /api/embed` calls carry three guards (`crates/ibis-ai/src/ollama.rs`); the
+memory tree browses kinds with the embedding-free `memory_list` tool, so
+semantic embeds fire only for real queries:
+
+| Guard | Behavior |
+|-------|----------|
+| `keep_alive` | `"30m"` per call keeps `nomic-embed-text` resident (Ollama default `5m`; a cold reload costs ~4s). The API parameter overrides the server `OLLAMA_KEEP_ALIVE` for the embedding model — `IBIS_OLLAMA_KEEP_ALIVE` changes it. |
+| Query cache | Identical input texts reuse the in-process embedding (cap 1024 entries, cleared wholesale when exceeded). |
+| FIFO queue | One in-flight `/api/embed` per permit, default `1` (matches `OLLAMA_NUM_PARALLEL=1` and the Windows+Radeon single-model limit); `IBIS_OLLAMA_EMBED_CONCURRENCY` raises it when the local server allows more. Cache hits never queue. |
+
+Ollama exposes no API for its concurrency settings (`/api/ps` and `/api/show`
+carry no parallelism field), so the queue defaults to the safe value and is
+overridable by hand.
+
 ## Plug-and-play keys
 
 Enter API keys in the **wizard** or **Settings UI**; they are stored in `config.json` (plugin data dir when `runtime_mode=plugin`).
