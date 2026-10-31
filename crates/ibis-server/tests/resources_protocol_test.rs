@@ -12,6 +12,12 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use futures::future::FutureExt;
+use ibis_ai::Client;
+use ibis_core::config::{Config, ProjectConfig};
+use ibis_server::resources;
+use ibis_server::sampling;
+use ibis_server::state::AppState;
+use ibis_server::{assembly, mcp_server};
 use rmcp::model::{
     ClientCapabilities, ClientConfig, ErrorCode, Implementation, ProtocolVersion,
     ReadResourceRequestParams, ResourceUpdatedNotificationParam, SubscribeRequestParams,
@@ -23,12 +29,6 @@ use rmcp::service::{
 };
 use rmcp::ClientHandler;
 use serde_json::{json, Value};
-use ibis_ai::Client;
-use ibis_core::config::{Config, ProjectConfig};
-use ibis_server::resources;
-use ibis_server::sampling;
-use ibis_server::state::AppState;
-use ibis_server::{assembly, mcp_server};
 
 /// A minimal-but-real [`AppState`]: no DB (degraded clone-only), no AI
 /// providers, no background workers — enough state for the resource surface
@@ -506,11 +506,7 @@ async fn fire_targets_both_rule_surfaces() {
             .boxed()
         })
     };
-    registry.subscribe(
-        "ibis://rules/no-deps-on-node-builtins",
-        1,
-        notify.clone(),
-    );
+    registry.subscribe("ibis://rules/no-deps-on-node-builtins", 1, notify.clone());
     registry.subscribe("ibis://memory/rule/memory:rule1", 2, notify);
 
     // The mutation hook fires the memory URI and (for rules) the rules twin.

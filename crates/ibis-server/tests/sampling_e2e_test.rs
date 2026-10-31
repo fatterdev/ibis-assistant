@@ -12,21 +12,19 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+use ibis_ai::{AIProvider, Client, CursorLMProvider, FallbackChain, McpSamplingProvider};
+use ibis_core::config::Config;
+use ibis_server::mcp_server::IbisServer;
+use ibis_server::sampling::SamplingSessionRegistry;
+use ibis_server::state::AppState;
 use rmcp::handler::client::ClientHandler;
 use rmcp::model::{
     ClientCapabilities, ClientConfig, CreateMessageRequestParams, CreateMessageResult,
     Implementation, Role, SamplingMessage, SamplingMessageContentBlock,
 };
 use rmcp::service::{RequestContext, RoleClient, RunningService};
-use rmcp::{ErrorData as McpError, ServiceExt, service::serve_client};
+use rmcp::{service::serve_client, ErrorData as McpError, ServiceExt};
 use serde_json::json;
-use ibis_ai::{
-    Client, CursorLMProvider, FallbackChain, McpSamplingProvider, AIProvider,
-};
-use ibis_core::config::Config;
-use ibis_server::mcp_server::IbisServer;
-use ibis_server::sampling::SamplingSessionRegistry;
-use ibis_server::state::AppState;
 
 /// An MCP client that declares the `sampling` capability and answers
 /// `sampling/createMessage` with a canned assistant turn.
@@ -89,11 +87,12 @@ async fn test_state(registry: Arc<SamplingSessionRegistry>) -> Arc<AppState> {
     };
     let ai = sampling_chain(registry.clone());
     let db: Option<Arc<dyn ibis_db::executor::Executor>> = None;
-    let ticket = ibis_server::assembly::assemble_ticketing(db.clone()).await.0;
+    let ticket = ibis_server::assembly::assemble_ticketing(db.clone())
+        .await
+        .0;
     let repopr = ibis_server::assembly::assemble_repopr(&ticket.config().clone());
-    let ai_adapter: Option<Arc<dyn ibis_ai::AIProvider>> = Some(Arc::new(
-        ibis_server::state::ClientAIAdapter(ai.clone()),
-    ));
+    let ai_adapter: Option<Arc<dyn ibis_ai::AIProvider>> =
+        Some(Arc::new(ibis_server::state::ClientAIAdapter(ai.clone())));
     Arc::new(AppState {
         cfg: Arc::new(RwLock::new(cfg.clone())),
         db: Arc::new(RwLock::new(db)),
@@ -208,11 +207,12 @@ async fn ask_project_reasons_through_mcp_sampling() {
 
     let result = peer
         .call_tool(
-            rmcp::model::CallToolRequestParams::new("ask_project")
-                .with_arguments(json!({ "query": "why did init change?" })
+            rmcp::model::CallToolRequestParams::new("ask_project").with_arguments(
+                json!({ "query": "why did init change?" })
                     .as_object()
                     .unwrap()
-                    .clone()),
+                    .clone(),
+            ),
         )
         .await
         .expect("ask_project over sampling");
@@ -256,10 +256,7 @@ async fn sampling_without_client_capability_degrades_to_chain_error() {
     let result = peer
         .call_tool(
             rmcp::model::CallToolRequestParams::new("ask_project")
-                .with_arguments(json!({ "query": "why?" })
-                    .as_object()
-                    .unwrap()
-                    .clone()),
+                .with_arguments(json!({ "query": "why?" }).as_object().unwrap().clone()),
         )
         .await
         .expect("ask_project executes");

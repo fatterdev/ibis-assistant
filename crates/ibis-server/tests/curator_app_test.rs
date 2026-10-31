@@ -10,13 +10,6 @@
 
 use std::sync::{Arc, Mutex, RwLock};
 
-use rmcp::model::{
-    ClientCapabilities, ClientConfig, ErrorCode, Implementation, ReadResourceRequestParams,
-    ResourceContents,
-};
-use rmcp::service::{ClientLifecycleMode, ClientServiceExt, Peer, RoleClient, RunningService,
-    ServiceError, ServiceExt};
-use serde_json::Value;
 use ibis_ai::Client;
 use ibis_core::config::{Config, ProjectConfig};
 use ibis_httpserver::curator;
@@ -24,6 +17,15 @@ use ibis_server::resources;
 use ibis_server::sampling;
 use ibis_server::state::AppState;
 use ibis_server::{assembly, mcp_server};
+use rmcp::model::{
+    ClientCapabilities, ClientConfig, ErrorCode, Implementation, ReadResourceRequestParams,
+    ResourceContents,
+};
+use rmcp::service::{
+    ClientLifecycleMode, ClientServiceExt, Peer, RoleClient, RunningService, ServiceError,
+    ServiceExt,
+};
+use serde_json::Value;
 
 /// A minimal-but-real [`AppState`]: no DB, no AI providers, no background
 /// workers — the F0.7 surface is static metadata + an embedded asset.
@@ -136,11 +138,7 @@ async fn curator_app_listed_and_readable_with_app_mime() {
         .list_resources(Default::default())
         .await
         .expect("resources/list");
-    assert_eq!(
-        listed.resources.len(),
-        2,
-        "guide + curator: {listed:?}"
-    );
+    assert_eq!(listed.resources.len(), 2, "guide + curator: {listed:?}");
     let declared = listed
         .resources
         .iter()
@@ -202,7 +200,10 @@ async fn curator_app_listed_and_readable_with_app_mime() {
                 .and_then(|csp| csp.get("connectDomains"))
                 .and_then(|v| v.as_array())
                 .expect("contents _meta.ui.csp.connectDomains");
-            assert_eq!(contents_connect.len(), curator::CURATOR_CONNECT_DOMAINS.len());
+            assert_eq!(
+                contents_connect.len(),
+                curator::CURATOR_CONNECT_DOMAINS.len()
+            );
         }
         other => panic!("expected text contents, got {other:?}"),
     }

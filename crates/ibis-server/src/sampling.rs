@@ -208,11 +208,7 @@ mod tests {
                 rmcp::model::Role::User
             ]
         );
-        let texts: Vec<String> = params
-            .messages
-            .iter()
-            .map(text_of_message)
-            .collect();
+        let texts: Vec<String> = params.messages.iter().map(text_of_message).collect();
         assert_eq!(texts, vec!["why?", "because", "map to user"]);
     }
 

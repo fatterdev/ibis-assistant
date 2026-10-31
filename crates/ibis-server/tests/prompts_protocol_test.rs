@@ -8,16 +8,16 @@
 
 use std::sync::{Arc, Mutex, RwLock};
 
+use ibis_ai::Client;
+use ibis_core::config::{Config, ProjectConfig};
+use ibis_server::state::AppState;
+use ibis_server::{assembly, mcp_server, prompts};
 use rmcp::model::{
     ClientCapabilities, ClientConfig, CompleteRequestParams, GetPromptRequestParams,
     Implementation, Reference,
 };
 use rmcp::service::{Peer, RoleClient, RunningService, ServiceExt};
 use serde_json::{json, Value};
-use ibis_ai::Client;
-use ibis_core::config::{Config, ProjectConfig};
-use ibis_server::state::AppState;
-use ibis_server::{assembly, mcp_server, prompts};
 
 /// A minimal-but-real [`AppState`]: no DB (degraded clone-only), no AI
 /// providers, no background workers — enough state for the prompt surface

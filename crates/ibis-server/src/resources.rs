@@ -440,8 +440,8 @@ mod tests {
             "ibis://rules/a/b",                 // name with slash
             "ibis://ticket/",                   // empty id
             "ibis://ticket/a/b",                // id with slash
-            "threski://memory/decision/x",         // foreign scheme (the retired one)
-            "https://example.com",                 // foreign scheme
+            "threski://memory/decision/x",      // foreign scheme (the retired one)
+            "https://example.com",              // foreign scheme
             "ibis://other/x",                   // unknown surface
         ] {
             assert!(parse_uri(uri).is_none(), "{uri} must not parse");

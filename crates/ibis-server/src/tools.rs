@@ -5,12 +5,12 @@
 
 use std::sync::Arc;
 
+use ibis_ai::SamplingTransport;
 use ibis_db::value::Value as DbValue;
 use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::service::RequestContext;
 use rmcp::RoleServer;
 use serde_json::{json, Value};
-use ibis_ai::SamplingTransport;
 
 use crate::args::{bool_arg, get_string_arg, str_arg};
 use crate::progress::{report, ProgressReporter};
@@ -934,8 +934,8 @@ async fn optimize_knowledge(
 #[cfg(test)]
 mod ui_meta_tests {
     use super::*;
-    use rmcp::model::ContentBlock;
     use ibis_httpserver::curator;
+    use rmcp::model::ContentBlock;
 
     /// F0.7 text-fallback gate: a successful memory-tool result keeps its
     /// textual content (hosts without MCP Apps support render this) and

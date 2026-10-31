@@ -287,8 +287,7 @@ impl AppState {
         }
         let service = self.search();
         if let Err(e) =
-            ibis_search::memory::projection::write_memory_projection(&service, &root, &name)
-                .await
+            ibis_search::memory::projection::write_memory_projection(&service, &root, &name).await
         {
             tracing::warn!("memory projection failed: {e}");
         }
@@ -420,8 +419,7 @@ pub async fn assemble_ai(
             && cfg.ai.embedding.auto_update
             && !plugin_unbound
         {
-            let _ =
-                ibis_ai::ensure_ollama(&cfg.ai.embedding.url, &local_model, false, true).await;
+            let _ = ibis_ai::ensure_ollama(&cfg.ai.embedding.url, &local_model, false, true).await;
         }
         local_reasoning = Some(Box::new(OllamaChatProvider::new(
             &local_model,

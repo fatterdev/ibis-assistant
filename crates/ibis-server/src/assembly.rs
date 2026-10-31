@@ -753,10 +753,7 @@ mod tests {
         let raw = row_object(vec![
             (
                 "id",
-                Value::RecordId(surrealdb::types::RecordId::new(
-                    "file_chunk",
-                    "chunk-1",
-                )),
+                Value::RecordId(surrealdb::types::RecordId::new("file_chunk", "chunk-1")),
             ),
             ("content", Value::String("chunk body".into())),
         ]);
@@ -819,7 +816,10 @@ mod tests {
         let plain = ibis_db::ids::record_id_to_plain(&record);
         assert_eq!(plain, "file_chunk:aB3_x-9");
         assert!(ibis_db::ids::is_safe_record_id(&plain), "{plain}");
-        assert_eq!(Value::RecordId(record.clone()).to_sql(), "file_chunk:`aB3_x-9`");
+        assert_eq!(
+            Value::RecordId(record.clone()).to_sql(),
+            "file_chunk:`aB3_x-9`"
+        );
         assert_eq!(ibis_db::ids::format_record(&record), "file_chunk:⟨aB3_x-9⟩");
     }
 }
