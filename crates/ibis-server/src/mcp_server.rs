@@ -27,12 +27,12 @@ use std::sync::Arc;
 
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::model::{
-    CacheScope, CallToolRequestParams, CallToolResponse, CompleteRequestParams, CompleteResult,
-    GetPromptRequestParams, GetPromptResponse, ListPromptsResult, ListResourceTemplatesResult,
-    ListResourcesResult, ListToolsResult, PaginatedRequestParams, PromptMessage, ProtocolVersion,
-    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
-    ResourceContents, ResultType, Role, ServerCapabilities, ServerConfig, SubscribeRequestParams,
-    SubscriptionFilter, Tool, UnsubscribeRequestParams,
+    CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, CompleteRequestParams,
+    CompleteResult, ContentBlock, GetPromptRequestParams, GetPromptResponse, ListPromptsResult,
+    ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
+    PromptMessage, ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse,
+    ReadResourceResult, Resource, ResourceContents, ResultType, Role, ServerCapabilities,
+    ServerConfig, SubscribeRequestParams, SubscriptionFilter, Tool, UnsubscribeRequestParams,
 };
 use rmcp::service::{RequestContext, SubscriptionContext};
 use rmcp::tool_handler;
@@ -109,6 +109,42 @@ impl IbisServer {
     }
 }
 
+/// Message text of a panic payload (`panic!("…")` / `unwrap` style).
+/// Shared by the server panic hook (`main.rs`) and tool-dispatch recovery.
+pub fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|m| (*m).to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "<non-string panic payload>".to_string())
+}
+
+/// Runs a tool dispatch future, converting a panic into an `isError` tool
+/// result so the caller gets a fast error instead of a hung MCP call —
+/// regression: the fetch-limit clamp panic killed the handler task and the
+/// IDE waited out its 60s timeout. The process-wide panic hook still logs
+/// payload + backtrace.
+async fn catch_tool_panic(
+    tool_name: &str,
+    dispatch: impl std::future::Future<Output = Result<CallToolResponse, rmcp::ErrorData>>,
+) -> Result<CallToolResponse, rmcp::ErrorData> {
+    use futures::FutureExt as _;
+    match std::panic::AssertUnwindSafe(dispatch).catch_unwind().await {
+        Ok(response) => response,
+        Err(payload) => {
+            let message = panic_payload_message(&*payload);
+            tracing::error!(
+                tool = tool_name,
+                "tool panicked; returning an error result: {message}"
+            );
+            Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                "internal error: tool '{tool_name}' panicked: {message}\nsee the server log for details"
+            ))])
+            .into())
+        }
+    }
+}
+
 #[tool_handler(router = self.router)]
 impl ServerHandler for IbisServer {
     fn get_info(&self) -> ServerConfig {
@@ -175,7 +211,8 @@ impl ServerHandler for IbisServer {
 
     /// F0.6: a config-hidden tool call gets a configuration error naming the
     /// fix, instead of the router's bare "tool not found" (the caller may be
-    /// working from a stale tool list).
+    /// working from a stale tool list). A panicking handler is caught and
+    /// returned as an `isError` result — never a hung call.
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
@@ -191,8 +228,9 @@ impl ServerHandler for IbisServer {
                 None,
             ));
         }
+        let tool_name = request.name.clone();
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
-        self.router.call(tcc).await
+        catch_tool_panic(&tool_name, self.router.call(tcc)).await
     }
 
     async fn list_resources(
@@ -201,7 +239,10 @@ impl ServerHandler for IbisServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, rmcp::ErrorData> {
         Ok(ListResourcesResult {
-            resources: vec![Self::guide_resource(), crate::mcp_server::curator_resource()],
+            resources: vec![
+                Self::guide_resource(),
+                crate::mcp_server::curator_resource(),
+            ],
             ..Default::default()
         })
     }
@@ -237,14 +278,12 @@ impl ServerHandler for IbisServer {
         // MCP Apps support never fetch it — the memory tools keep their
         // always-present textual output).
         if request.uri == ibis_httpserver::curator::CURATOR_URI {
-            return Ok(ReadResourceResult::new(vec![
-                ResourceContents::text(
-                    ibis_httpserver::curator::curator_html(),
-                    request.uri,
-                )
-                .with_mime_type(ibis_httpserver::curator::CURATOR_MIME)
-                .with_meta(ibis_httpserver::curator::ui_resource_meta()),
-            ])
+            return Ok(ReadResourceResult::new(vec![ResourceContents::text(
+                ibis_httpserver::curator::curator_html(),
+                request.uri,
+            )
+            .with_mime_type(ibis_httpserver::curator::CURATOR_MIME)
+            .with_meta(ibis_httpserver::curator::ui_resource_meta())])
             .into());
         }
         // F0.4 template reads (memory / rules / ticket); anything else is a
@@ -456,5 +495,65 @@ impl ServerHandler for IbisServer {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod panic_guard_tests {
+    use super::*;
+
+    async fn panicking_probe() -> Result<CallToolResponse, rmcp::ErrorData> {
+        panic!("probe boom");
+    }
+
+    /// A handler panic must surface as an `isError` tool result, not as a
+    /// hung call (regression: the fetch-limit clamp panic killed the handler
+    /// task and the IDE waited out its 60s timeout).
+    #[tokio::test]
+    async fn tool_panic_becomes_error_result() {
+        let response = catch_tool_panic("probe_tool", panicking_probe())
+            .await
+            .expect("panic must be converted, not propagated");
+        let CallToolResponse::Complete(result) = response else {
+            panic!("expected a complete tool response");
+        };
+        assert_eq!(result.is_error, Some(true));
+        match result.content.first().expect("text block always present") {
+            ContentBlock::Text(text) => {
+                assert!(
+                    text.text
+                        .contains("internal error: tool 'probe_tool' panicked: probe boom"),
+                    "unexpected error text: {}",
+                    text.text
+                );
+            }
+            other => panic!("expected text content, got {other:?}"),
+        }
+    }
+
+    /// The guard must not alter the normal outcome path.
+    #[tokio::test]
+    async fn ok_results_pass_through() {
+        let response = catch_tool_panic("probe_tool", async {
+            Ok::<CallToolResponse, rmcp::ErrorData>(
+                CallToolResult::success(vec![ContentBlock::text("fine")]).into(),
+            )
+        })
+        .await
+        .expect("ok dispatch");
+        let CallToolResponse::Complete(result) = response else {
+            panic!("expected a complete tool response");
+        };
+        assert_eq!(result.is_error, Some(false));
+    }
+
+    /// `panic_payload_message` decodes `&str` and `String` payloads.
+    #[test]
+    fn payload_message_decodes_str_and_string() {
+        let from_str = std::panic::catch_unwind(|| panic!("str payload")).unwrap_err();
+        assert_eq!(panic_payload_message(&*from_str), "str payload");
+        let from_string =
+            std::panic::catch_unwind(|| panic!("{}", String::from("string payload"))).unwrap_err();
+        assert_eq!(panic_payload_message(&*from_string), "string payload");
     }
 }

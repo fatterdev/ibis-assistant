@@ -83,11 +83,7 @@ fn main() {
         "start" | "stop" => exit_with_service_dispatch(&argv),
         "version" | "-version" | "--version" => {
             if !mcp_server::COMMIT.is_empty() && mcp_server::COMMIT != "none" {
-                println!(
-                    "ibis {} ({})",
-                    mcp_server::VERSION,
-                    mcp_server::COMMIT
-                );
+                println!("ibis {} ({})", mcp_server::VERSION, mcp_server::COMMIT);
             } else {
                 println!("ibis {}", mcp_server::VERSION);
             }
@@ -257,10 +253,7 @@ fn normalize_flag_style(args: &[String]) -> Vec<String> {
         .map(|arg| {
             let bare = arg.split('=').next().unwrap_or(arg);
             if let Some(name) = bare.strip_prefix('-') {
-                if !name.is_empty()
-                    && !name.starts_with('-')
-                    && SERVER_LONG_FLAGS.contains(&name)
-                {
+                if !name.is_empty() && !name.starts_with('-') && SERVER_LONG_FLAGS.contains(&name) {
                     return format!("-{arg}");
                 }
             }
@@ -341,6 +334,32 @@ fn run_server(args: &[String]) -> ! {
         .expect("tokio runtime");
     let code = runtime.block_on(run_server_async(args.to_vec()));
     std::process::exit(code);
+}
+
+/// Routes panics through `tracing` so they land in the server log file as
+/// ERROR lines (payload, thread, location, backtrace) instead of vanishing
+/// on a stderr nobody reads in stdio/plugin mode — the regression where a
+/// `clamp(min > max)` panic killed the handler task and the MCP call hung
+/// with the log frozen right before the next `tracing::info!`. The previous
+/// hook still runs, keeping the default behavior on interactive shells.
+fn install_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = std::thread::current();
+        let thread = thread.name().unwrap_or("<unnamed>");
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown>".to_string());
+        let message = ibis_server::mcp_server::panic_payload_message(info.payload());
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        tracing::error!(
+            thread = thread,
+            location = location.as_str(),
+            "panic: {message}\nbacktrace:\n{backtrace}"
+        );
+        previous(info);
+    }));
 }
 
 async fn run_server_async(args: Vec<String>) -> i32 {
@@ -431,6 +450,7 @@ async fn run_server_async(args: Vec<String>) -> i32 {
         }
         return 1;
     }
+    install_panic_hook();
     tracing::info!(
         "[INIT] Flags parsed. Mode: {}, Port: {}",
         cfg.mode,
@@ -555,9 +575,7 @@ async fn run_server_async(args: Vec<String>) -> i32 {
         sampling: sampling_registry,
         // F0.6: the published visibility matches the assembled ticketing
         // service (no providers → the ticket_* group starts hidden).
-        tool_discovery: ibis_server::tool_discovery::ToolDiscovery::new(
-            !ticketing_unconfigured,
-        ),
+        tool_discovery: ibis_server::tool_discovery::ToolDiscovery::new(!ticketing_unconfigured),
     });
 
     // Background workers
@@ -784,9 +802,8 @@ mod flag_parity_tests {
     use super::*;
 
     fn parse(args: &[&str]) -> ServerFlags {
-        let normalized = normalize_flag_style(
-            &args.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
-        );
+        let normalized =
+            normalize_flag_style(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>());
         ServerFlags::try_parse_from(std::iter::once("ibis".to_string()).chain(normalized))
             .expect("normalized spawn args parse")
     }
@@ -846,10 +863,9 @@ mod flag_parity_tests {
             .flat_map(|(flag, value)| vec![flag.to_string(), value.to_string()])
             .collect();
         let normalized = normalize_flag_style(&raw);
-        let flags = ServerFlags::try_parse_from(
-            std::iter::once(String::from("ibis")).chain(normalized),
-        )
-        .expect("all single-dash flags parse");
+        let flags =
+            ServerFlags::try_parse_from(std::iter::once(String::from("ibis")).chain(normalized))
+                .expect("all single-dash flags parse");
         assert_eq!(flags.port, Some(4123));
         assert_eq!(flags.mode.as_deref(), Some("sse"));
         assert_eq!(flags.scan, Some(true));
@@ -859,5 +875,55 @@ mod flag_parity_tests {
         assert_eq!(flags.runtime_mode.as_deref(), Some("plugin"));
         assert_eq!(flags.workspace.as_deref(), Some("C:/dev/repo"));
         assert_eq!(flags.config.as_deref(), Some("config.json"));
+    }
+}
+
+#[cfg(test)]
+mod panic_hook_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    /// In-memory writer shared with the fmt subscriber (same pattern as
+    /// `tests/degraded_log_test.rs`).
+    #[derive(Clone)]
+    struct SharedBuf(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for SharedBuf {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A panic captured by the hook is emitted through tracing with payload,
+    /// thread, location and backtrace — the line the stdio/plugin log file
+    /// never saw when the fetch-limit clamp panicked and the MCP call hung.
+    #[test]
+    fn panic_hook_logs_payload_location_and_backtrace() {
+        install_panic_hook();
+        let shared = SharedBuf(Arc::new(Mutex::new(Vec::new())));
+        let writer = shared.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::ERROR)
+            .with_ansi(false)
+            .with_target(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tracing::subscriber::with_default(subscriber, || {
+                panic!("panic-hook regression payload");
+            });
+        }));
+        assert!(panicked.is_err(), "the probe must panic");
+        let out = String::from_utf8(shared.0.lock().unwrap().clone()).expect("capture is utf-8");
+        assert!(
+            out.contains("panic: panic-hook regression payload"),
+            "payload missing:\n{out}"
+        );
+        assert!(out.contains("main.rs:"), "location missing:\n{out}");
+        assert!(out.contains("backtrace:\n"), "backtrace missing:\n{out}");
     }
 }
