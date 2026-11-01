@@ -34,3 +34,4 @@ jobs:
         with:
           node-version: 20
       - run: node ide-host/src/bridge_framing_test.mjs
+      - run: node ide-host/src/session_test.mjs

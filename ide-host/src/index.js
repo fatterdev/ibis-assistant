@@ -63,6 +63,276 @@ export function spawnStdioChild(backend = resolveBackend()) {
 }
 
 /**
+ * Persistent stdio sessions: one initialized child per backend identity,
+ * reused across tool calls. A cold child pays the plugin boot (workspace
+ * bind + embedded SurrealDB sidecar) before answering, so paying that per
+ * call made every VSIX interaction multi-second; the session amortizes the
+ * boot once and keeps the sidecar alive between calls.
+ *
+ * Session identity covers everything that changes which runtime/data the
+ * child talks to. VS Code config changes on `ibis.runtime.*` and extension
+ * dispose call [`disposeMcpSessions`]; idle children self-close after
+ * [`SESSION_IDLE_MS`] and the next call respawns.
+ */
+const SESSION_IDLE_MS = Number(process.env.IBIS_MCP_SESSION_IDLE_MS || 120_000);
+
+/** @type {Map<string, StdioSession>} */
+const sessions = new Map();
+
+/**
+ * @param {Backend & { mode: "spawn" }} backend
+ */
+function sessionKey(backend) {
+  const env = backend.env || {};
+  return [
+    backend.command,
+    backend.args.join(" "),
+    env.IBIS_DATA_DIR || "",
+    env.IBIS_WORKSPACE || "",
+    env.RUNTIME_MODE || "",
+  ].join("|");
+}
+
+class StdioSession {
+  /** @param {Backend & { mode: "spawn" }} backend */
+  constructor(backend) {
+    this.backend = backend;
+    this.closed = false;
+    this.nextId = 1;
+    /** @type {Map<number, any>} */
+    this.replies = new Map();
+    /** @type {Array<(err?: Error) => void>} */
+    this.waiters = [];
+    /** @type {NodeJS.Timeout | null} */
+    this.idleTimer = null;
+    /** @type {Promise<void> | null} */
+    this.initPromise = null;
+    this.child = spawnStdioChild(backend);
+
+    let outBuf = Buffer.alloc(0);
+    this.child.stdout.on("data", (chunk) => {
+      outBuf = Buffer.concat([outBuf, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+      const { messages, rest } = takeStdioMessages(outBuf);
+      outBuf = rest;
+      for (const raw of messages) {
+        let msg;
+        try {
+          msg = JSON.parse(raw);
+        } catch {
+          continue;
+        }
+        if (msg.id != null) {
+          this.replies.set(msg.id, msg);
+          this.wake();
+        }
+      }
+    });
+    this.child.on("exit", (code, signal) => {
+      this.drop(`child exited (code=${code} signal=${signal})`);
+    });
+    this.child.on("error", (err) => {
+      this.drop(`spawn failed: ${err.message}`);
+    });
+  }
+
+  /** Reject every in-flight waiter and forget the session. */
+  drop(reason) {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    this.forget();
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+    const pending = this.waiters;
+    this.waiters = [];
+    const err = new Error(`ibis stdio session dropped: ${reason}`);
+    for (const w of pending) {
+      w(err);
+    }
+  }
+
+  /** Remove this session from the registry only if it is still the current one. */
+  forget() {
+    const key = sessionKey(this.backend);
+    if (sessions.get(key) === this) {
+      sessions.delete(key);
+    }
+  }
+
+  wake() {
+    const pending = this.waiters;
+    this.waiters = [];
+    for (const w of pending) {
+      w();
+    }
+  }
+
+  /** @param {Record<string, unknown>} obj */
+  write(obj) {
+    this.child.stdin.write(`${JSON.stringify(obj)}\n`);
+  }
+
+  /**
+   * Resolve one request id; rejects on timeout/exit/error. Late replies for
+   * timed-out ids are discarded so the replies map cannot grow unbounded.
+   */
+  waitFor(id, ms) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.child.off("exit", onExit);
+        this.child.off("error", onError);
+        this.waiters = this.waiters.filter((w) => w !== check);
+        fn(value);
+      };
+      const timer = setTimeout(() => {
+        this.replies.delete(id);
+        finish(reject, new Error(`timeout waiting for MCP response id=${id}`));
+      }, ms);
+      const onExit = () =>
+        finish(reject, new Error(`child exited before MCP response id=${id}`));
+      const onError = (err) => finish(reject, err);
+      const check = (failErr) => {
+        if (failErr) {
+          finish(reject, failErr);
+          return;
+        }
+        if (this.replies.has(id)) {
+          const msg = this.replies.get(id);
+          this.replies.delete(id);
+          finish(resolve, msg);
+        }
+      };
+      this.child.once("exit", onExit);
+      this.child.once("error", onError);
+      this.waiters.push(check);
+      check();
+    });
+  }
+
+  /** Pay the MCP handshake once per session (later calls reuse the child). */
+  init() {
+    if (!this.initPromise) {
+      this.initPromise = (async () => {
+        const id = this.nextId++;
+        this.write({
+          jsonrpc: "2.0",
+          id,
+          method: "initialize",
+          params: {
+            protocolVersion: "2024-11-05",
+            capabilities: {},
+            clientInfo: { name: "ibis-ide-host", version: "1.0.0" },
+          },
+        });
+        const reply = await this.waitFor(id, DEFAULT_TOOL_TIMEOUT_MS);
+        if (reply.error) {
+          throw new Error(reply.error.message || JSON.stringify(reply.error));
+        }
+        this.write({ jsonrpc: "2.0", method: "notifications/initialized", params: {} });
+      })().catch((err) => {
+        this.drop(`initialize failed: ${err.message}`);
+        throw err;
+      });
+    }
+    return this.initPromise;
+  }
+
+  touch() {
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+    }
+    this.idleTimer = setTimeout(() => this.close(), SESSION_IDLE_MS);
+    if (typeof this.idleTimer.unref === "function") {
+      this.idleTimer.unref();
+    }
+  }
+
+  /** Idle teardown: the next tool call respawns a fresh child. */
+  close() {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    this.forget();
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+    try {
+      this.child.stdin.end();
+    } catch {
+      /* ignore */
+    }
+    try {
+      this.child.kill();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** @returns {Promise<string>} */
+  async call(toolName, args, waitMs) {
+    if (this.closed) {
+      throw new Error("ibis stdio session closed");
+    }
+    const id = this.nextId++;
+    this.write({
+      jsonrpc: "2.0",
+      id,
+      method: "tools/call",
+      params: { name: toolName, arguments: args },
+    });
+    const result = await this.waitFor(id, waitMs);
+    if (result.error) {
+      throw new Error(result.error.message || JSON.stringify(result.error));
+    }
+    return textFromToolResult(result.result);
+  }
+}
+
+/**
+ * Persistent-session tool call: reuse the initialized child for the backend
+ * identity. When the child died between calls (crash/exit), retry once on a
+ * fresh one so a single dead child never wedges the surface.
+ */
+async function callMcpToolSession(backend, toolName, args, waitMs) {
+  const key = sessionKey(backend);
+  let session = sessions.get(key);
+  if (!session || session.closed) {
+    session = new StdioSession(backend);
+    sessions.set(key, session);
+  }
+  session.touch();
+  try {
+    await session.init();
+    return await session.call(toolName, args, waitMs);
+  } catch (err) {
+    if (!session.closed) {
+      throw err;
+    }
+    const fresh = new StdioSession(backend);
+    sessions.set(key, fresh);
+    fresh.touch();
+    await fresh.init();
+    return await fresh.call(toolName, args, waitMs);
+  }
+}
+
+/** Close every persistent session (runtime config change / extension dispose). */
+export function disposeMcpSessions() {
+  for (const session of [...sessions.values()]) {
+    session.close();
+  }
+}
+
+/**
  * Pipe this process stdio to a spawned Go child (passthrough MCP).
  * @param {Backend} [backend]
  */
@@ -308,9 +578,9 @@ async function callMcpToolHttp(url, toolName, args) {
 }
 
 /**
- * Default per-request wait for one-shot stdio MCP calls. A cold plugin child
- * initializes its data dir (embedded SurrealDB + migrations) on first launch,
- * which can exceed 15s on slower disks; override with IBIS_MCP_TOOL_TIMEOUT_MS.
+ * Default per-request wait for MCP calls. A cold plugin child initializes its
+ * data dir (embedded SurrealDB + migrations) on first launch, which can
+ * exceed 15s on slower disks; override with IBIS_MCP_TOOL_TIMEOUT_MS.
  */
 export const DEFAULT_TOOL_TIMEOUT_MS = Number(process.env.IBIS_MCP_TOOL_TIMEOUT_MS || 60_000);
 
@@ -321,8 +591,27 @@ export const DEFAULT_TOOL_TIMEOUT_MS = Number(process.env.IBIS_MCP_TOOL_TIMEOUT_
  * @param {{ keepAliveMs?: number, timeoutMs?: number }} [opts]
  */
 async function callMcpToolStdio(backend, toolName, args, { keepAliveMs = 0, timeoutMs } = {}) {
-  const child = spawnStdioChild(backend);
   const waitMs = timeoutMs || DEFAULT_TOOL_TIMEOUT_MS;
+  if (keepAliveMs > 0) {
+    // One-shot child kept alive after the reply (ephemeral settings UI): the
+    // runtime hosts in-process listeners there, so it cannot be a session
+    // child — spawn, call, keep the child for keepAliveMs.
+    return callMcpToolOneShot(backend, toolName, args, keepAliveMs, waitMs);
+  }
+  return callMcpToolSession(backend, toolName, args, waitMs);
+}
+
+/**
+ * Legacy one-shot stdio call: spawn a child, initialize, one tools/call,
+ * then tear it down (kept alive for keepAliveMs when requested).
+ * @param {Backend & { mode: "spawn" }} backend
+ * @param {string} toolName
+ * @param {Record<string, unknown>} args
+ * @param {number} keepAliveMs
+ * @param {number} waitMs
+ */
+async function callMcpToolOneShot(backend, toolName, args, keepAliveMs, waitMs) {
+  const child = spawnStdioChild(backend);
   let outBuf = Buffer.alloc(0);
   const replies = new Map();
   /** @type {Array<() => void>} */

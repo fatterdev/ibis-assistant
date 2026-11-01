@@ -114,6 +114,7 @@ async function activate(context) {
   }
 
   const cfg = getConfig();
+  bindHostDispose(host);
   if (!configuredAttach(cfg, host).attach) {
     host.warnDualPluginChildren();
   }
@@ -174,6 +175,11 @@ async function activate(context) {
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("ibis")) {
         refreshStatusBar(host);
+      }
+      if (event.affectsConfiguration("ibis.runtime")) {
+        // Runtime identity changed (binary/mode/data dir/args): persistent
+        // ide-host sessions must not survive it.
+        host.disposeMcpSessions?.();
       }
       const reloadKeys = [
         "ibis.lmBridge.enabled",
@@ -648,10 +654,23 @@ function sharedRuntimeMcpConfig(backend) {
 }
 
 function deactivate() {
+  try {
+    hostDispose?.();
+  } catch {
+    /* ignore */
+  }
   if (lmServer) {
     lmServer.close();
     lmServer = undefined;
   }
+}
+
+/** @type {(() => void) | undefined} */
+let hostDispose;
+
+/** Keep the deactivate path able to close ide-host sessions. */
+function bindHostDispose(host) {
+  hostDispose = host?.disposeMcpSessions?.bind(host);
 }
 
 module.exports = { activate, deactivate, sharedRuntimeMcpConfig, resolveSettingsURL };

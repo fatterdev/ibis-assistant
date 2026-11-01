@@ -16,6 +16,9 @@ export function callMcpTool(
   backend: Backend,
   toolName: string,
   args?: Record<string, unknown>,
+  opts?: { keepAliveMs?: number; timeoutMs?: number },
 ): Promise<string>;
+export const DEFAULT_TOOL_TIMEOUT_MS: number;
+export function disposeMcpSessions(): void;
 export function extractSettingsURL(text: string): string | null;
 export function warnDualPluginChildren(): void;
