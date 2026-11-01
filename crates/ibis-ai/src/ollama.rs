@@ -30,16 +30,16 @@ fn embed_keep_alive() -> &'static String {
     })
 }
 
-/// Embedding cache cap: cleared wholesale when exceeded (query texts are
-/// short; the cap bounds memory without an LRU dance).
-const EMBED_CACHE_CAP: usize = 1024;
-
 /// Ollama serves requests with limited parallelism (`OLLAMA_NUM_PARALLEL`,
 /// traditionally 1): yesterday's pile-up of concurrent embed requests
 /// surfaced as `ollama API request failed` transport errors. All
 /// `/api/embed` calls go through this FIFO queue + limiter instead — one
 /// permit per in-flight HTTP call, cache hits never queue.
 const EMBED_CONCURRENCY_DEFAULT: usize = 1;
+
+/// Cache cap default. Exceeded → wholesale clear (query texts are short;
+/// the cap bounds memory without an LRU dance).
+const EMBED_CACHE_CAP: usize = 1024;
 
 /// Process-wide embed queue, shared by every [`OllamaProvider`] instance
 /// (they all target the same local server). `IBIS_OLLAMA_EMBED_CONCURRENCY`
@@ -80,6 +80,8 @@ pub struct OllamaProvider {
     /// Query-embedding cache keyed by input text (the model is fixed per
     /// instance; identical inputs are deterministic).
     cache: Mutex<HashMap<String, Vec<f32>>>,
+    /// Cache cap; tests shrink it to force wholesale clears deterministically.
+    cache_cap: usize,
 }
 
 impl OllamaProvider {
@@ -94,7 +96,85 @@ impl OllamaProvider {
             api_url,
             http: http_client(HTTP_TIMEOUT),
             cache: Mutex::new(HashMap::new()),
+            cache_cap: EMBED_CACHE_CAP,
         }
+    }
+
+    /// Test-only constructor with a shrunken cache cap so the wholesale
+    /// clear path churns under the concurrent stress test.
+    #[cfg(test)]
+    fn with_cache_cap(model: &str, api_url: &str, cap: usize) -> Self {
+        let mut provider = OllamaProvider::new(model, api_url);
+        provider.cache_cap = cap.max(1);
+        provider
+    }
+
+    /// Queue + one batched HTTP call; the fetched embeddings are returned by
+    /// value AND cached. The wholesale clear (cap) only affects the cache:
+    /// callers rely on the returned pairs, never on re-reading the cache, so
+    /// a concurrent clear cannot wipe a result that was already computed.
+    async fn fetch_embeddings(&self, texts: &[String]) -> Result<Vec<(String, Vec<f32>)>, AiError> {
+        // Coda + limiter: one in-flight call per permit (FIFO); the wait
+        // is before the request, so the HTTP timeout covers the call
+        // itself, not the queue.
+        let queue_wait = std::time::Instant::now();
+        let _permit = embed_queue()
+            .acquire()
+            .await
+            .map_err(|_| AiError::other("ollama embed queue is closed"))?;
+        let waited = queue_wait.elapsed();
+        if waited > std::time::Duration::from_secs(1) {
+            tracing::info!("ollama embed queue: slot acquired after {waited:?}");
+        }
+        let body = serde_json::to_string(&EmbedRequest {
+            model: self.model.clone(),
+            input: texts.to_vec(),
+            keep_alive: embed_keep_alive().clone(),
+        })
+        .map_err(|e| AiError::other(format!("failed to marshal Ollama embed request: {e}")))?;
+        // did not trim a trailing slash here (chat did) — a
+        // misconfigured `{url}/` produced `{url}//api/embed`; trim for both.
+        let url = format!("{}/api/embed", self.api_url.trim_end_matches('/'));
+        let resp = self
+            .http
+            .post(url)
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| AiError::other(format!("ollama API request failed: {e}")))?;
+        let status = resp.status().as_u16();
+        let raw = resp.bytes().await?;
+        if status != 200 {
+            return Err(AiError::other(format!(
+                "ollama API returned status {status}: {}",
+                String::from_utf8_lossy(&raw)
+            )));
+        }
+        let resp_data: EmbedResponse = serde_json::from_slice(&raw)
+            .map_err(|e| AiError::other(format!("failed to decode Ollama response: {e}")))?;
+        if resp_data.embeddings.is_empty() {
+            return Err(AiError::other("ollama returned empty embeddings"));
+        }
+        if resp_data.embeddings.len() != texts.len() {
+            return Err(AiError::other(format!(
+                "ollama returned {} embeddings for {} inputs",
+                resp_data.embeddings.len(),
+                texts.len()
+            )));
+        }
+        let fresh: Vec<(String, Vec<f32>)> =
+            texts.iter().cloned().zip(resp_data.embeddings).collect();
+        {
+            let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+            if cache.len() + fresh.len() > self.cache_cap {
+                cache.clear();
+            }
+            for (text, embedding) in &fresh {
+                cache.insert(text.clone(), embedding.clone());
+            }
+        }
+        Ok(fresh)
     }
 }
 
@@ -132,74 +212,46 @@ impl AIProvider for OllamaProvider {
             }
             misses
         };
+        // Fresh-by-value results for the misses. Another writer's wholesale
+        // clear (cap) can land between the miss pass and the hit read below,
+        // so results never depend on the cache still holding an entry.
+        let mut resolved: HashMap<String, Vec<f32>> = HashMap::new();
         if !misses.is_empty() {
-            // Coda + limiter: one in-flight call per permit (FIFO); the wait
-            // is before the request, so the HTTP timeout covers the call
-            // itself, not the queue.
-            let queue_wait = std::time::Instant::now();
-            let _permit = embed_queue()
-                .acquire()
-                .await
-                .map_err(|_| AiError::other("ollama embed queue is closed"))?;
-            let waited = queue_wait.elapsed();
-            if waited > std::time::Duration::from_secs(1) {
-                tracing::info!("ollama embed queue: slot acquired after {waited:?}");
-            }
-            let body = serde_json::to_string(&EmbedRequest {
-                model: self.model.clone(),
-                input: misses.clone(),
-                keep_alive: embed_keep_alive().clone(),
-            })
-            .map_err(|e| AiError::other(format!("failed to marshal Ollama embed request: {e}")))?;
-            // did not trim a trailing slash here (chat did) — a
-            // misconfigured `{url}/` produced `{url}//api/embed`; trim for both.
-            let url = format!("{}/api/embed", self.api_url.trim_end_matches('/'));
-            let resp = self
-                .http
-                .post(url)
-                .header("Content-Type", "application/json")
-                .body(body)
-                .send()
-                .await
-                .map_err(|e| AiError::other(format!("ollama API request failed: {e}")))?;
-            let status = resp.status().as_u16();
-            let raw = resp.bytes().await?;
-            if status != 200 {
-                return Err(AiError::other(format!(
-                    "ollama API returned status {status}: {}",
-                    String::from_utf8_lossy(&raw)
-                )));
-            }
-            let resp_data: EmbedResponse = serde_json::from_slice(&raw)
-                .map_err(|e| AiError::other(format!("failed to decode Ollama response: {e}")))?;
-            if resp_data.embeddings.is_empty() {
-                return Err(AiError::other("ollama returned empty embeddings"));
-            }
-            if resp_data.embeddings.len() != misses.len() {
-                return Err(AiError::other(format!(
-                    "ollama returned {} embeddings for {} inputs",
-                    resp_data.embeddings.len(),
-                    misses.len()
-                )));
-            }
-            {
-                let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-                if cache.len() + misses.len() > EMBED_CACHE_CAP {
-                    cache.clear();
-                }
-                for (text, embedding) in misses.into_iter().zip(resp_data.embeddings) {
-                    cache.insert(text, embedding);
-                }
+            for (text, embedding) in self.fetch_embeddings(&misses).await? {
+                resolved.insert(text, embedding);
             }
         }
-        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        // Hits resolve from the cache in the same lock that decides the
+        // stragglers; anything the concurrent clear already wiped joins the
+        // straggler re-fetch instead of panicking on a missing entry.
+        let stragglers: Vec<String> = {
+            let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+            let mut stragglers: Vec<String> = Vec::new();
+            for text in texts {
+                if resolved.contains_key(text) {
+                    continue;
+                }
+                match cache.get(text) {
+                    Some(embedding) => {
+                        resolved.insert(text.clone(), embedding.clone());
+                    }
+                    None => stragglers.push(text.clone()),
+                }
+            }
+            stragglers
+        };
+        if !stragglers.is_empty() {
+            for (text, embedding) in self.fetch_embeddings(&stragglers).await? {
+                resolved.insert(text, embedding);
+            }
+        }
         Ok(texts
             .iter()
             .map(|text| {
-                cache
+                resolved
                     .get(text)
                     .cloned()
-                    .expect("every input was cached above")
+                    .expect("every requested text was resolved above")
             })
             .collect())
     }
@@ -301,6 +353,45 @@ mod tests {
     async fn empty_batch_short_circuits() {
         let p = OllamaProvider::new("m", "http://127.0.0.1:9");
         assert!(p.batch_embed_text(&[]).await.unwrap().is_empty());
+    }
+
+    /// Regression: with the wholesale cache clear in play, the old tail
+    /// (`cache.get(text).expect(...)`) could panic when a concurrent batch
+    /// cleared the cache between the miss pass and the final read. The
+    /// stress run shrinks the cap so clears churn while batches overlap;
+    /// every caller must still resolve every text.
+    #[tokio::test]
+    async fn cache_clears_never_lose_a_requested_embedding() {
+        use std::sync::Arc;
+        let app = Router::new().route(
+            "/api/embed",
+            post(move |req: Request| async move {
+                let body = axum::body::to_bytes(req.into_body(), 1 << 20)
+                    .await
+                    .unwrap();
+                let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                let n = parsed["input"].as_array().map(Vec::len).unwrap_or(0);
+                let embs: Vec<Vec<f64>> = vec![vec![0.1, 0.2]; n];
+                ok(&serde_json::json!({ "embeddings": embs }).to_string())
+            }),
+        );
+        let base_url = serve(app).await;
+        let provider = Arc::new(OllamaProvider::with_cache_cap("m", &base_url, 4));
+        let mut tasks = Vec::new();
+        for task in 0..6 {
+            let provider = provider.clone();
+            tasks.push(tokio::spawn(async move {
+                let texts: Vec<String> = (0..6)
+                    .map(|i| format!("t{task}-{i}"))
+                    .chain((0..3).map(|i| format!("shared-{i}")))
+                    .collect();
+                let embs = provider.batch_embed_text(&texts).await.expect("batch");
+                assert_eq!(embs.len(), texts.len());
+            }));
+        }
+        for task in tasks {
+            task.await.unwrap();
+        }
     }
 
     #[tokio::test]
