@@ -246,9 +246,36 @@ loopback per il caso personale.
 
 ## 5. Prossimi passi (dopo le decisioni)
 
-1. Spec: `docs/superpowers/specs/2026-11-XX-memory-view-team-server-design.md`
+1. Spec: `docs/superpowers/specs/2026-11-01-memory-view-team-server-design.md`
    (una spec unica con due milestone A/B, o due spec se gli owner preferiscono
    separare i flussi di lavoro).
 2. Nuova fase in [PLAN.md](PLAN.md) con sub-fasi commit-style e gate review
    (proposto: **R7** su team server con 2+ client reali attaccati).
 3. Sequencing: `[S3 publish 1.0.0] → F4 A (view) ∥ F4 B (team server) → F3 docs`.
+
+## 6. Decisioni owner (01/11/2026)
+
+Sessione decisionale eseguita sulle 8 domande §4. Dove la decisione diverge
+dalla raccomandazione bozza è indicato.
+
+| # | Domanda | Decisione | vs bozza |
+|---|---|---|---|
+| A1 | Default filtro status | **`current`** — l'albero mostra solo memorie correnti; switch `all` per il curation browse | diverge (bozza: `all`) |
+| A2 | Grouping | **Seconda vista "Workstreams"** (2 viste nel container) — richiede estensione server (`memory_list` con filtro workstream + list dei workstream) | conforme |
+| A3 | Curation inline | **Menu completo**: Share, Archive, **Supersede…, Update content…** dal tree (conferma esplicita; update solo su memorie proprie — la governance rifiuta update di team altrui e indirizza al supersede) | diverge (bozza: Share/Archive) |
+| A4 | Live refresh | non chiesto: **refresh on focus** (opzione (b) bozza); subscription `resources/updated` solo se l'uso reale la chiede | — |
+| A5 | Topologia backend | **Daemon sempre-on**: la VSIX rinuncia al provider spawn e attacca un daemon `ibis run` locale — un solo runtime; lifecycle del daemon fuori da VS Code (start/health integrate, senza ownership) | diverge (bozza: status quo) |
+| T1 | Deployment team server | **Runbook + `ibis serve --team` + docker-compose ufficiale** (tutte e tre: docs (a), subcommand (b), compose (c)) | diverge (bozza: a+b) |
+| T2 | Identity actor | **Settings `ibis.identity.actor` + header `X-Ibis-Actor`** su attach HTTP, fallback env `IBIS_ACTOR`; niente auth/token (guardrails) | conforme |
+| T3 | Consolidamento multi-client | non chiesto: **il daemon esegue il loop di default, i client mai** (coerente con A5) | — |
+| T4 | Reconciliation Layer 3 | **Implementata nella fase F4** (precondizione del daemon/serve) | conforme |
+| T5 | Knob personal-claims | non chiesto: Settings knob insieme a T2 (pannello "Team") | — |
+| — | Nome fase | **F4** (dopo F0–F3; Track D resta il benchmark Scope) | conforme |
+
+Effetti di A5 (la decisione più strutturale): la VSIX passa a backend
+attach-only verso il daemon personale; il provider MCP contribuito diventa una
+definition Streamable HTTP; i due child collassano in **un solo runtime**
+(una ingest lane, un batch manager, un consolidatore). La VSIX integra
+start/health del daemon (comando "Start Daemon" + probe esistente
+`runtime.autoAttach`) **senza** possederne il lifecycle: il daemon sopravvive
+a VS Code e si spegne da sé / da gestione owner.

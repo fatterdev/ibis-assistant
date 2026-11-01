@@ -21,6 +21,13 @@
 > MCP App con fallback testuale). Evidenze e finding in
 > [review-r2-checklist.md](review-r2-checklist.md). Fix BatchManager record-id
 > incluso; runtime rilasciato **0.2.0** (tag `v0.2.0`). Da qui: **[F1 ∥ F2]**.
+> **Aggiornamento 01/11/2026 — F4 approvata**: round S1 debug chiuso (client
+> stdio persistente in ide-host, pipeline embed corazzata, igiene ambiente);
+> brainstorm [memory-view-team-server-brainstorm.md](memory-view-team-server-brainstorm.md)
+> deciso (§6) e spec
+> [2026-11-01-memory-view-team-server-design.md](../superpowers/specs/2026-11-01-memory-view-team-server-design.md)
+> approvata: **F4 A** (memory view, VSIX 1.1.0, backend daemon sempre-on) e
+> **F4 B** (team server, runtime 0.3.0) dopo il publish R3/R4, prima di F3.
 
 ## 1. Decisioni di prodotto
 
@@ -184,11 +191,15 @@ Ciclo chiuso: **Scope finds → import → memoria Threski → skill/rules/descr
 ## 10. Sequencing, versioning, effort
 
 ```
-F0.1 (rename) → R1 → F0.2..F0.7 → R2 → [F1 ∥ F2] → R3/R4 → F3 → D1..D3 → R6 (gate publish) → D4/D5 loop
+F0.1 (rename) → R1 → F0.2..F0.7 → R2 → [F1 ∥ F2] → R3/R4 (publish 1.0.0)
+  → [F4-B (team server 0.3.0) ∥ F4-A (memory view VSIX 1.1.0)] → R7
+  → F3 → D1..D3 → R6 (gate publish) → D4/D5 loop
 ```
-- Runtime root: `0.2.0` a F0 completata (CHANGELOG `[Unreleased]` → `[0.2.0]`, tag).
-- VSIX resta `1.0.0` fino al publish; plugin `0.1.0`.
-- Effort stimato: F0.1 ½–1g · F0.2–0.7 2–4g · F1 2–4g · F2 1–2g · F3 ½g · D 2–3g (+costi run agenti).
+(F4: sezione §13 — decisioni 01/11/2026, sequencing e commit nella
+[spec F4](../superpowers/specs/2026-11-01-memory-view-team-server-design.md).)
+- Runtime root: `0.2.0` a F0 completata (CHANGELOG `[Unreleased]` → `[0.2.0]`, tag); `0.3.0` a F4-B.
+- VSIX resta `1.0.0` fino al publish; `1.1.0` a F4-A; plugin `0.1.0`.
+- Effort stimato: F0.1 ½–1g · F0.2–0.7 2–4g · F1 2–4g · F2 1–2g · F4 2–3g ∥ 2–3g · F3 ½g · D 2–3g (+costi run agenti).
 
 ## 11. Rischi e mitigazioni
 | Rischio | Mitigazione |
@@ -207,3 +218,19 @@ F0.1 (rename) → R1 → F0.2..F0.7 → R2 → [F1 ∥ F2] → R3/R4 → F3 → 
 - Copilot Memory: repository facts cloud con TTL 28 giorni — posizionamento Threski: memoria tipizzata, provenance git, self-hosted, grafo-aware.
 - Contribution points correnti: `chatAgents`, `chatInstructions`, `chatPromptFiles`, `chatSkills`, `languageModelTools`, `languageModelChatProviders`; **Chat Participants deprecati**.
 - Publishing: `vsce publish --oidc` (Trusted Publishing, GitHub Actions); Open VSX separato; MCP registry open-source con `server.json`.
+
+## 13. FASE 4 — Memory view + Team server (dopo publish R3/R4; §13 prima di F3)
+
+> Decisioni owner 01/11/2026 ([brainstorm §6](memory-view-team-server-brainstorm.md)) e
+> design nella [spec F4](../superpowers/specs/2026-11-01-memory-view-team-server-design.md).
+> Due milestone: **F4-A** memory view (VSIX `1.1.0`), **F4-B** team server
+> (runtime `0.3.0`). Decisivo: la VSIX passa a **backend daemon sempre-on**
+> (attach, un solo runtime); il team server arriva con `ibis serve --team`,
+> compose ufficiale, identity actor, consolidamento solo-daemon e
+> reconciliation Layer 3. Sub-fasi e commit-message nella spec (F4-B1..B4,
+> F4-A1..A5, 1 commit per sub-fase).
+
+**→ REVIEW R7**: team server (compose o `serve --team` su LAN) con 2+ client
+reali attaccati (VSIX + plugin), attribution actor visibile sulle righe
+condivise, nessun consolidamento duplicato, restart daemon pulisce i sidecar
+stale.
