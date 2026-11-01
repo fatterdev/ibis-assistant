@@ -12,7 +12,10 @@ scrittura e della memoria. `ibis` è il motore e binario CLI; **Ibis Assistant**
 2. **[naming-map.md](naming-map.md)** — mappa canonica di revert `threski` → `ibis` / `Ibis Assistant`.
 3. **[vscode-platform-notes.md](vscode-platform-notes.md)** — note di ricerca piattaforma VS Code 1.144, Agent Plugins 1.0, MCP Apps e Microsoft Scope.
 4. **[review-r2-checklist.md](review-r2-checklist.md)** — gate R2 (Parte A protocollo automatizzato + Parte B smoke manuale in VS Code 1.144).
-5. **Artefatti del piano nel repo**:
+5. **[review-r3r4-checklist.md](review-r3r4-checklist.md)** — gate R3/R4 (Parte A `smoke-plugin.mjs` 26/26 + Parte B runbook VSIX/plugin, con evidenze UI-TARS).
+6. **[memory-view-team-server-brainstorm.md](memory-view-team-server-brainstorm.md)** — bozza di brainstorming per la prossima iterazione: memory view VSIX (filtri, grouping, curation inline) e team server (deployment, identity, reconciliation Layer 3).
+7. **[sidecar-lifecycle-plan.md](sidecar-lifecycle-plan.md)** — ciclo di vita sidecar portabile (implementato; reconciliation Layer 3 promossa a componente strutturale, in brainstorm).
+8. **Artefatti del piano nel repo**:
    - `plugin/` — agent plugin `ibis` (Agent Plugins 1.0: `plugin.json`, `mcp.json`, 5 skill corte per slash `/ibis <nome>`, hooks, agents, automations; nessun `commands/` duplicato).
    - `vscode-extension/` — estensione VSIX `fatterdev.ibis-assistant`.
    - `evaluations/scope/` — config-as-code per il benchmark DevAX con Microsoft Scope (criteri, profili, task prompt, seed/run/analysis).
