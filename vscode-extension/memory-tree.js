@@ -2,8 +2,9 @@
 
 /**
  * "Ibis Assistant" activity-bar view: memory kinds -> typed entries via MCP
- * `memory_search`, free-text semantic search, and a read-only detail editor
- * filled from MCP `memory_expand` (fallback: the search summary).
+ * `memory_list` (metadata browse, no embedding), free-text semantic search
+ * via `memory_search`, and a read-only detail editor filled from MCP
+ * `memory_expand` (fallback: the search summary).
  */
 
 const vscode = require("vscode");

@@ -4,6 +4,26 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(ide-host): persistent stdio MCP sessions for the VSIX** - every
+  spawn-mode tool call paid a full child boot (workspace bind + embedded
+  SurrealDB sidecar) and tore it down right after the reply, so each tree
+  expansion / search / detail / Remember stayed multi-second even after the
+  `memory_list` and embed-pipeline fixes; tool calls now share one
+  initialized child per backend identity (multiplexed request ids, idle
+  self-close after 120s via `IBIS_MCP_SESSION_IDLE_MS`, one clean retry when
+  a child died between calls, late replies for timed-out ids discarded).
+  `keepAliveMs` keeps the legacy one-shot path for the ephemeral settings UI;
+  `disposeMcpSessions()` runs on `ibis.runtime.*` config changes and on
+  extension dispose. New `ide-host/src/session_test.mjs` (reuse,
+  dispose-respawn, dead-child retry) wired into CI.
+- **fix(ai): embed cache clears never lose a requested embedding** - the
+  batch tail read every input back from the cache with an `expect`, so a
+  concurrent batch's wholesale clear (cap 1024) could wipe a just-computed
+  entry and panic the caller; fetched embeddings now travel by value
+  (`fetch_embeddings` returns the pairs), hits are read in the same lock
+  that decides the stragglers, and entries the clear already wiped join one
+  bounded re-fetch instead of panicking (stress test with cap 4).
+
 - **fix(search): `memory_search` no longer panics when limit exceeds the
   fetch cap** - `(limit * 3).clamp(limit, 45)` panicked with `min > max` when
   the IDE memory tree sent `limit=50`, killing the handler task and hanging

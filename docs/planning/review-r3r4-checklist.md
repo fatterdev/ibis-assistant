@@ -208,3 +208,22 @@ Pre-flight: cartella `plugin/` del repo.
 **Stato: PARTIE A COMPLETA (26/26), PARTIE B in esecuzione (R3.1–R3.2 PASS)**
 (azioni ② ③ ⑤ ancora da fare). Registrare qui le evidenze (screenshot/log)
 come fatto per R2.
+
+**Aggiornamento S1 (01/11/2026) — chiusura debug "blocchi e lentezze":**
+- **S1.1 done** — client stdio persistente in ide-host (sessione per backend
+  identity, handshake pagato una volta, idle self-close 120s, retry su child
+  morto): le interazioni VSIX non pagano più il boot del child per chiamata.
+  Ripacchettata `ibis-assistant-1.0.0.vsix` (58.46 KB), `smoke-plugin.mjs`
+  26/26, `session_test.mjs` 3/3 in CI. R3.3 va riverificato con QUESTA build.
+- **S1.2 done (igiene ambiente owner)** — `chat.pluginLocations` corretto da
+  `C:\devsrc\threski-studio\plugin` (percorso morto pre-revert) a
+  `C:\devsrc\ibis-assistant\plugin` (il plugin non si caricava da sorgente →
+  P4.x bloccati); binario Go stale `ibis-assistant.exe` (18/09) non più
+  risolvibile su PATH (`where.exe` vuoto; la dir `go\bin` è sparita durante
+  la sessione per causa esterna — da riverificare a freddo che non torni);
+  `debug-353a81.log` archiviato in `artifacts/debug/` (era alla root, evidence
+  del vecchio runtime Go lanciato alle 19:56 del 30/10 con CLI `-mode stdio`).
+- **S1.3 pending (pass di misura)** — riverificare R3.3 frasi B/C con la
+  strumentazione timing ancora a `info` nel log runtime; target: espansione
+  freddo < 2s, caldo < 500ms. **S1.4 pending**: solo dopo la misura, demote
+  `info`→`debug` delle timing (memory_search/embed/boost).
