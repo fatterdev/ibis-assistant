@@ -1,8 +1,8 @@
 # Memory view + team server: F4 design (VSIX 1.1.0 / runtime 0.3.0)
 
 **Date:** 2026-11-01
-**Status:** Approved — owner decisions recorded in [the brainstorm](../../planning/memory-view-team-server-brainstorm.md) §6 (A1 `current`, A2 second view, A3 full curation menu, A5 always-on daemon, T1 runbook+serve+compose, T2 settings+header, T4 reconciliation in-phase, phase named **F4**).
-**Related:** [memory absorption](2026-10-09-memory-absorption-design.md), [git claim store addendum](2026-10-24-git-claim-store-addendum.md), [ADR claim SoT](2026-10-24-adr-claim-sot-annotative-layer3.md), [sidecar lifecycle plan](../../planning/sidecar-lifecycle-plan.md), [memory layer](../../memory_layer.md), [runtime modes](../../runtime_modes.md), [PLAN.md F4](../../planning/PLAN.md).
+**Status:** Approved — owner decisions recorded in [the brainstorm](../planning/memory-view-team-server-brainstorm.md) §6 (A1 `current`, A2 second view, A3 full curation menu, A5 always-on daemon, T1 runbook+serve+compose, T2 settings+header, T4 reconciliation in-phase, phase named **F4**).
+**Related:** [memory absorption](specs/2026-10-09-memory-absorption-design.md), [git claim store addendum](specs/2026-10-24-git-claim-store-addendum.md), [ADR claim SoT](specs/2026-10-24-adr-claim-sot-annotative-layer3.md), [sidecar lifecycle plan](../planning/sidecar-lifecycle-plan.md), [memory layer](../memory_layer.md), [runtime modes](../runtime_modes.md), [PLAN.md F4](../planning/PLAN.md).
 
 ## Summary
 

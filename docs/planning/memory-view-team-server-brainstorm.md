@@ -246,7 +246,7 @@ loopback per il caso personale.
 
 ## 5. Prossimi passi (dopo le decisioni)
 
-1. Spec: `docs/superpowers/specs/2026-11-01-memory-view-team-server-design.md`
+1. Spec: `docs/superpowers/2026-11-01-memory-view-team-server-design.md`
    (una spec unica con due milestone A/B, o due spec se gli owner preferiscono
    separare i flussi di lavoro).
 2. Nuova fase in [PLAN.md](PLAN.md) con sub-fasi commit-style e gate review

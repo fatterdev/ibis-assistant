@@ -25,7 +25,7 @@
 > stdio persistente in ide-host, pipeline embed corazzata, igiene ambiente);
 > brainstorm [memory-view-team-server-brainstorm.md](memory-view-team-server-brainstorm.md)
 > deciso (§6) e spec
-> [2026-11-01-memory-view-team-server-design.md](../superpowers/specs/2026-11-01-memory-view-team-server-design.md)
+> [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md)
 > approvata: **F4 A** (memory view, VSIX 1.1.0, backend daemon sempre-on) e
 > **F4 B** (team server, runtime 0.3.0) dopo il publish R3/R4, prima di F3.
 
@@ -196,7 +196,7 @@ F0.1 (rename) → R1 → F0.2..F0.7 → R2 → [F1 ∥ F2] → R3/R4 (publish 1.
   → F3 → D1..D3 → R6 (gate publish) → D4/D5 loop
 ```
 (F4: sezione §13 — decisioni 01/11/2026, sequencing e commit nella
-[spec F4](../superpowers/specs/2026-11-01-memory-view-team-server-design.md).)
+[spec F4](../superpowers/2026-11-01-memory-view-team-server-design.md).)
 - Runtime root: `0.2.0` a F0 completata (CHANGELOG `[Unreleased]` → `[0.2.0]`, tag); `0.3.0` a F4-B.
 - VSIX resta `1.0.0` fino al publish; `1.1.0` a F4-A; plugin `0.1.0`.
 - Effort stimato: F0.1 ½–1g · F0.2–0.7 2–4g · F1 2–4g · F2 1–2g · F4 2–3g ∥ 2–3g · F3 ½g · D 2–3g (+costi run agenti).
@@ -222,7 +222,7 @@ F0.1 (rename) → R1 → F0.2..F0.7 → R2 → [F1 ∥ F2] → R3/R4 (publish 1.
 ## 13. FASE 4 — Memory view + Team server (dopo publish R3/R4; §13 prima di F3)
 
 > Decisioni owner 01/11/2026 ([brainstorm §6](memory-view-team-server-brainstorm.md)) e
-> design nella [spec F4](../superpowers/specs/2026-11-01-memory-view-team-server-design.md).
+> design nella [spec F4](../superpowers/2026-11-01-memory-view-team-server-design.md).
 > Due milestone: **F4-A** memory view (VSIX `1.1.0`), **F4-B** team server
 > (runtime `0.3.0`). Decisivo: la VSIX passa a **backend daemon sempre-on**
 > (attach, un solo runtime); il team server arriva con `ibis serve --team`,
