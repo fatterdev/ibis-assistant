@@ -663,7 +663,7 @@
             "type": "number"
           },
           "status": {
-            "description": "Optional status filter (empty = all)",
+            "description": "Optional status filter (empty = all; the explicit all marker is equivalent)",
             "type": "string"
           },
           "visibility": {
@@ -719,7 +719,7 @@
             "type": "string"
           },
           "status": {
-            "description": "Optional status filter (default current)",
+            "description": "Optional status filter (default current; pass all for every status)",
             "type": "string"
           },
           "tags": {

@@ -209,7 +209,7 @@ pub static TOOL_SPECS: &[ToolSpec] = &[
             p!("project_name", "Target project/repo scope", String),
             p!("query", "Semantic query text (required)", String),
             p!("kind", "Optional comma-separated kind filter", String),
-            p!("status", "Optional status filter (default current)", String),
+            p!("status", "Optional status filter (default current; pass all for every status)", String),
             p!("visibility", "team|personal|all (default all: team + caller's own personal)", String),
             p!("tags", "Optional comma-separated tag filter (ANY match)", String),
             p!("limit", "Optional max results (default 10)", Number),
@@ -221,7 +221,7 @@ pub static TOOL_SPECS: &[ToolSpec] = &[
         description: "Browse memories by kind/status/visibility without embeddings (metadata list, most recent first). Use memory_search for semantic queries.",
         properties: &[
             p!("kind", "Optional comma-separated kind filter", String),
-            p!("status", "Optional status filter (empty = all)", String),
+            p!("status", "Optional status filter (empty = all; the explicit all marker is equivalent)", String),
             p!("visibility", "team|personal|all (default: team + caller's own personal)", String),
             p!("limit", "Optional max results (default 100)", Number),
             p!("actor", "Optional identity fallback", String),

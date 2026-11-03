@@ -570,8 +570,9 @@ impl crate::search::SearchService {
             where_parts.push(filter);
             bindings.extend(more);
         }
-        if !params.status.trim().is_empty() {
-            let (filter, more) = temporal::memory_status_filter_sql(params.status.trim());
+        let status = params.status.trim();
+        if !status.is_empty() && !temporal::memory_status_is_all(status) {
+            let (filter, more) = temporal::memory_status_filter_sql(status);
             where_parts.push(filter);
             bindings.extend(more);
         }
@@ -620,7 +621,12 @@ impl crate::search::SearchService {
         })?;
         tracing::debug!("memory_search: embedded in {:?}", t0.elapsed());
 
-        let mut status = params.status.trim().to_string();
+        // Status filter: empty defaults to currentness; the explicit `all`
+        // marker (F4 §A.2) drops the status predicate entirely so archived /
+        // superseded / stale rows surface too.
+        let status_arg = params.status.trim().to_string();
+        let status_all = temporal::memory_status_is_all(&status_arg);
+        let mut status = status_arg;
         if status.is_empty() {
             status = "current".to_string();
         }
@@ -630,9 +636,11 @@ impl crate::search::SearchService {
         }
         let mut where_parts = vec!["embedding != NONE".to_string()];
         let mut bindings: Bindings = Vec::new();
-        let (status_sql, status_bindings) = temporal::memory_status_filter_sql(&status);
-        where_parts.push(status_sql);
-        bindings.extend(status_bindings);
+        if !status_all {
+            let (status_sql, status_bindings) = temporal::memory_status_filter_sql(&status);
+            where_parts.push(status_sql);
+            bindings.extend(status_bindings);
+        }
         if let Some((filter, more)) = kinds_filter(&params.kinds) {
             where_parts.push(filter);
             bindings.extend(more);
@@ -1140,6 +1148,112 @@ mod tests {
         assert!(
             sql.contains("LIMIT 15"),
             "expected 3x widening below the cap: {sql}"
+        );
+    }
+
+    /// F4 §A.2: the explicit `all` marker means "every status" — the
+    /// currentness predicate must disappear from the query instead of
+    /// exact-matching the literal (which would silently return zero rows).
+    #[tokio::test]
+    async fn search_memory_all_marker_drops_the_currentness_predicate() {
+        let (fake, svc) = search_service_with_one_memory();
+        svc.search_memory(
+            &crate::ActorContext::LOCAL,
+            MemorySearchParams {
+                query: "regression".into(),
+                status: " ALL ".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("all marker accepted");
+        let all_sql = fake
+            .smart_calls
+            .lock()
+            .unwrap()
+            .clone()
+            .iter()
+            .rfind(|q| q.contains("FROM memory"))
+            .cloned()
+            .expect("memory query");
+        assert!(
+            !all_sql.contains("status = 'current'") && !all_sql.contains("$status_filter"),
+            "the all marker must not constrain status: {all_sql}"
+        );
+
+        svc.search_memory(
+            &crate::ActorContext::LOCAL,
+            MemorySearchParams {
+                query: "regression".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("default status");
+        let default_sql = fake
+            .smart_calls
+            .lock()
+            .unwrap()
+            .clone()
+            .iter()
+            .rfind(|q| q.contains("FROM memory"))
+            .cloned()
+            .expect("memory query");
+        assert!(
+            default_sql.contains("(status = 'current')"),
+            "empty status keeps the currentness default: {default_sql}"
+        );
+    }
+
+    /// Same `all` marker contract for the metadata browse (`memory_list`),
+    /// where an explicit `current` must keep the currentness predicate.
+    #[tokio::test]
+    async fn list_memories_all_marker_drops_the_status_predicate() {
+        let (fake, svc) = search_service_with_one_memory();
+        svc.list_memories(
+            &crate::ActorContext::LOCAL,
+            MemoryListParams {
+                status: "all".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("all marker accepted");
+        let all_sql = fake
+            .smart_calls
+            .lock()
+            .unwrap()
+            .clone()
+            .iter()
+            .rfind(|q| q.contains("FROM memory"))
+            .cloned()
+            .expect("memory query");
+        assert!(
+            !all_sql.contains("status =") && !all_sql.contains("status_filter"),
+            "the all marker must not constrain status: {all_sql}"
+        );
+
+        svc.list_memories(
+            &crate::ActorContext::LOCAL,
+            MemoryListParams {
+                status: "current".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("explicit current");
+        let current_sql = fake
+            .smart_calls
+            .lock()
+            .unwrap()
+            .clone()
+            .iter()
+            .rfind(|q| q.contains("FROM memory"))
+            .cloned()
+            .expect("memory query");
+        assert!(
+            current_sql.contains("(status = 'current')"),
+            "explicit current keeps the currentness predicate: {current_sql}"
         );
     }
 }

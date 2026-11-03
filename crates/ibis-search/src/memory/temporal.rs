@@ -6,9 +6,18 @@ pub(crate) fn memory_currentness_sql() -> String {
     "(status = 'current') AND (valid_until = NONE OR valid_until > time::now())".to_string()
 }
 
+/// `memoryStatusFilterIsAll: the explicit `all` marker (F4 §A.2) — a status
+/// filter value meaning "no status constraint" (every status). Case- and
+/// whitespace-tolerant, like the visibility `all` case.
+pub(crate) fn memory_status_is_all(status: &str) -> bool {
+    status.trim().eq_ignore_ascii_case("all")
+}
+
 /// `memoryStatusFilterSQL: empty/current → full currentness; explicit
 /// non-current statuses match exactly (user-controlled value → bound var,
-/// F-002).
+/// F-002). The `all` marker is handled by the callers (no status predicate
+/// at all), not here — an exact match on the literal would silently return
+/// zero rows.
 pub(crate) fn memory_status_filter_sql(
     status: &str,
 ) -> (String, Vec<(String, ibis_db::value::Value)>) {
@@ -70,5 +79,17 @@ mod tests {
         let (sql, vars) = memory_status_filter_sql("stale");
         assert_eq!(sql, "status = $status_filter");
         assert_eq!(vars[0].1, ibis_db::value::Value::from_t("stale"));
+    }
+
+    #[test]
+    fn all_marker_is_the_no_constraint_value() {
+        // F4 §A.2: the explicit empty/all marker means "every status" —
+        // case- and whitespace-tolerant, never an exact-match value.
+        assert!(memory_status_is_all("all"));
+        assert!(memory_status_is_all(" ALL "));
+        assert!(memory_status_is_all("All"));
+        assert!(!memory_status_is_all(""));
+        assert!(!memory_status_is_all("current"));
+        assert!(!memory_status_is_all("stale"));
     }
 }

@@ -4,6 +4,16 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(server): status all marker for memory_list and memory_search** -
+  F4-A2 prerequisite (F4 §A.2): the "explicit empty/all marker" the design
+  references did not exist server-side — `memory_search` defaulted an empty
+  `status` to current and exact-matched any other value (an `all` marker
+  would have silently returned zero rows). `memory_list` / `memory_search`
+  now accept `status: "all"` (case- and whitespace-tolerant) as "no status
+  constraint": the status predicate is dropped entirely, so superseded /
+  archived / stale rows surface for the memory-tree `all` browse.
+  Registry param descriptions updated and the discovery fixture regenerated
+  (D15 lockstep); unit tests pin the SQL shape for both tools.
 - **feat(deploy): team server compose and runbook** - F4-B4: the official
   team-server packaging (`deploy/Dockerfile` + `deploy/docker-compose.yml`)
   and the runbook (`docs/team_server.md`, F4 §B.3). The image builds `ibis`
