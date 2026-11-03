@@ -14,6 +14,10 @@ ibis-db.workspace = true
 ibis-search.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 surrealdb = { version = "3.3.4", features = ["protocol-ws"] }
 tokio.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

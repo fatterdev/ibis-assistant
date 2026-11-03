@@ -81,6 +81,12 @@ fn main() {
             }
         }
         "start" | "stop" => exit_with_service_dispatch(&argv),
+        "eval" => {
+            // In-process retrieval eval (A1): no running server, no MCP
+            // registry change — see eval_mode.
+            let code = ibis_server::eval_mode::run_eval_cli(&argv[1..]);
+            std::process::exit(code);
+        }
         "version" | "-version" | "--version" => {
             if !mcp_server::COMMIT.is_empty() && mcp_server::COMMIT != "none" {
                 println!("ibis {} ({})", mcp_server::VERSION, mcp_server::COMMIT);
@@ -188,6 +194,9 @@ fn print_help() {
     println!("  memory       Collaborative project memories");
     println!("  outcome      Save reasoning outcomes");
     println!("  optimize     RAFT knowledge-base optimization");
+    println!("\nIn-process commands:");
+    println!("  eval retrieval --dataset <path> [--min-recall-5 X]");
+    println!("               Retrieval quality eval over the golden dataset");
     println!("\nExample:");
     println!("  {bin_name} run -port 3030");
 }

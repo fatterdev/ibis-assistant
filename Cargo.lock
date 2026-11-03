@@ -2026,7 +2026,9 @@ dependencies = [
  "ibis-search",
  "serde",
  "serde_json",
+ "serde_yaml",
  "surrealdb",
+ "tempfile",
  "tokio",
  "tracing",
 ]

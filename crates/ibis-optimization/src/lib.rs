@@ -25,10 +25,15 @@
 //!   after the endpoints are persisted (D17 R4) and `UPDATE` on the
 //!   just-selected observation row (it exists — 3.x semantics hold).
 
+pub mod eval;
 pub mod memory_consolidate;
 pub mod raft;
 pub mod store;
 
+pub use eval::{
+    build_report, load_dataset, seed_golden_estate, EvalCase, EvalReport, OfflineEmbedder,
+    RetrievalDataset, RetrievalEvalRunner,
+};
 pub use memory_consolidate::{
     parse_consolidation_decision, ConsolidationDecision, ConsolidationObservation, DuplicateMemory,
 };

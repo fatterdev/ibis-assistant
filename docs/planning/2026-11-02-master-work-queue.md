@@ -18,7 +18,7 @@
 | WQ-2 | **Publish gate** (azioni ② ③ ⑤ + `publish-vscode.yml`) | [review-r3r4-checklist.md §Publish gate](./review-r3r4-checklist.md) | ☐ non iniziato | azioni manuali ②③ (Trusted Publishing OIDC, Open VSX token) | WQ-1 (R3/R4 PASS) | WQ-3, WQ-4 |
 | WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | Approved; 9 sub-fasi (F4-B1..B4 ∥ F4-A1..A5) + gate R7 da fare | **F4-B1** — reconciliation Layer 3 (ledger + liveness + start-time) | WQ-2 | gate R7 → F3 docs → Track D |
 | WQ-4 | **Track D** — benchmark DevAX/Scope (D1–D5) | [PLAN.md §9](./PLAN.md), [evaluations/scope/README.md](../evaluations/scope/README.md) | Pianificato (scaffold presente; profili con placeholder `TODO-verify-*` by design, pre-D2) | D1 — pin immagine compose + seed su istanza Scope live | WQ-3 (gate R7), azione D1 | D2–D5, R6 close |
-| WQ-5 | **Miglioramenti ddofds** — fasi 0–5 (eval, retrieval, costi, memoria) | [analisi L1](./2026-11-01-dailydoseofds-improvement-analysis.md) → [L2](./2026-11-01-dailydoseofds-improvement-analysis-l2-flussi-funzionali.md) → [L3](./2026-11-01-dailydoseofds-improvement-analysis-l3-punti-di-aggancio.md) | Analisi completata (L1–L3); nessun codice scritto | **Fase 0** — A1 eval harness retrieval (dataset golden + runner + CI) | — (ortogonale a WQ-1/2/3, vedi §3) | fasi 1–3; baseline per Track D D3 |
+| WQ-5 | **Miglioramenti ddofds** — fasi 0–5 (eval, retrieval, costi, memoria) | [analisi L1](./2026-11-01-dailydoseofds-improvement-analysis.md) → [L2](./2026-11-01-dailydoseofds-improvement-analysis-l2-flussi-funzionali.md) → [L3](./2026-11-01-dailydoseofds-improvement-analysis-l3-punti-di-aggancio.md); [piano A1](./2026-11-02-a1-retrieval-eval-plan.md) | **Fase 0 (A1) done 02/11**: dataset 12 case + runner (mrr/recall@5/@15 per-channel) + CLI `ibis eval retrieval` (report JSON, soglia exit) + job CI `retrieval-eval`; baseline offline MRR 0.917 / r@5 0.958 / r@15 1.0 (working tree non committato) | **Fase 1** — A2 RRF al posto della fusione additiva, validato dalla baseline A1 (poi C9+D13+B6) | — (baseline A1 verde) | fasi 1–3; baseline per Track D D3 |
 
 Storico chiuso (non più in sospeso): F0.1–F0.7, gate R2, runtime 0.2.0 — vedi [PLAN.md](./PLAN.md).
 
@@ -58,4 +58,16 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
 - Disallineamento README/analysis.mjs (pass@k annunciato vs pass-rate implementato) e placeholder profili: **stato atteso**, non difetto — si chiudono a D2 (runner+analysis) e D1 (pin/seed su istanza live). Registrato anche come correzione nell'analisi L2 §4.1.
 
 ### WQ-5 — ddofds
-- Fasi 0–3 specificate in L3 con criteri di accettazione per intervento; il piano passo-passo va redatto quando la fase 0 viene presa in carico (contratto funzionale già pronto).
+- **Fase 0 (A1) completata 02/11/2026** (working tree, commit da fare nel §Ordine
+  del [piano A1](./2026-11-02-a1-retrieval-eval-plan.md)): `eval.rs` in
+  ibis-optimization (dataset YAML validato, `RetrievalEvalRunner` con mrr /
+  recall@5 / recall@15 / per-channel, estate golden auto-seminata con id
+  espliciti, `OfflineEmbedder` deterministico), CLI in-process
+  `ibis eval retrieval` (niente nuovo tool MCP: registry resta a 57), dataset
+  `evaluations/retrieval/dataset.yaml` (12 case), job CI `retrieval-eval`
+  (SurrealDB pinnato v3.3.5 + embedder offline, soglia 0.75). Baseline offline:
+  MRR 0.917, recall@5 0.958, recall@15 1.0 — 12/12 ok.
+- Restano: misurare la baseline con Ollama reale quando torna su :11434;
+  committare secondo il §Ordine del piano.
+- Fasi 0–3 specificate in L3 con criteri di accettazione per intervento; il
+  prossimo è A2 (RRF) validato dalla baseline A1.

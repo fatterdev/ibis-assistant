@@ -1,0 +1,50 @@
+version: "1"
+cases:
+  - id: r01_price_discounts
+    query: "where are volume discounts applied to invoice totals?"
+    expected_ids: ["file_chunk:g_fc_price"]
+    note: "code channel; seed dal task T2 (convenzioni pricing) di fixture-tasks.md"
+  - id: r02_sidecar_kill
+    query: "what kills the sidecar children when the parent process exits?"
+    expected_ids: ["file_chunk:g_fc_sidecar"]
+    note: "code channel; scenario sidecar-lifecycle (job object)"
+  - id: r03_eval_metrics
+    query: "which module computes MRR and recall over the golden dataset?"
+    expected_ids: ["file_chunk:g_fc_eval"]
+    note: "code channel; auto-riferimento A1"
+  - id: r04_mcp_timeout
+    query: "what is the MCP response timeout during plugin store init?"
+    expected_ids: ["memory:g_mem_mcp_timeout"]
+    note: "memory channel; fix reale R3.3 (timeout 15→60s)"
+  - id: r05_spawn_threads
+    query: "which threads are allowed to spawn sidecars on linux?"
+    expected_ids: ["memory:g_mem_spawn_thread"]
+    note: "memory channel; regola PDEATHSIG (thread long-lived, mai spawn_blocking)"
+  - id: r06_mathmax_gotcha
+    query: "why does math::max fail on SurrealDB 3.x?"
+    expected_ids: ["memory:g_mem_mathmax"]
+    note: "memory channel; gotcha reale (ask_score_expr, D17)"
+  - id: r07_surreal_sidecar_url
+    query: "which url does the test SurrealDB sidecar use?"
+    expected_ids: ["memory:g_mem_surreal_url"]
+    note: "memory channel; convenzione spike ws://127.0.0.1:38000"
+  - id: r08_rrf_decision
+    query: "which fusion strategy was chosen for the channel merge?"
+    expected_ids: ["memory:g_mem_rrf"]
+    note: "memory channel; decision A2 (RRF vs additivo)"
+  - id: r09_rrf_commit
+    query: "when was reciprocal rank fusion introduced?"
+    expected_ids: ["commit_chunk:g_cc_rrf"]
+    note: "commit channel; changelog semantico"
+  - id: r10_time_decay
+    query: "why do fresh chunks outrank stale ones?"
+    expected_ids: ["reasoning:g_r_decay"]
+    note: "reasoning channel; outcome salvato (time decay 0.3)"
+  - id: r11_multi_eval_rrf
+    query: "how is retrieval quality measured and which ranking change improves it?"
+    expected_ids: ["file_chunk:g_fc_eval", "commit_chunk:g_cc_rrf"]
+    note: "multi-expected su canali code+commit"
+  - id: r12_multi_sidecar
+    query: "sidecar lifecycle guarantees and spawn constraints"
+    expected_ids: ["file_chunk:g_fc_sidecar", "memory:g_mem_spawn_thread"]
+    note: "multi-expected su canali code+memory"

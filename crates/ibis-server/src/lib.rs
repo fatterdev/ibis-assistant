@@ -12,6 +12,7 @@
 pub mod args;
 pub mod assembly;
 pub mod collision;
+pub mod eval_mode;
 pub mod mcp_server;
 pub mod progress;
 pub mod prompts;

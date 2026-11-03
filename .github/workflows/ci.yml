@@ -35,3 +35,32 @@ jobs:
           node-version: 20
       - run: node ide-host/src/bridge_framing_test.mjs
       - run: node ide-host/src/session_test.mjs
+
+  # A1 retrieval eval (ddofds fase 0): golden dataset over a live SurrealDB
+  # sidecar with the deterministic offline embedder. Baseline in
+  # docs/planning/2026-11-02-a1-retrieval-eval-plan.md (offline: MRR 0.917,
+  # recall@5 0.958) — the 0.75 floor catches gross ranking regressions.
+  retrieval-eval:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start SurrealDB sidecar (pinned)
+        run: |
+          docker run -d --name surreal -p 38000:8000 surrealdb/surrealdb:v3.3.5 \
+            start -u root -p root --bind 0.0.0.0:8000
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:38000/health && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:38000/health
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p ibis-server
+      - name: Retrieval eval (offline embedder)
+        run: ./target/debug/ibis eval retrieval --dataset evaluations/retrieval/dataset.yaml --embedder offline --min-recall-5 0.75 --out artifacts/eval/retrieval-offline.json
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: retrieval-eval-report
+          path: artifacts/eval/retrieval-offline.json
