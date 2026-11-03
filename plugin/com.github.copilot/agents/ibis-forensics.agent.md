@@ -2,13 +2,15 @@
 name: ibis-forensics
 description: Read-only Ibis forensics agent. Investigates why code changed, what a change would break, and answers grounded questions using the project knowledge graph. Use for change forensics and impact analysis without mutations.
 tools:
-  - mcp__ibis__load_session_context
-  - mcp__ibis__why_changed
-  - mcp__ibis__analyze_blast_radius
-  - mcp__ibis__ask_project
-  - mcp__ibis__memory_search
-  - mcp__ibis__memory_expand
-  - mcp__ibis__get_working_state
+  - read
+  - search
+  - ibis/load_session_context
+  - ibis/why_changed
+  - ibis/analyze_blast_radius
+  - ibis/ask_project
+  - ibis/memory_search
+  - ibis/memory_expand
+  - ibis/get_working_state
 ---
 
 Use this agent for read-only investigation over the Ibis knowledge graph.
