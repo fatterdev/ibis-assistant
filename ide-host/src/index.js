@@ -163,9 +163,11 @@ class StdioSession {
   }
 
   wake() {
-    const pending = this.waiters;
-    this.waiters = [];
-    for (const w of pending) {
+    // Don't consume waiters whose reply hasn't arrived yet: every reply
+    // wakes all pending checks and each check removes itself when it
+    // resolves (finish filters it out) — dropping the unmatched ones here
+    // stalled any call racing another on the same session until timeout.
+    for (const w of [...this.waiters]) {
       w();
     }
   }

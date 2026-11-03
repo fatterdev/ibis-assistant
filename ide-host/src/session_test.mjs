@@ -136,4 +136,26 @@ const WAIT = { timeoutMs: 20_000 };
   }
 }
 
-console.log("session_test: 3/3 PASS");
+// 4. Two parallel calls on one session must both resolve (multiplexing).
+{
+  const dir = mkdtempSync(join(tmpdir(), "ibis-session-"));
+  try {
+    const backend = backendFor(dir, "parallel");
+    const [a, b] = await Promise.all([
+      callMcpTool(backend, "memory_list", {}, WAIT),
+      callMcpTool(backend, "memory_search", { query: "x" }, WAIT),
+    ]);
+    assert.equal(a, "pong:memory_list");
+    assert.equal(b, "pong:memory_search");
+    assert.equal(
+      readLines(join(dir, "spawns-parallel.txt")).length,
+      1,
+      "parallel calls must share one child",
+    );
+  } finally {
+    disposeMcpSessions();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+console.log("session_test: 4/4 PASS");

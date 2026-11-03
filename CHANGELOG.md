@@ -4,6 +4,16 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **fix(ide-host): parallel tool calls on one session lost their replies
+  (VSIX 1.0.6)** - `StdioSession.wake()` consumed the whole waiter list on
+  every reply: checks whose id wasn't in that reply were dropped and never
+  re-registered, so any call racing another on the same persistent session
+  waited out its full timeout even though the runtime had answered
+  (surfaced by the 1.0.5 refresh — 8 parallel `memory_list` count fetches
+  returned to the caller as 7× 60s timeouts, "refresh cycle complete in
+  60410ms"; sequential calls never hit it, one waiter at a time). Waiters
+  now stay registered until they resolve or fail; new `session_test` case
+  pins the parallel multiplexing (4/4).
 - **feat(vscode): 1.0.5 — refresh updates collapsed-kind counts** - the
   memory-tree refresh cycle now pre-fetches the entry count of **all eight
   kinds** (collapsed parents included — owner decision 03/11: ~8 parallel
