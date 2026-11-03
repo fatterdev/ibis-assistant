@@ -16,7 +16,7 @@
 |---|---|---|---|---|---|---|
 | WQ-1 | **R3/R4 gate** — VSIX 1.0.11 + plugin agent (Parte B) | [review-r3r4-checklist.md](./review-r3r4-checklist.md), [runbook R3.3](./2026-11-03-r33-closure-runbook.md), [analisi tempi S1.3](./2026-11-03-s13-timing-analysis.md) | **CHIUSO (03/11)**: Parte A 26/26 PASS; Parte B completa (R3.1–R3.8 + P4.1–P4.6 PASS) — run interattivo con evidenza da log; cold target chiuso dal pre-warm (prima fetch 12–30ms dopo boot pagato all'attivazione, 3.3–4.7s con Ollama su); note: P4.1 UX (status in chat), P4.5 tool-ref fix + superficie = mode picker, noise hook da estensione Azure Tools (checklist §Esito) | **push differito (decisione owner 03/11)** — a fine sviluppo: riscrittura dell'intera storia in pochi commit precisi (include rimozione claim/fact di test) → push | — | F4 (WQ-3) sbloccata |
 | WQ-2 | **Publish gate** (azioni ② ③ ⑤ + `publish-vscode.yml`) | [review-r3r4-checklist.md §Publish gate](./review-r3r4-checklist.md) | **Differito (decisione owner 03/11)**: publish a sviluppo concluso, non a R3/R4 — vedi §3.6 | azioni manuali ②③ (Trusted Publishing OIDC, Open VSX token) al momento del publish | fine sviluppo (decisione owner su timing) | WQ-4 (D-CLAIMS gate pre-publishing) |
-| WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | **F4-A2 done (03/11, `009e3da` + prereq `77be046`)** — VSIX 1.0.13: `ibis.memory.statusFilter` current (default)/all → `status` arg su `memory_list`/`memory_search`, toggle da title bar, badge `all` nel view title; prereq server: marker `all` esplicito (il design lo dava per esistente); Milestone B completa, resta il gate R7; 4 sub-fasi A residue | **F4-A3** — memory_list workstream arg + memory_workstreams tool (`feat(server): workstream browse (memory_workstreams, list filter)`) | — (publish differito, §3.6) | gate R7 → F3 docs → Track D |
+| WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | **F4-A3 done (04/11, `cc83203`)** — server workstream browse: `memory_list` arg `workstream` (nome o id via lookup bound case-insensitive → edge `part_of_workstream`, `SELECT VALUE in` — la proiezione oggetto non matcha nulla contro `id IN`, verificato su SurrealDB 3.3.5) + tool read-only `memory_workstreams` (`{id, name, status, current_count}` ordinati per most-recently-touched; `current_count` rispetta visibilità + currentness) + DDL campi browse su `workstream` (additiva, la tabella era nata senza campi); superficie 57→58, contract test + fixture D15 lockstep, smoke-mcp read-only set allineato (recupera anche `memory_list` stale da `6447058`); Milestone B completa, resta il gate R7; 3 sub-fasi A residue | **F4-A4** — Workstreams view VSIX + curation menu + refresh on focus (`feat(vscode): workstreams view and inline curation menu`) | — (publish differito, §3.6) | gate R7 → F3 docs → Track D |
 | WQ-4 | **Track D** — benchmark DevAX/Scope (D1–D5) | [PLAN.md §9](./PLAN.md), [evaluations/scope/README.md](../evaluations/scope/README.md) | Pianificato (scaffold presente; profili con placeholder `TODO-verify-*` by design, pre-D2) | D1 — pin immagine compose + seed su istanza Scope live | WQ-3 (gate R7), azione D1 | D2–D5, R6 close |
 | WQ-5 | **Miglioramenti ddofds** — fasi 0–5 (eval, retrieval, costi, memoria) | [analisi L1](./2026-11-01-dailydoseofds-improvement-analysis.md) → [L2](./2026-11-01-dailydoseofds-improvement-analysis-l2-flussi-funzionali.md) → [L3](./2026-11-01-dailydoseofds-improvement-analysis-l3-punti-di-aggancio.md); [piano A1](./2026-11-02-a1-retrieval-eval-plan.md); [validazione A2](./2026-11-03-a2-rrf-validation.md) | **Fase 0 (A1) done** (commit `9fb53da` 03/11): dataset 12 case + runner + CLI `ibis eval retrieval` + job CI `retrieval-eval`; baseline offline MRR 0.917 / r@5 0.958 / r@15 1.0, baseline ollama (additive) MRR 0.917 / r@5 1.0 / r@15 1.0. **Fase 1 (A2) implementata 03/11**: `rrf_fuse` + `FusionMode` + config `search.fusion` (default **additive**) + eval `--fusion` + campo `fusion` nel report; validazione: offline parità, ollama **regressione** (MRR 0.875, r@5 0.958 — perdita margine r05/r11). **Decisione owner A2 (03/11): opzione 2 — tuning RRF prima di decidere** (default resta additive) | **tuning RRF** (k più piccolo / ibride rank+cosine normalizzate, fuori scope A2) + re-run eval offline+ollama, poi decisione default | — | tuning A2; fasi 1–3 (C9/D13/B6); baseline per Track D D3 |
 | WQ-6 | **Track B** — ingest tracce Beacon (B0–B4, B3 se promossa) | [PLAN.md §9-bis](./PLAN.md) | Pianificato (approvato 03/11; solo piano, nessun codice) | B0 — installazione endpoint Beacon (azione manuale ⑥) + campionamento `runtime.jsonl` → nota `evaluations/beacon/campionamento.md` | azione manuale ⑥ (owner) | B1–B4, R8, B3 (se promossa) |
@@ -255,7 +255,42 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   warnings` verde, `vsce package` 1.0.13. Extra: walkthrough browse-memory
   aggiornato (e corretto il riferimento stale a `memory_search` come sorgente
   delle entries — il tree usa `memory_list` da `eea3f19`).
-- Prossimo commit previsto: `feat(server): workstream browse (memory_workstreams, list filter)` (F4-A3 — `memory_list` arg `workstream` via edge `part_of_workstream` + tool read-only `memory_workstreams` 57→58; contract test + discovery fixture nello stesso commit).
+- **F4-A3 atterrata (04/11, `cc83203`)** — workstream browse server-side (F4
+  §A.3): `memory_list` arg `workstream` (nome **o** id) — nome risolto via
+  lookup bound case-insensitive (`string::lowercase(name OR '') = $ws_name`),
+  id espliciti passati attraverso normalizzati (`format_record_id`) e
+  table-checked; **nome sconosciuto → errore** (niente zero-righe silenziose
+  per le root di browse). Filtro applicato congiuntamente a kind/status/
+  visibility/limit via subquery sull'edge `part_of_workstream` (`in` =
+  memory, `out` = workstream — direzione pinnata da unit test). Nuovo tool
+  read-only `memory_workstreams` (no args → `{id, name, status,
+  current_count}`): `current_count` = membri correnti visibili (stessa
+  currentness SQL del browse `current` del tree + visibility filter), ordine
+  per most-recently-touched = max member `updated_at` **attraverso l'edge**
+  (i membri superseded tengono caldo il parent); righe senza membri in coda,
+  tie-break per id. Modulo nuovo `ibis_search::memory::workstream`
+  (`list_workstreams` + `resolve_workstream_id` condivisa con `list_memories`).
+  **DDL**: la tabella `workstream` era nata SCHEMAFULL senza campi (Axon-like
+  "future lanes declare their fields") — F4-A3 è la lane e dichiara i campi
+  browse (`name`/`status`/`created_at`/`updated_at`, `IF NOT EXISTS`
+  additivo; senza, qualsiasi writer futuro non potrebbe scrivere e il probe
+  live fallisce). **Finding SurrealQL (verificato live su 3.3.5)**: il
+  `id IN (SELECT in FROM part_of_workstream WHERE out = …)` del design NON
+  matcha — la subquery proietta oggetti `{in: …}`, non valori; serve
+  `SELECT VALUE in` (l'edge read per-riga `SELECT in, out FROM …` invece
+  funziona: la decodifica object-row gestisce `in`/`out`). Superficie 57→58:
+  contract test (`tool_contracts_all_58_names_present`, read-only set
+  23→24, no-args shape), discovery snapshot + tools/list gates (incluso il
+  43-tool core di `today_e2e_test`), fixture rigenerata in-process (D15
+  lockstep). smoke-mcp `EXPECTED_READONLY` aggiornato — recupera anche il
+  gap stale: `memory_list` read-only da `6447058` non era mai entrato nella
+  lista (il check sarebbe fallito al prossimo run). Verifica: cargo test
+  workspace (unico fallimento: finding pre-esistente ibis-ai/Ollama), clippy
+  `-D warnings`, smoke-mcp 23/23 (43 tool core, 17 read-only) e **probe
+  live** su sidecar reale seminato via CLI (10/10): store vuoto → `[]`,
+  current_count esclusi i superseded, ordine per touch, nome case-
+  insensitive, id esplicito, errore su nome sconosciuto.
+- Prossimo commit previsto: `feat(vscode): workstreams view and inline curation menu` (F4-A4 — seconda TreeView `ibis.workstreamExplorer` con roots da `memory_workstreams`, children da `memory_list({workstream})` con status filter, curation menu A.4, refresh on focus A.5; smoke-plugin aggiornato).
 - Dipendenza interna da rispettare: B.6 (reconciliation) è precondizione strutturale del Milestone B — **soddisfatta**.
 
 ### WQ-4 — Track D
