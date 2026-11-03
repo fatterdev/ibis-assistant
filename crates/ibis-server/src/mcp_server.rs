@@ -219,6 +219,13 @@ impl ServerHandler for IbisServer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, rmcp::ErrorData> {
         if !self.tool_visible(&request.name) {
+            // A hidden tool call is diagnostic gold (stale client list, a
+            // caller probing for unconfigured lanes): log it, don't fail
+            // silently like the pre-warm 1.0.2 null call did.
+            tracing::warn!(
+                "MCP Tool Rejected: {} (hidden by config — dynamic tool discovery)",
+                request.name
+            );
             return Err(rmcp::ErrorData::invalid_params(
                 format!(
                     "tool '{}' is not available: ticketing is not configured \
@@ -230,7 +237,23 @@ impl ServerHandler for IbisServer {
         }
         let tool_name = request.name.clone();
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
-        catch_tool_panic(&tool_name, self.router.call(tcc)).await
+        let t0 = std::time::Instant::now();
+        let response = catch_tool_panic(&tool_name, self.router.call(tcc)).await;
+        let elapsed = t0.elapsed();
+        match &response {
+            Ok(CallToolResponse::Complete(result)) => {
+                if result.is_error == Some(true) {
+                    tracing::warn!("MCP Tool Done: {tool_name} is_error in {elapsed:?}");
+                } else {
+                    tracing::info!("MCP Tool Done: {tool_name} ok in {elapsed:?}");
+                }
+            }
+            Ok(_) => tracing::info!("MCP Tool Done: {tool_name} ok in {elapsed:?}"),
+            Err(err) => {
+                tracing::warn!("MCP Tool Done: {tool_name} ERROR in {elapsed:?}: {}", err.message);
+            }
+        }
+        response
     }
 
     async fn list_resources(
