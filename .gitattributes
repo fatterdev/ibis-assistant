@@ -1,0 +1,5 @@
+# Docker artifacts build on Linux: keep them LF on every checkout
+# (autocrlf would inject CRLF into the Dockerfile's shell loops).
+deploy/Dockerfile text eol=lf
+deploy/docker-compose.yml text eol=lf
+.dockerignore text eol=lf

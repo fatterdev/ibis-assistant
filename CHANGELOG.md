@@ -4,6 +4,24 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(deploy): team server compose and runbook** - F4-B4: the official
+  team-server packaging (`deploy/Dockerfile` + `deploy/docker-compose.yml`)
+  and the runbook (`docs/team_server.md`, F4 §B.3). The image builds `ibis`
+  from source and ships the pinned sidecars beside it — SurrealDB `v3.3.5`
+  (the release tarball the runtime's own installer fetches; same version the
+  CI retrieval-eval job pins) and ast-grep `0.51.1` — with
+  `DB_AUTO_UPDATE=false` so the runtime never probes GitHub at boot;
+  non-root uid 10001, `/data` volume for the
+  surrealkv file + sidecar ledger, healthcheck on the discovery endpoint,
+  `restart: unless-stopped` owning sidecar recovery where kernel job-object
+  semantics do not apply. Default command is the §B.5 team recommendation
+  (`serve --team --bind 0.0.0.0 --data-dir /data/ibis-team.db
+  --consolidate`); the runbook documents the banner, both install paths
+  (compose and systemd/NSSM with absolute data dirs), actor-identity
+  semantics (loopback-only header trust, `actor` argument fallback for LAN
+  clients), client onboarding (VSIX attach, Cursor/Claude Desktop, plugin
+  http variant), consolidation ownership, backup/restore/upgrade and the
+  R7 verification checklist. GHCR publishing stays deferred (§3.6).
 - **feat(daemon): consolidation loop owned by the daemon** - F4-B3: the
   consolidation backlog is drained by the long-lived runtime, never by client
   surfaces (T3: one runtime owns consolidation, so duplicate-supersede

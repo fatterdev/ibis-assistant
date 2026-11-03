@@ -1,0 +1,30 @@
+# Docker build context (docker build -f deploy/Dockerfile from the repo root):
+# only the workspace sources + the ast-grep rule assets are needed.
+target/
+dist/
+artifacts/
+.git/
+.cursor/
+.vscode/
+.idea/
+.github/
+node_modules/
+docs/
+scripts/
+ide-host/
+vscode-extension/
+marketplace/
+plugin/
+cursor-plugin/
+evaluations/
+.r2-smoke-data/
+.ruff_cache/
+.ibis/
+testrun/
+config.json
+config/
+config_master.json
+*.log
+*.vsix
+.env
+.env.local

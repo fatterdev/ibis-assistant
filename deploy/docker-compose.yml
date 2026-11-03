@@ -1,0 +1,40 @@
+# Ibis Assistant team server (F4 §B.2) — docs/team_server.md is the runbook.
+#
+# First start builds the image from the repository root; subsequent starts
+# reuse it (`docker compose up -d --build` after pulling a new revision).
+# The data volume is the SurrealDB store (SoT) plus the sidecar ledger.
+services:
+  ibis:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    # Un-comment once CI publishes images (publish gate deferred, §3.6) and
+    # drop the build block:
+    # image: ghcr.io/fatterdev/ibis-assistant/ibis-team:0.2.0
+    container_name: ibis-team
+    init: true                    # reap the SurrealDB sidecar on shutdown
+    restart: unless-stopped       # the restart policy owns sidecar recovery
+    ports:
+      - "3030:3030"               # /mcp (Streamable HTTP) + discovery + settings UI
+    volumes:
+      - ibis-team-data:/data      # SurrealDB data file + sidecar ledger (SoT)
+      # Optional team config (git_repos, discovery_root, ai.*, smtp, …):
+      # mount read-write if the settings UI should persist changes.
+      # - ./config.json:/opt/ibis/config.json
+    environment:
+      LOG_LEVEL: INFO
+      # Embeddings default to Ollama on 127.0.0.1 — unreachable inside the
+      # container, so point them at the team Ollama host (AI features degrade
+      # to non-embedding channels otherwise; the server still boots):
+      # EMBEDDING_URL: http://host.docker.internal:11434   # Docker Desktop hosts
+      # EMBEDDING_URL: http://<ollama-lan-host>:11434      # Linux hosts (add
+      #   extra_hosts: ["host.docker.internal:host-gateway"] for the alias)
+      # EMBEDDING_MODEL: nomic-embed-text
+      # Persist the runtime log beside the data (docker logs holds stdout):
+      # LOG_FILE: /data/ibis.log
+      # Move off the root/root defaults (applied to the embedded SurrealDB):
+      # SURREAL_USER: ibis
+      # SURREAL_PASS: change-me
+
+volumes:
+  ibis-team-data:
