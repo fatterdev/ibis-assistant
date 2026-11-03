@@ -97,4 +97,5 @@ Riferimenti chiave emersi dalla ricerca del 29/10/2026, usati per le decisioni i
 - MCP user docs: https://code.visualstudio.com/docs/agent-customization/mcp-servers
 - Copilot Memory: https://code.visualstudio.com/docs/agents/run/memory
 - Scope: https://github.com/microsoft/scope · https://microsoft.github.io/scope/
+- Beacon (ricerca 03/11/2026): https://github.com/Asymptote-Labs/agent-beacon · https://docs.beacon.sh — schema eventi `/telemetry-schema/event-schema` · JSONL locale `/log-forwarding/local-jsonl` · memoria `/concepts/cross-harness-memory` + `/cli/memory` · MCP `/cli/mcp-serve`
 - Publishing OIDC: https://code.visualstudio.com/api/working-with-extensions/publishing-extension

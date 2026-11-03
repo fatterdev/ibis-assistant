@@ -19,6 +19,7 @@
 | WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | Approved; 9 sub-fasi (F4-B1..B4 ∥ F4-A1..A5) + gate R7 da fare | **F4-B1** — reconciliation Layer 3 (ledger + liveness + start-time) | WQ-2 | gate R7 → F3 docs → Track D |
 | WQ-4 | **Track D** — benchmark DevAX/Scope (D1–D5) | [PLAN.md §9](./PLAN.md), [evaluations/scope/README.md](../evaluations/scope/README.md) | Pianificato (scaffold presente; profili con placeholder `TODO-verify-*` by design, pre-D2) | D1 — pin immagine compose + seed su istanza Scope live | WQ-3 (gate R7), azione D1 | D2–D5, R6 close |
 | WQ-5 | **Miglioramenti ddofds** — fasi 0–5 (eval, retrieval, costi, memoria) | [analisi L1](./2026-11-01-dailydoseofds-improvement-analysis.md) → [L2](./2026-11-01-dailydoseofds-improvement-analysis-l2-flussi-funzionali.md) → [L3](./2026-11-01-dailydoseofds-improvement-analysis-l3-punti-di-aggancio.md); [piano A1](./2026-11-02-a1-retrieval-eval-plan.md); [validazione A2](./2026-11-03-a2-rrf-validation.md) | **Fase 0 (A1) done** (commit `9fb53da` 03/11): dataset 12 case + runner + CLI `ibis eval retrieval` + job CI `retrieval-eval`; baseline offline MRR 0.917 / r@5 0.958 / r@15 1.0, baseline ollama (additive) MRR 0.917 / r@5 1.0 / r@15 1.0. **Fase 1 (A2) implementata 03/11**: `rrf_fuse` + `FusionMode` + config `search.fusion` (default **additive**) + eval `--fusion` + campo `fusion` nel report; validazione: offline parità, ollama **regressione** (MRR 0.875, r@5 0.958 — perdita margine r05/r11) | **decisione owner su A2** (validazione §Esito: 1 default additive + procedere con C9/D13/B6 / 2 tuning RRF / 3 girare default) | — (A2 atterrato con rollback a config) | fasi 1–3; baseline per Track D D3 |
+| WQ-6 | **Track B** — ingest tracce Beacon (B0–B4, B3 se promossa) | [PLAN.md §9-bis](./PLAN.md) | Pianificato (approvato 03/11; solo piano, nessun codice) | B0 — installazione endpoint Beacon (azione manuale ⑥) + campionamento `runtime.jsonl` → nota `evaluations/beacon/campionamento.md` | azione manuale ⑥ (owner) | B1–B4, R8, B3 (se promossa) |
 
 Storico chiuso (non più in sospeso): F0.1–F0.7, gate R2, runtime 0.2.0 — vedi [PLAN.md](./PLAN.md).
 
@@ -93,3 +94,10 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   (opzione raccomandata: default additive, procedere con C9/D13/B6).
 - Fasi 0–3 specificate in L3 con criteri di accettazione per intervento;
   dopo la decisione owner il prossimo è C9+D13+B6 (fase 1).
+
+### WQ-6 — Track B
+- Nessun sub-fase iniziata: piano integrato in [PLAN.md §9-bis](./PLAN.md)
+  (approvato 03/11, sessione analisi Agent Beacon vs Microsoft Scope).
+  Script-first (B0/B1/B2/B4), promozione a lane nativa `ibis-ingest-traces` (B3)
+  solo dopo ≥3 iterazioni utili; gate **REVIEW R8**. Prerequisito owner:
+  azione manuale ⑥ (endpoint Beacon MSI, user-mode).

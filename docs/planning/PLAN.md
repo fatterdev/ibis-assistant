@@ -43,6 +43,7 @@
 | API VS Code | engines `^1.144.0`, uso delle API stabili più recenti (`chatInstructions`, LM tools, MCP provider, MCP Apps) |
 | Publishing | Full distribution: VS Marketplace (publisher `fatterdev`, OIDC Trusted Publishing) + Open VSX + MCP registry + plugin marketplace + `vscode:mcp/install` |
 | Track D (Scope) | Sperimentale, config-as-code; **D-CLAIMS** = benchmark interno dei claims (gate pre-publishing); **D-INSIGHTS** = Scope Insights come fonte di memoria (import script-first, promozione a ingest lane solo dopo ≥3 iterazioni utili) |
+| Track B (Beacon) | Sperimentale, **script-first** (specchio di Track D): tracce JSONL Beacon → `observation` high-signal → `memory_consolidate` distilla; import memoria review-gated (B4). Beacon = cattura, Ibis = memoria tipizzata (le tracce sono fonte di ingest come logs/tickets); **zero Beacon Cloud**; visibility configurabile, default `team` |
 | Skill duplicati | Il contratto di sessione vive come skill `usage` nel plugin e come `chatInstructions` nella VSIX — mai entrambi come skill; skill e comandi non si duplicano (le skill corte sono l'unica superficie slash `/ibis <nome>`) |
 | Skill sync Copilot Memory | Sì, sperimentale (`ibis-sync-copilot-memory`) |
 
@@ -77,6 +78,7 @@
 3. Account Eclipse Foundation per **Open VSX** (canale separato, non Microsoft).
 4. Istanza **Scope** (docker-compose self-hosted) + preview/API key.
 5. Installazione locale di VSIX e plugin per i review R3/R4.
+6. Installazione locale **Beacon endpoint** (MSI Windows, user-mode) + `beacon endpoint test-event` (prerequisito del campionamento B0).
 
 ## 5. FASE 0 — Runtime (Rust)
 
@@ -181,18 +183,58 @@ Scaffold già presente in `evaluations/scope/`.
 Ciclo chiuso: **Scope finds → import → memoria Ibis → skill/rules/descrizioni migliorano → Scope re-measures**.
 **→ REVIEW R6**: risultati D-CLAIMS → **gate di publish** del marketplace; D-INSIGHTS in loop continuo.
 
+## 9-bis. TRACK B — Ingest tracce Beacon (in parallelo a Track D; approvata 03/11/2026)
+
+> Fonte: analisi Agent Beacon (Asymptote-Labs) vs Microsoft Scope. Beacon cattura
+> sessioni cross-harness (Cursor, Codex, OpenCode, Claude Code, Cline, 20+) e le
+> normalizza in JSONL locale (`~/.beacon/endpoint/logs/runtime.jsonl`, user-mode;
+> rotazione 10 MiB ×5 archivi; schema v1.0, `event.id` UUID deterministico,
+> `event.fidelity` observed/inferred; Beacon già redige/tronca prima di scrivere).
+> Principi: **script-first** (specchio della regola D-INSIGHTS di §9), **Beacon =
+> cattura, Ibis = memoria tipizzata** — le tracce sono una fonte di ingest come
+> logs/tickets e restano valide le decisioni "not chat-transcript storage" (README);
+> **zero Beacon Cloud**; osservazioni deterministiche high-signal, la distillazione
+> resta a `memory_consolidate` (nessuna AI nella lane); visibility configurabile,
+> default `team`. Riferimenti docs: schema eventi `/telemetry-schema/event-schema`,
+> JSONL locale `/log-forwarding/local-jsonl`, memoria `/concepts/cross-harness-memory`
+> e `/cli/memory`, MCP locale `/cli/mcp-serve`.
+
+| Sub | Contenuto | Commit |
+|---|---|---|
+| B0 | **Azione manuale ⑥** (endpoint Beacon) + campionamento `runtime.jsonl` reale su Windows: frequenze `event.action`, coverage `session.working_directory`/`repository`/`branch`, tasso redaction, volumi/rotazione → nota `evaluations/beacon/campionamento.md` + decisione mapping repo→progetto | — |
+| B1 | `scripts/beacon-traces-import.mjs` (pattern `scripts/scope-insights-import.mjs`): read JSONL con offset+rotazione → filtri high-signal deterministici (approval denials con `fidelity=observed`; `command.exit_code≠0` ripetuti ≥N sulla stessa command; errori `mcp.tool_invoked`/tool; session digest bounded) → mapping `working_directory`→progetti ibis registrati → `memory_add` kind=observation (confidence 0.5, visibility da config, tag `trace:<harness>`, `source_hash=sha256("beacon:event:<id>")`; session id nel content — `provenance.session` pieno arriva con B3, `memory_add` non lo espone) → state file, dedup `event.id`, `--dry-run`, `--since`, `--min-repeat-failures` | `feat(scripts): beacon traces to ibis observation import` |
+| B2 | `docs/planning/beacon-notes.md` (formato del §Scope in `vscode-platform-notes.md`) + **guard anti-overlap** (non registrare Beacon MCP/skills nei progetti ibis-managed: Beacon=cattura, Ibis=memoria) + riga README feature matrix se i numeri reggono | `docs: beacon trace ingest notes and guardrails` |
+| B4 | `scripts/beacon-memory-import.mjs` (gemello di D-INSIGHTS): memoria Beacon **già approvata da umano** (`beacon memory list --json` / MCP loopback read-only `search_memory`) → mapping kind (workflow→rule, correction→fix, debugging_pattern→fix, gotcha→gotcha, convention→rule) → `memory_add` con `source_hash=sha256("beacon:memory:<id>")`; `--sync` (superseded/rejected → `memory_search`+`memory_delete`, stile scope:132-153) | `feat(scripts): beacon approved memory to ibis import` |
+| B3 | **Promozione a lane nativa** (gate: ≥3 iterazioni utili di B1, regola §1 Track D): crate `ibis-ingest-traces` — Watcher/Tailer (pattern `ibis-ingest-logs/src/watcher.rs`), dedup tabella `trace_processed_event` (stile `log_processed_file`), config `session_traces` in `ibis-core/src/config.rs` + `config_master.json`, wiring `main.rs`/`assembly.rs` (pattern `start_log_watcher`), `provenance.session` pieno via `add_memory` core, test unit + `live_traces.rs` (sidecar SurrealDB + fake events, skip grazioso) | `feat(ingest): native beacon trace lane with typed provenance` |
+
+Config B3 (default conservativi, lane **disabilitata** di default):
+
+```json
+{ "session_traces": { "enabled": false, "jsonl_paths": [], "visibility": "team",
+    "min_repeat_command_failures": 3, "max_observations_per_session": 5,
+    "include_session_digest": true } }
+```
+
+Ciclo chiuso: **sessioni cross-harness → osservazioni high-signal → consolidate →
+memoria tipizzata sul grafo → recuperata dagli stessi harness via ibis MCP**;
+B4 alimenta direttamente la memoria review-gated (stessa direzione di D-INSIGHTS).
+Effort: B 2–3½g (B0..B4) + 2g (B3, solo se promossa).
+
+**→ REVIEW R8**: idempotenza re-run (zero duplicati), zero prompt verbatim nel
+content, cap per sessione rispettato, unknown-rate documentato, guard B2 presente.
+
 ## 10. Sequencing, versioning, effort
 
 ```
 F0.1 (rename) → R1 → F0.2..F0.7 → R2 → [F1 ∥ F2] → R3/R4 (publish 1.0.0)
   → [F4-B (team server 0.3.0) ∥ F4-A (memory view VSIX 1.1.0)] → R7
-  → F3 → D1..D3 → R6 (gate publish) → D4/D5 loop
+  → F3 → [D1..D3 ∥ B0..B2] → R6 (gate publish) → [D4/D5 ∥ B4] loop → B3 (se promossa)
 ```
 (F4: sezione §13 — decisioni 01/11/2026, sequencing e commit nella
 [spec F4](../superpowers/2026-11-01-memory-view-team-server-design.md).)
 - Runtime root: `0.2.0` a F0 completata (CHANGELOG `[Unreleased]` → `[0.2.0]`, tag); `0.3.0` a F4-B.
 - VSIX resta `1.0.0` fino al publish; `1.1.0` a F4-A; plugin `0.1.0`.
-- Effort stimato: F0.1 ½–1g · F0.2–0.7 2–4g · F1 2–4g · F2 1–2g · F4 2–3g ∥ 2–3g · F3 ½g · D 2–3g (+costi run agenti).
+- Effort stimato: F0.1 ½–1g · F0.2–0.7 2–4g · F1 2–4g · F2 1–2g · F4 2–3g ∥ 2–3g · F3 ½g · D 2–3g (+costi run agenti) · B 2–3½g (B0..B4) + 2g (B3, solo se promossa).
 
 ## 11. Rischi e mitigazioni
 | Rischio | Mitigazione |
@@ -202,6 +244,9 @@ F0.1 (rename) → R1 → F0.2..F0.7 → R2 → [F1 ∥ F2] → R3/R4 (publish 1.
 | MCP Apps experimental | Degradazione testuale sempre presente; CSP solo loopback |
 | Scope research-preview (usciuto 29/10/2026) | Immagini pinned, tutto config-as-code, nessuna hard dependency; gate R6 |
 | Skill duplicati VSIX/plugin | Contratto di sessione: skill nel plugin, instructions nella VSIX |
+| Schema Beacon in rapida evoluzione (v1.0, ~3k commit) | Check `schema_version`, parser tollerante (skip unknown), contatore unknown-rate nel report di import |
+| Doppio layer memoria (Beacon MCP/skills nei progetti ibis) | Guard B2: Beacon=cattura, Ibis=memoria tipizzata; mai Beacon MCP/skills nei progetti ibis-managed |
+| Privacy/volume tracce (prompt nel JSONL) | Mai prompt verbatim nel content (lezione + pointer), cap osservazioni/sessione, Beacon già redige; `session_traces.enabled=false` default |
 
 ## 12. Riferimenti piattaforma (ricerca 29/10/2026)
 - VS Code 1.144 (28/10/2026): Agent Host + AHP v1.0, Agents window, Copilot harness default, assisted permissions GA, Copilot Memory GA, OIDC trusted publishing.
