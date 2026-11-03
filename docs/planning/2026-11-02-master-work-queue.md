@@ -14,9 +14,9 @@
 
 | ID | Stream | Doc di riferimento | Stato (02/11) | Prossimo passo (uno solo) | Sbloccato da | Sblocca |
 |---|---|---|---|---|---|---|
-| WQ-1 | **R3/R4 gate** — VSIX 1.0.11 + plugin agent (Parte B) | [review-r3r4-checklist.md](./review-r3r4-checklist.md), [runbook R3.3](./2026-11-03-r33-closure-runbook.md), [analisi tempi S1.3](./2026-11-03-s13-timing-analysis.md) | Parte A 26/26 PASS; **Parte B COMPLETA (03/11): R3.1–R3.8 + P4.1–P4.6 PASS** — run interattivo con evidenza da log; cold target chiuso dal pre-warm (prima fetch 12–30ms dopo boot pagato all'attivazione, 3.3–4.7s con Ollama su); note: P4.1 UX (status in chat), P4.5 tool-ref fix + superficie = mode picker, noise hook da estensione Azure Tools (checklist §Esito) | **azioni ②③** — Trusted Publishing OIDC + token Open VSX (owner) → publish gate | azioni ②③ (owner) | publish gate (WQ-2) |
-| WQ-2 | **Publish gate** (azioni ② ③ ⑤ + `publish-vscode.yml`) | [review-r3r4-checklist.md §Publish gate](./review-r3r4-checklist.md) | ☐ non iniziato | azioni manuali ②③ (Trusted Publishing OIDC, Open VSX token) | WQ-1 (R3/R4 PASS) | WQ-3, WQ-4 |
-| WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | Approved; 9 sub-fasi (F4-B1..B4 ∥ F4-A1..A5) + gate R7 da fare | **F4-B1** — reconciliation Layer 3 (ledger + liveness + start-time) | WQ-2 | gate R7 → F3 docs → Track D |
+| WQ-1 | **R3/R4 gate** — VSIX 1.0.11 + plugin agent (Parte B) | [review-r3r4-checklist.md](./review-r3r4-checklist.md), [runbook R3.3](./2026-11-03-r33-closure-runbook.md), [analisi tempi S1.3](./2026-11-03-s13-timing-analysis.md) | **CHIUSO (03/11)**: Parte A 26/26 PASS; Parte B completa (R3.1–R3.8 + P4.1–P4.6 PASS) — run interattivo con evidenza da log; cold target chiuso dal pre-warm (prima fetch 12–30ms dopo boot pagato all'attivazione, 3.3–4.7s con Ollama su); note: P4.1 UX (status in chat), P4.5 tool-ref fix + superficie = mode picker, noise hook da estensione Azure Tools (checklist §Esito) | **push differito (decisione owner 03/11)** — a fine sviluppo: riscrittura dell'intera storia in pochi commit precisi (include rimozione claim/fact di test) → push | — | F4 (WQ-3) sbloccata |
+| WQ-2 | **Publish gate** (azioni ② ③ ⑤ + `publish-vscode.yml`) | [review-r3r4-checklist.md §Publish gate](./review-r3r4-checklist.md) | **Differito (decisione owner 03/11)**: publish a sviluppo concluso, non a R3/R4 — vedi §3.6 | azioni manuali ②③ (Trusted Publishing OIDC, Open VSX token) al momento del publish | fine sviluppo (decisione owner su timing) | WQ-4 (D-CLAIMS gate pre-publishing) |
+| WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | **F4-B1 done (03/11, `e28d936`)** — reconciliation Layer 3 atterrata (ledger + liveness start-time + terminate; e2e live SurrealDB verde); 8 sub-fasi residue + gate R7 | **F4-B2** — `ibis serve --team` profile + bind + projection default | — (publish differito, §3.6) | gate R7 → F3 docs → Track D |
 | WQ-4 | **Track D** — benchmark DevAX/Scope (D1–D5) | [PLAN.md §9](./PLAN.md), [evaluations/scope/README.md](../evaluations/scope/README.md) | Pianificato (scaffold presente; profili con placeholder `TODO-verify-*` by design, pre-D2) | D1 — pin immagine compose + seed su istanza Scope live | WQ-3 (gate R7), azione D1 | D2–D5, R6 close |
 | WQ-5 | **Miglioramenti ddofds** — fasi 0–5 (eval, retrieval, costi, memoria) | [analisi L1](./2026-11-01-dailydoseofds-improvement-analysis.md) → [L2](./2026-11-01-dailydoseofds-improvement-analysis-l2-flussi-funzionali.md) → [L3](./2026-11-01-dailydoseofds-improvement-analysis-l3-punti-di-aggancio.md); [piano A1](./2026-11-02-a1-retrieval-eval-plan.md); [validazione A2](./2026-11-03-a2-rrf-validation.md) | **Fase 0 (A1) done** (commit `9fb53da` 03/11): dataset 12 case + runner + CLI `ibis eval retrieval` + job CI `retrieval-eval`; baseline offline MRR 0.917 / r@5 0.958 / r@15 1.0, baseline ollama (additive) MRR 0.917 / r@5 1.0 / r@15 1.0. **Fase 1 (A2) implementata 03/11**: `rrf_fuse` + `FusionMode` + config `search.fusion` (default **additive**) + eval `--fusion` + campo `fusion` nel report; validazione: offline parità, ollama **regressione** (MRR 0.875, r@5 0.958 — perdita margine r05/r11). **Decisione owner A2 (03/11): opzione 2 — tuning RRF prima di decidere** (default resta additive) | **tuning RRF** (k più piccolo / ibride rank+cosine normalizzate, fuori scope A2) + re-run eval offline+ollama, poi decisione default | — | tuning A2; fasi 1–3 (C9/D13/B6); baseline per Track D D3 |
 | WQ-6 | **Track B** — ingest tracce Beacon (B0–B4, B3 se promossa) | [PLAN.md §9-bis](./PLAN.md) | Pianificato (approvato 03/11; solo piano, nessun codice) | B0 — installazione endpoint Beacon (azione manuale ⑥) + campionamento `runtime.jsonl` → nota `evaluations/beacon/campionamento.md` | azione manuale ⑥ (owner) | B1–B4, R8, B3 (se promossa) |
@@ -28,14 +28,14 @@ Storico chiuso (non più in sospeso): F0.1–F0.7, gate R2, runtime 0.2.0 — ve
 Fonti: PLAN.md (sequencing originale), F4 spec (sequencing aggiornato, 01/11), checklist R3/R4 (stato reale).
 
 ```text
-[R3/R4 Parte B]──PASS──►[Publish gate ②③⑤]──►[F4-B1..B4 ∥ F4-A1..A5]──►[R7]──►[F3 docs]──►[Track D D1..D5]──►[R6]
-     (WQ-1)                    (WQ-2)                (WQ-3)                                (WQ-4)
+[R3/R4 Parte B]──PASS──►[F4-B1..B4 ∥ F4-A1..A5]──►[R7]──►[F3 docs]──►[Track D D1..D5]──►[R6]──►[Publish gate ②③⑤]
+     (WQ-1)                    (WQ-3)                                (WQ-4)                      (WQ-2, differito)
 
 parallelo, runtime-side, ortogonale alla VSIX:
-     [ddofds fase 0: A1 eval] ──► [fase 1: A2+C9+D13+B6] ──► [fasi 2–3: A4+A3+C7, D10+D11+D12]   (WQ-5)
+      [ddofds fase 0: A1 eval] ──► [fase 1: A2 tuning + C9+D13+B6] ──► [fasi 2–3: A4+A3+C7, D10+D11+D12]   (WQ-5)
 ```
 
-Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4 spec (più recente) inserisce `F4 → R7` tra publish e F3. La sequenza attesa è quella sopra (F4 prima di F3/Track D).
+Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4 spec (più recente) inserisce `F4 → R7` tra publish e F3. **Aggiornamento 03/11 (decisione owner §3.6)**: il publish gate non segue più R3/R4 ma chiude la sequenza a sviluppo concluso (dopo R6/R7, timing a scelta owner); F4 è sbloccata direttamente.
 
 ## 3. Decisioni di coordinamento (dove i piani si toccano)
 
@@ -44,6 +44,8 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
 3. **A1 eval → Track D D3.** La baseline di retrieval quality (A1) è complementare al D3 "memoria → outcome": A1 misura l'ibis interno, D3 misura l'agente end-to-end. Fare A1 prima che D1..D3 parta in earnest rende le fasi 2–3 ddofds misurabili con Track D in parallelo.
 4. **Timeout/sidecar.** WQ-1 S1.1 (client stdio persistente) e il rebuild del binario stale sono prerequisiti di misura per S1.3; l'F4-B1 (reconciliation ledger) complica il sidecar lifecycle — fare S1.3/S1.4 PRIMA di F4-B1 evita due volte le stesse misure.
 5. **Versioni.** VSIX: le build debug iteracono il numero di **patch** (`1.0.1`, `1.0.2`, … — decisione owner 03/11, a ritroso dalle 1.1.0–1.1.2 provvisorie mai committate) e restano distinguishibili dalla versione a ogni reinstall; `1.1.0` resta riservato a F4. Runtime resta 0.2.0 finché il root `[Unreleased]` non viene taggato (decisione in checklist §Publish gate). F4 porterà runtime 0.3.0. Gli interventi ddofds vanno nel root `[Unreleased]` runtime, nessuna bump propria.
+6. **Publish differito (decisione owner 03/11).** Il gate WQ-2 non segue più R3/R4: si pubblica a sviluppo concluso (indicativamente dopo R7/F4, timing a scelta owner). Conseguenze: il primo rilascio pubblico sarà **1.1.0** (F4) invece di 1.0.0 — le patch 1.0.x restano build locali mai pubblicate; le azioni ②③ (OIDC Trusted Publishing, token Open VSX) restano manuali owner e si fanno al momento del publish.
+7. **Push differito + riscrittura storia finale (decisione owner 03/11).** Nessun push fino a fine sviluppo; a quel punto riscrittura dell'**intera** storia (47+ commit) in pochi commit precisi, che include la pulizia già registrata (claim `mem_26f1730…`/`mem_973f67a…` e le 2 fact DB-only via `memory_delete` — le fact DB-only non vivono in git, la loro rimozione resta operativa sullo store locale). Le build/prove intermedie non sopravvivono al rewrite: la coda e i doc di planning restano la fonte della verità.
 
 ## 4. Stato per stream (dettaglio minimo)
 
@@ -92,17 +94,41 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   hook Azure Tools). Restano le azioni owner ②③ per il publish gate.
 - Aperto: azioni ②③ (Trusted Publishing OIDC, token Open VSX) → publish
   gate (azioni ⑤ già fatte per i review).
-- **Pulizia pre-push (registrata, owner: riscrittura storia attesa prima del
-  push)**: rimuovere le memorie di test — claim in-repo `mem_26f1730…`
-  (R3.4 selection, commit `b112bd7`) e `mem_973f67a…` (R3.5 file, commit
-  `1f64f7f`) da `.ibis/claims/`, più le due fact DB-only create in chat
-  ("Memoria fact di prova", "Quick Actions fact" `mem_ff975f41…`) via
-  `memory_delete`. **Restano** le 3 memorie seed (decision/fix/gotcha, claim
-  `a4cd24f`/`1d00552`: contenuto reale di progetto).
+- **Pulizia memorie di test (aggiornata 03/11: push differito, §3.7)**: la
+  rimozione non è più una passata separata pre-push — finisce nella
+  **riscrittura dell'intera storia** a fine sviluppo (claim in-repo
+  `mem_26f1730…` commit `b112bd7` e `mem_973f67a…` commit `1f64f7f`
+  eliminati nel rewrite; le 2 fact DB-only "Memoria fact di prova" /
+  "Quick Actions fact" `mem_ff975f41…` vanno rimosse dallo store locale via
+  `memory_delete`, non vivono in git). **Restano** le 3 memorie seed
+  (decision/fix/gotcha, claim `a4cd24f`/`1d00552`: contenuto reale di
+  progetto).
 
 ### WQ-3 — F4
-- Nessun sub-fase iniziata. Primo commit previsto: `feat(runtime): sidecar reconciliation at startup (layer 3)` (F4-B1).
-- Dipendenza interna da rispettare: B.6 (reconciliation) è precondizione strutturale del Milestone B.
+- **F4-B1 atterrata (03/11, `e28d936`)** — `ibis_core::sidecar_ledger` (ledger
+  JSON accanto al file dati SurrealDB: `pid`+start-time+`port`+`pgid`+owner
+  identity; `reconcile` prima dello spawn: prune morte / keep con owner vivo
+  / terminate orfane con owner morto; PID-reuse escluso via start-time,
+  Windows FILETIME + `GetExitCodeProcess`≠STILL_ACTIVE — un terminato con
+  handle aperti non è vivo; Linux `/proc` field 22; macOS kill-only,
+  residuo documentato) + wiring `ProcessManager` (reconcile pre-spawn con
+  ledger dir = parent del file dati, register solo per child confermato
+  vivo, unregister post-stop riuscito). Test: 7 unit ibis-core (stale-kill
+  e2e con sleeper reali) + live gated `IBIS_SURREAL_BIN` (owner crash
+  simulato → restart pulito, 3.9s) + lifecycle riallineato. Workspace
+  verde, clippy `-D warnings` verde.
+- **Finding follow-up (da B1, non fixato nel commit)**: `daemon.rs`
+  `stop_process_raw` apre con `TERMINATE|SYNCHRONIZE` senza query right →
+  `GetExitCodeProcess` fallisce e il grace-loop D10 può leggere un processo
+  vivo come già morto (mascherato col console condivisa, latente per child
+  pipe-spawned). Stessa forma del difetto colto dal probe B1; fix possibile
+  come one-liner (`| PROCESS_QUERY_LIMITED_INFORMATION`) ma tocca la
+  semantica D10 pinata nei test → decisione owner su quando atterrarlo.
+- F4-B1 conclusa anche la parte sidecar-lifecycle-plan §Layer 3 (piano
+  aggiornato, [sidecar-lifecycle-plan.md](./sidecar-lifecycle-plan.md)).
+- Nessun'altra sub-fase iniziata. Prossimo commit previsto: `feat(cli): serve
+  --team profile with lan binding` (F4-B2).
+- Dipendenza interna da rispettare: B.6 (reconciliation) è precondizione strutturale del Milestone B — **soddisfatta**.
 
 ### WQ-4 — Track D
 - Disallineamento README/analysis.mjs (pass@k annunciato vs pass-rate implementato) e placeholder profili: **stato atteso**, non difetto — si chiudono a D2 (runner+analysis) e D1 (pin/seed su istanza live). Registrato anche come correzione nell'analisi L2 §4.1.
