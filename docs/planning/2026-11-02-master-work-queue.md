@@ -117,13 +117,14 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   e2e con sleeper reali) + live gated `IBIS_SURREAL_BIN` (owner crash
   simulato → restart pulito, 3.9s) + lifecycle riallineato. Workspace
   verde, clippy `-D warnings` verde.
-- **Finding follow-up (da B1, non fixato nel commit)**: `daemon.rs`
+- **Finding follow-up (da B1) — RISOLTO (03/11, commit fix)**: `daemon.rs`
   `stop_process_raw` apre con `TERMINATE|SYNCHRONIZE` senza query right →
   `GetExitCodeProcess` fallisce e il grace-loop D10 può leggere un processo
   vivo come già morto (mascherato col console condivisa, latente per child
-  pipe-spawned). Stessa forma del difetto colto dal probe B1; fix possibile
-  come one-liner (`| PROCESS_QUERY_LIMITED_INFORMATION`) ma tocca la
-  semantica D10 pinata nei test → decisione owner su quando atterrarlo.
+  pipe-spawned). Fix: `PROCESS_QUERY_LIMITED_INFORMATION` nella maschera +
+  test di regressione che pina il contratto exit-code attraverso la maschera
+  esatta dello stop (`stop_handle_query_right_reads_still_active_for_a_live_process`).
+  Verificato: ibis-server daemon tests 18/18.
 - F4-B1 conclusa anche la parte sidecar-lifecycle-plan §Layer 3 (piano
   aggiornato, [sidecar-lifecycle-plan.md](./sidecar-lifecycle-plan.md)).
 - Nessun'altra sub-fase iniziata. Prossimo commit previsto: `feat(cli): serve

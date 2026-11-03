@@ -257,6 +257,10 @@ mod ffi {
     //
     pub const PROCESS_TERMINATE: u32 = 0x0001;
     pub const PROCESS_SYNCHRONIZE: u32 = 0x0010_0000;
+    /// Query right the stop handle must carry: without it `GetExitCodeProcess`
+    /// fails, the zero-initialized exit code reads as "already exited" and the
+    /// grace loop returns before any kill — a live process survives `stop`.
+    pub const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x0000_1000;
     pub const STILL_ACTIVE: u32 = 259;
     pub const CTRL_BREAK_EVENT: u32 = 1;
     //
@@ -300,11 +304,23 @@ fn is_process_running_raw(_pid: u32) -> bool {
 /// with a 5s/200ms exit-code grace, then TerminateProcess on the atomic
 /// OpenProcess handle. Detached (console-less) daemon children never receive
 /// the event, so the grace window is skipped — exactly the behavior (N-A07).
+/// The handle carries `PROCESS_QUERY_LIMITED_INFORMATION` too: the grace
+/// loop reads the exit code through it, and without the query right
+/// `GetExitCodeProcess` fails, the zero-initialized code reads as "already
+/// exited" and a live CTRL_BREAK-ignoring process would survive `stop` with
+/// `Ok(())` (the same defect the sidecar-ledger probe caught on its
+/// terminate path, F4-B1).
 #[cfg(windows)]
 fn stop_process_raw(pid: u32) -> io::Result<()> {
     use std::time::{Duration, Instant};
     unsafe {
-        let handle = ffi::OpenProcess(ffi::PROCESS_TERMINATE | ffi::PROCESS_SYNCHRONIZE, 0, pid);
+        let handle = ffi::OpenProcess(
+            ffi::PROCESS_TERMINATE
+                | ffi::PROCESS_SYNCHRONIZE
+                | ffi::PROCESS_QUERY_LIMITED_INFORMATION,
+            0,
+            pid,
+        );
         if handle == 0 {
             return Ok(());
         }
@@ -718,6 +734,44 @@ mod tests {
         stop_process(pid).expect("stop_process");
         reap(&mut child);
         assert!(!is_process_running(pid));
+    }
+
+    /// The stop handle's query right is what keeps the D10 grace loop honest:
+    /// `GetExitCodeProcess` through the exact `OpenProcess` mask the stop
+    /// path uses must report STILL_ACTIVE for a live process. With
+    /// `TERMINATE | SYNCHRONIZE` only, the call fails and the
+    /// zero-initialized code reads as "already exited" — a live
+    /// CTRL_BREAK-ignoring process survived `stop` with `Ok(())` (the
+    /// defect recorded under F4-B1).
+    #[cfg(windows)]
+    #[test]
+    fn stop_handle_query_right_reads_still_active_for_a_live_process() {
+        let mut child = spawn_sleeper();
+        let handle = unsafe {
+            ffi::OpenProcess(
+                ffi::PROCESS_TERMINATE
+                    | ffi::PROCESS_SYNCHRONIZE
+                    | ffi::PROCESS_QUERY_LIMITED_INFORMATION,
+                0,
+                child.id(),
+            )
+        };
+        assert!(handle != 0, "the stop mask opens the process");
+        let mut exit_code: u32 = 0;
+        let ok = unsafe { ffi::GetExitCodeProcess(handle, &mut exit_code) };
+        unsafe { ffi::CloseHandle(handle) };
+        assert_eq!(
+            ok, 1,
+            "GetExitCodeProcess must succeed through the stop mask"
+        );
+        assert_eq!(
+            exit_code,
+            ffi::STILL_ACTIVE,
+            "a live process reads STILL_ACTIVE"
+        );
+        stop_process(child.id()).expect("stop_process");
+        reap(&mut child);
+        assert!(!is_process_running(child.id()));
     }
 
     #[cfg(any(windows, unix))]

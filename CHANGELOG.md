@@ -4,6 +4,16 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **fix(server): daemon stop handle carries a query right** - `stop_process_raw`
+  opened its handle with `TERMINATE | SYNCHRONIZE` only: `GetExitCodeProcess`
+  fails without a query right, the zero-initialized exit code reads as
+  "already exited" and the D10 grace loop returned before any kill — a live
+  CTRL_BREAK-ignoring process survived `stop` with `Ok(())`. Masked whenever
+  a console is shared (the CTRL_BREAK path kills the child for real), latent
+  for stubborn console-attached processes; caught by the F4-B1 sidecar-ledger
+  probe on its specular terminate path. `PROCESS_QUERY_LIMITED_INFORMATION`
+  added to the mask; regression test pins the exit-code contract through the
+  exact stop mask.
 - **feat(runtime): sidecar reconciliation at startup (layer 3)** - F4-B1: a
   per-sidecar ledger (`sidecar_ledger.json` beside the SurrealDB data file)
   records pid + process start-time + port + owner identity at spawn time;
