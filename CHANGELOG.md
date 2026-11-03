@@ -4,6 +4,17 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(vscode): 1.0.4 — ui-test instrumentation** - every Output-channel
+  line is mirrored to `%LOCALAPPDATA%\ibis\ui-tests\output-channel.log`
+  (boot-delimited), closing the evidence gap that lost the S1.3 run's
+  channel numbers; the memory tree logs per-fetch timing
+  (`memory tree: kind=X via memory_list in Nms, M entries`, the search
+  variant, detail expand with chain length, refresh requested/complete) so
+  cold/warm and refresh outcomes are readable from the file instead of a
+  stopwatch; Remember Selection/File lines carry the full `source_hash`
+  for provenance verification. Runtime side (separate commit): per-call
+  completion lines (`MCP Tool Done: <name> ok|is_error|ERROR in <elapsed>`)
+  and a rejection line when dynamic tool discovery hides a called tool.
 - **fix(ai): usage-flush batch test is load-independent** -
   `usage_flush_batches_updates` tied its assertion to wall-clock time (50
   sequential embeds had to finish within ~1s to stay under the `< 10` save

@@ -1,9 +1,19 @@
 const vscode = require("vscode");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 const { registerMemoryTree } = require("./memory-tree");
 const { registerRememberSelection } = require("./remember-selection");
 
 const EXTENSION_ID = "fatterdev.ibis-assistant";
+
+const UI_TEST_LOG_DIR = path.join(
+  process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
+  "ibis",
+  "ui-tests",
+);
+const UI_TEST_LOG_PATH = path.join(UI_TEST_LOG_DIR, "output-channel.log");
 
 /** Shared kind quick-pick for Remember (command, selection, file). */
 const REMEMBER_KINDS = [
@@ -47,10 +57,31 @@ async function loadIdeHost() {
 }
 
 function logLine(message) {
-  if (!outputChannel) {
-    return;
+  const line = `[${new Date().toISOString()}] ${message}`;
+  if (outputChannel) {
+    outputChannel.appendLine(line);
   }
-  outputChannel.appendLine(`[${new Date().toISOString()}] ${message}`);
+  appendUiTestLog(line);
+}
+
+/**
+ * Mirror every Output-channel line to a local file so a test run leaves a
+ * persistable evidence trail (the S1.3 analysis lost its channel numbers to
+ * exactly this gap). Swallows failures — the sink must never break the
+ * extension.
+ */
+function appendUiTestLog(line) {
+  try {
+    fs.mkdirSync(UI_TEST_LOG_DIR, { recursive: true });
+    fs.appendFileSync(UI_TEST_LOG_PATH, `${line}\n`);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Boot separator written to the sink file only, delimiting runs. */
+function startUiTestLog(version) {
+  appendUiTestLog(`\n===== ibis-assistant ${version} boot ${new Date().toISOString()} =====`);
 }
 
 function logVerbose(cfg, message) {
@@ -102,6 +133,7 @@ function settingOrEnv(cfg, key, envName, fallback) {
 async function activate(context) {
   outputChannel = vscode.window.createOutputChannel("Ibis Assistant");
   context.subscriptions.push(outputChannel);
+  startUiTestLog(context.extension.packageJSON.version);
 
   let host;
   try {

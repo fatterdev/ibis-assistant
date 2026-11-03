@@ -249,11 +249,18 @@ class MemoryTreeDataProvider {
    */
   async fetchEntries(query, kind) {
     const cfg = this.api.getConfig();
+    const t0 = Date.now();
     const backend = await this.api.resolveBackend(this.host, cfg);
     const text = kind
       ? await this.host.callMcpTool(backend, "memory_list", { kind, limit: KIND_LIMIT })
       : await this.host.callMcpTool(backend, "memory_search", { query, limit: SEARCH_LIMIT });
-    return parseMemoryArray(text);
+    const entries = parseMemoryArray(text);
+    this.api.logLine(
+      kind
+        ? `memory tree: kind=${kind} via memory_list in ${Date.now() - t0}ms, ${entries.length} entries`
+        : `memory tree: search "${query}" via memory_search in ${Date.now() - t0}ms, ${entries.length} entries`,
+    );
+    return entries;
   }
 
   /**
@@ -366,8 +373,14 @@ async function openMemoryDetail(api, host, entry) {
   let detail = { ...entry };
   try {
     const backend = await api.resolveBackend(host, api.getConfig());
+    const t0 = Date.now();
     const text = await host.callMcpTool(backend, "memory_expand", { id: entry.id });
     const expanded = JSON.parse(text);
+    api.logLine(
+      `memory detail: memory_expand ${entry.id} in ${Date.now() - t0}ms (chain=${
+        Array.isArray(expanded && expanded.supersedes_chain) ? expanded.supersedes_chain.length : 0
+      })`,
+    );
     if (expanded && expanded.memory) {
       detail = { ...detail, ...expanded.memory };
     }
@@ -412,8 +425,11 @@ function registerMemoryTree(context, api, host) {
       await vscode.window.withProgress(
         { location: { viewId: "ibis.memoryExplorer" }, title: "Ibis: refreshing memory…" },
         async () => {
+          const t0 = Date.now();
+          api.logLine("memory tree: refresh requested");
           provider.refresh();
           await new Promise((resolve) => setTimeout(resolve, 400));
+          api.logLine(`memory tree: refresh cycle complete in ${Date.now() - t0}ms`);
         },
       );
     }),
