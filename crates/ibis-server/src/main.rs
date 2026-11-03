@@ -3,6 +3,8 @@
 //! Command surface ( main:79-168):
 //! - no args → help
 //! - `run` / `-run` / `--run` / any flag-argument → the server
+//! - `serve` / `-serve` / `--serve` → the server (alias of `run`; the
+//!   `--team` profile flag turns it into the F4 team server)
 //! - `config [fast|full|show|--recommend|ai]` → the wizard
 //! - `version` / `-version` / `--version`
 //! - `/run`, `install`, `uninstall`, `start`, `stop` → the daemon/service
@@ -58,6 +60,7 @@ fn main() {
     match cmd {
         "/run" => exit_with_service_dispatch(&argv),
         "run" | "-run" | "--run" => run_server(&argv[1..]),
+        "serve" | "-serve" | "--serve" => run_server(&argv[1..]),
         "/install" | "install" | "-install" | "--install" => exit_with_service_dispatch(&argv),
         "/uninstall" | "uninstall" | "-uninstall" | "--uninstall" => {
             exit_with_service_dispatch(&argv)
@@ -174,6 +177,7 @@ fn print_help() {
     println!("  {bin_name} <command> [options]");
     println!("\nServer commands:");
     println!("  run         Start the server interactively (default)");
+    println!("  serve       Alias of run; --team enables the team server profile");
     println!("  start       Start the server in the background");
     println!("  stop        Stop the background server");
     println!("  config       Interactive setup (default: fast)");
@@ -248,6 +252,9 @@ const SERVER_LONG_FLAGS: &[&str] = &[
     "runtime-mode",
     "workspace",
     "config",
+    "team",
+    "bind",
+    "data-dir",
 ];
 
 /// Go `flag` parity: the spawn contract everywhere (ide-host, the VSIX MCP
@@ -269,6 +276,34 @@ fn normalize_flag_style(args: &[String]) -> Vec<String> {
             arg.clone()
         })
         .collect()
+}
+
+/// The `--team` serve profile (F4 §B.1): the operator asked for the team
+/// server, so unset knobs take team defaults while explicit choices (CLI
+/// flags, config file) stay untouched:
+/// - runtime mode defaults to `server` (db_only personal claims, headless
+///   runtime semantics);
+/// - the bind address defaults to `127.0.0.1` — LAN exposure requires an
+///   explicit `--bind <lan-address>` (trust boundary is network reachability,
+///   no token/auth);
+/// - the `.ibis/memory` projection turns on unless the config file explicitly
+///   disables it.
+///
+/// A no-op outside the profile and in plugin isolation (the spawn contract
+/// never carries team flags, and isolation owns its paths).
+fn apply_team_profile(cfg: &mut Config, team_profile: bool) {
+    if !team_profile || cfg.is_plugin() {
+        return;
+    }
+    if cfg.runtime_mode.trim().is_empty() {
+        cfg.runtime_mode = "server".to_string();
+    }
+    if cfg.bind_address.trim().is_empty() {
+        cfg.bind_address = "127.0.0.1".to_string();
+    }
+    if ibis_core::config::projection_explicitly_set(&cfg.config_path) != Some(false) {
+        cfg.memory.projection_enabled = true;
+    }
 }
 
 /// `shouldRunWizard
@@ -329,6 +364,18 @@ struct ServerFlags {
     /// Opened folder / live working tree (personal/plugin)
     #[arg(long = "workspace")]
     workspace: Option<String>,
+    /// Team server profile: server runtime, loopback bind default, .ibis/memory
+    /// projection on (F4 §B.1)
+    #[arg(long = "team")]
+    team: bool,
+    /// Address to bind the HTTP listener to (default: runtime-mode driven;
+    /// the team profile defaults to 127.0.0.1)
+    #[arg(long = "bind")]
+    bind: Option<String>,
+    /// Data directory for the embedded SurrealDB store (team hosts keep the
+    /// team store out of personal plugin data)
+    #[arg(long = "data-dir")]
+    data_dir: Option<String>,
     /// Path to config.json (help-visibility only; consumed pre-parse)
     #[arg(long = "config")]
     #[arg(hide = true)]
@@ -433,6 +480,16 @@ async fn run_server_async(args: Vec<String>) -> i32 {
     if let Some(v) = flags.workspace {
         cfg.workspace = v;
     }
+    if let Some(v) = flags.bind {
+        cfg.bind_address = v;
+    }
+    if let Some(v) = flags.data_dir {
+        cfg.db_data_path = v;
+    }
+
+    // The `--team` profile (F4 §B.1): server runtime semantics, loopback-safe
+    // bind default, projection on — explicit choices (flags/config) win.
+    apply_team_profile(&mut cfg, flags.team);
 
     // Plugin/live-workspace adjustments
     if cfg.is_plugin() {
@@ -473,6 +530,20 @@ async fn run_server_async(args: Vec<String>) -> i32 {
         tracing::info!("Configuration loaded from: {}", cfg.config_path);
     } else {
         tracing::warn!("No config file found, using defaults and environment variables.");
+    }
+
+    // Team server startup banner (F4 §B.1): bind address + actor header
+    // reminder + the no-auth trust boundary, stated where the operator looks.
+    if flags.team {
+        tracing::info!(
+            "[TEAM] team server profile active — bind {} (LAN exposure requires an explicit --bind <lan-address>)",
+            cfg.listen_addr()
+        );
+        tracing::info!(
+            "[TEAM] actor identity: clients send the X-Ibis-Actor header (CLI: IBIS_ACTOR env)"
+        );
+        tracing::info!("[TEAM] no authentication: the trust boundary is network reachability");
+        tracing::info!("[TEAM] .ibis/memory projection enabled (team-reviewable docs)");
     }
 
     // 3. Discovery
@@ -885,6 +956,109 @@ mod flag_parity_tests {
         assert_eq!(flags.runtime_mode.as_deref(), Some("plugin"));
         assert_eq!(flags.workspace.as_deref(), Some("C:/dev/repo"));
         assert_eq!(flags.config.as_deref(), Some("config.json"));
+    }
+
+    /// The F4 team-server flags round-trip through the single-dash spelling.
+    #[test]
+    fn team_flags_accept_the_single_dash_form() {
+        let flags = parse(&["-team", "-bind", "0.0.0.0", "-data-dir", "C:/team-data"]);
+        assert!(flags.team);
+        assert_eq!(flags.bind.as_deref(), Some("0.0.0.0"));
+        assert_eq!(flags.data_dir.as_deref(), Some("C:/team-data"));
+    }
+}
+
+#[cfg(test)]
+mod team_profile_tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> ServerFlags {
+        let normalized =
+            normalize_flag_style(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        ServerFlags::try_parse_from(std::iter::once("ibis".to_string()).chain(normalized))
+            .expect("team args parse")
+    }
+
+    /// `serve --team` (F4 §B.1): server runtime semantics, loopback-safe bind
+    /// default (LAN exposure is an explicit --bind), projection on.
+    #[test]
+    fn team_profile_applies_server_defaults() {
+        let flags = parse(&["--team"]);
+        assert!(flags.team);
+        let mut cfg = Config::default();
+        apply_team_profile(&mut cfg, flags.team);
+        assert_eq!(cfg.runtime_mode, "server");
+        assert_eq!(cfg.bind_address, "127.0.0.1");
+        assert_eq!(cfg.listen_addr(), "127.0.0.1:3030");
+        assert!(cfg.memory.projection_enabled);
+    }
+
+    /// The profile only fills unset knobs: an explicit --bind (applied to the
+    /// config before the profile) and an explicit runtime mode stay untouched.
+    #[test]
+    fn team_profile_defaults_do_not_override_explicit_choices() {
+        let flags = parse(&["--team", "--bind", "0.0.0.0"]);
+        assert_eq!(flags.bind.as_deref(), Some("0.0.0.0"));
+        let mut cfg = Config {
+            bind_address: "0.0.0.0".to_string(),
+            runtime_mode: "personal".to_string(),
+            ..Default::default()
+        };
+        apply_team_profile(&mut cfg, flags.team);
+        assert_eq!(cfg.bind_address, "0.0.0.0");
+        assert_eq!(cfg.runtime_mode, "personal");
+    }
+
+    /// An explicit `memory.projection_enabled: false` in the config file
+    /// survives the team profile; an explicit true stays true.
+    #[test]
+    fn explicit_config_projection_survives_the_team_profile() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("config.json");
+        let flags = parse(&["--team"]);
+
+        std::fs::write(&path, r#"{"memory": {"projection_enabled": false}}"#).expect("write");
+        let mut cfg = Config {
+            config_path: path.display().to_string(),
+            ..Default::default()
+        };
+        apply_team_profile(&mut cfg, flags.team);
+        assert!(!cfg.memory.projection_enabled);
+
+        std::fs::write(&path, r#"{"memory": {"projection_enabled": true}}"#).expect("write");
+        let mut cfg = Config {
+            config_path: path.display().to_string(),
+            ..Default::default()
+        };
+        apply_team_profile(&mut cfg, flags.team);
+        assert!(cfg.memory.projection_enabled);
+    }
+
+    /// Plugin isolation owns its paths and spawn contract: the team profile
+    /// is a no-op there.
+    #[test]
+    fn team_profile_is_a_noop_in_plugin_isolation() {
+        let flags = parse(&["--team"]);
+        let mut cfg = Config {
+            runtime_mode: "plugin".to_string(),
+            ..Default::default()
+        };
+        apply_team_profile(&mut cfg, flags.team);
+        assert_eq!(cfg.runtime_mode, "plugin");
+        assert!(cfg.bind_address.is_empty());
+        assert!(!cfg.memory.projection_enabled);
+    }
+
+    /// Without `--team` nothing changes (plain `ibis serve` = `ibis run`).
+    #[test]
+    fn profile_is_a_noop_without_the_team_flag() {
+        let flags = parse(&["--port", "3031"]);
+        assert!(!flags.team);
+        let mut cfg = Config::default();
+        apply_team_profile(&mut cfg, flags.team);
+        assert!(cfg.runtime_mode.is_empty());
+        assert!(cfg.bind_address.is_empty());
+        assert!(!cfg.memory.projection_enabled);
     }
 }
 

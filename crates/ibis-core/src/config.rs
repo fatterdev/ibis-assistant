@@ -1135,6 +1135,16 @@ pub fn new_default_config() -> Config {
     Config::load()
 }
 
+/// Explicit `memory.projection_enabled` choice in the loaded config file, if
+/// any. Profile defaults (the `--team` serve profile) must not override an
+/// operator's explicit `false`; `None` means the key is absent (or the file
+/// is unreadable/unparseable), so the profile default applies.
+pub fn projection_explicitly_set(config_path: &str) -> Option<bool> {
+    let contents = std::fs::read_to_string(config_path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&contents).ok()?;
+    value.get("memory")?.get("projection_enabled")?.as_bool()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1179,6 +1189,20 @@ mod tests {
                 .unwrap();
         assert!(cfg.memory.projection_enabled);
         assert_eq!(cfg.memory.git_store.personal_claims, "in_repo");
+    }
+
+    #[test]
+    fn projection_explicitly_set_reads_only_the_file_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.json");
+        std::fs::write(&path, r#"{"port": 4040}"#).unwrap();
+        assert_eq!(projection_explicitly_set(path.to_str().unwrap()), None);
+        std::fs::write(&path, r#"{"memory": {"projection_enabled": false}}"#).unwrap();
+        assert_eq!(
+            projection_explicitly_set(path.to_str().unwrap()),
+            Some(false)
+        );
+        assert_eq!(projection_explicitly_set(""), None);
     }
 
     #[test]
