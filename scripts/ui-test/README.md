@@ -15,7 +15,7 @@ not in the runner.
   Settings (UI-TARS / VolcEngine Doubao / any OpenAI-compatible VLM) — the app
   ships without a model.
 - VS Code 1.144+ with the built VSIX
-  (`vscode-extension/ibis-assistant-1.0.0.vsix`, built by `npm run package`).
+  (`vscode-extension/ibis-assistant-1.0.1.vsix`, built by `npm run package`).
 - For R3.3/R3.4 checks: `ibis` binary + Ollama with an embedding model
   (semantic `memory_search`).
 - For P4.*: the plugin installed from source (`Chat: Install Plugin from

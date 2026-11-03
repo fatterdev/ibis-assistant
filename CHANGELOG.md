@@ -4,6 +4,24 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(vsix): 1.0.1 — memory tree parent count + refresh feedback** - the
+  memory tree parent (a kind or the search root) now shows a **count of the
+  loaded entries** as its description (`N+` when the fetch hits the list
+  cap); the parent row re-renders only when the count label actually changes
+  (convergent fire guard — an unconditional element-scoped fire from
+  `getChildren` would refetch an expanded node forever). The view-title
+  refresh button shows a **spinner in the view title** while the re-fetch
+  cycle runs (before: the refetch happened silently and looked like a dead
+  button). Debug builds iterated as `1.1.0→1.1.2` with throwaway timing
+  instrumentation during the S1.3 session; the instrumentation is removed in
+  this build and the debug-build numbering moves to patch bumps (`1.0.x`),
+  keeping `1.1.0` reserved for F4. Supporting artifacts for the R3.3 closure:
+  `scripts/seed-memory-r33.mjs` (seeds 3 team memories into the real plugin
+  data dir through the same spawn contract the VSIX uses and times
+  `memory_search` AND `memory_list` — the phrase-B call shape), the
+  failure-first owner runbook
+  `docs/planning/2026-11-03-r33-closure-runbook.md` and the S1.3 timing
+  analysis `docs/planning/2026-11-03-s13-timing-analysis.md`.
 - **feat(ide-host): persistent stdio MCP sessions for the VSIX** - every
   spawn-mode tool call paid a full child boot (workspace bind + embedded
   SurrealDB sidecar) and tore it down right after the reply, so each tree

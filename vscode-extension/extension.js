@@ -196,7 +196,7 @@ async function activate(context) {
   );
 
   logLine(
-    `activated (ide-host: ${host.source}, engine: ${vscode.version}); run "Ibis Assistant: Status" for the effective backend`,
+    `activated (ide-host: ${host.source}, engine: ${vscode.version}, ibis: ${context.extension.packageJSON.version}); run "Ibis Assistant: Status" for the effective backend`,
   );
   logVerbose(
     cfg,

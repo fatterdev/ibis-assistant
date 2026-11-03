@@ -21,6 +21,25 @@ const MEMORY_KINDS = [
 ];
 
 const SEARCH_LIMIT = 50;
+const KIND_LIMIT = 100;
+
+/**
+ * @param {string} query
+ * @returns {string}
+ */
+function searchKey(query) {
+  return `search:${query}`;
+}
+
+/**
+ * Renders the parent-count badge: a plain number, `N+` when the fetch hit
+ * the limit cap (more entries exist than loaded).
+ * @param {{ n: number, capped: boolean }} count
+ * @returns {string}
+ */
+function countLabel({ n, capped }) {
+  return capped ? `${n}+` : String(n);
+}
 
 /**
  * @param {string} text
@@ -110,12 +129,37 @@ class MemoryTreeDataProvider {
     this.api = api;
     this.host = host;
     this.searchQuery = "";
+    /** Loaded-entry count per tree parent (kind or search): { n, capped }. */
+    this.counts = new Map();
+    /** Last count label rendered per parent — the convergent fire guard. */
+    this.renderedCounts = new Map();
     this._onDidChangeTreeData = new vscode.EventEmitter();
     this.onDidChangeTreeData = this._onDidChangeTreeData.event;
   }
 
   refresh() {
     this._onDidChangeTreeData.fire();
+  }
+
+  /**
+   * Re-renders one parent row only when its count label actually changed.
+   * Firing unconditionally from `getChildren` would loop: an element-scoped
+   * fire re-requests the children of an expanded element, whose fetch fires
+   * again. Firing on label change converges (next fetch renders the same
+   * label → no fire).
+   * @param {MemoryNode} element
+   * @param {string} key
+   */
+  announceCount(element, key) {
+    const count = this.counts.get(key);
+    const label = count ? countLabel(count) : "";
+    if (this.renderedCounts.get(key) === label) {
+      element.item.description = label || undefined;
+      return;
+    }
+    this.renderedCounts.set(key, label);
+    element.item.description = label || undefined;
+    this._onDidChangeTreeData.fire(element);
   }
 
   /**
@@ -132,19 +176,21 @@ class MemoryTreeDataProvider {
    */
   async getChildren(element) {
     if (!element) {
-      const roots = MEMORY_KINDS.map(
-        (k) =>
-          new MemoryNode(
-            k.kind,
-            {
-              collapsible: vscode.TreeItemCollapsibleState.Collapsed,
-              icon: k.icon,
-              contextValue: "ibisMemoryKind",
-            },
-            { type: "kind", kind: k.kind, icon: k.icon },
-          ),
-      );
+      const roots = MEMORY_KINDS.map((k) => {
+        const count = this.counts.get(k.kind);
+        return new MemoryNode(
+          k.kind,
+          {
+            collapsible: vscode.TreeItemCollapsibleState.Collapsed,
+            icon: k.icon,
+            contextValue: "ibisMemoryKind",
+            description: count ? countLabel(count) : undefined,
+          },
+          { type: "kind", kind: k.kind, icon: k.icon },
+        );
+      });
       if (this.searchQuery) {
+        const count = this.counts.get(searchKey(this.searchQuery));
         roots.push(
           new MemoryNode(
             `search: "${this.searchQuery}"`,
@@ -152,7 +198,7 @@ class MemoryTreeDataProvider {
               collapsible: vscode.TreeItemCollapsibleState.Collapsed,
               icon: "search",
               contextValue: "ibisMemorySearch",
-              description: "search results",
+              description: count ? countLabel(count) : "search results",
             },
             { type: "search", query: this.searchQuery },
           ),
@@ -165,6 +211,13 @@ class MemoryTreeDataProvider {
     if (type === "kind" || type === "search") {
       try {
         const entries = await this.fetchEntries(type === "kind" ? kind : query, type === "kind" ? kind : "");
+        // The tree parent carries a visible count of the loaded entries
+        // (owner request 03/11): re-render the row only when the label
+        // changed (see announceCount — no unconditional fire here, it loops).
+        const key = type === "kind" ? kind : searchKey(query);
+        const capped = entries.length >= (type === "kind" ? KIND_LIMIT : SEARCH_LIMIT);
+        this.counts.set(key, { n: entries.length, capped });
+        this.announceCount(element, key);
         if (entries.length === 0) {
           return [
             new MemoryNode("no memories found", {
@@ -198,7 +251,7 @@ class MemoryTreeDataProvider {
     const cfg = this.api.getConfig();
     const backend = await this.api.resolveBackend(this.host, cfg);
     const text = kind
-      ? await this.host.callMcpTool(backend, "memory_list", { kind, limit: 100 })
+      ? await this.host.callMcpTool(backend, "memory_list", { kind, limit: KIND_LIMIT })
       : await this.host.callMcpTool(backend, "memory_search", { query, limit: SEARCH_LIMIT });
     return parseMemoryArray(text);
   }
@@ -352,7 +405,18 @@ function registerMemoryTree(context, api, host) {
   });
   context.subscriptions.push(
     treeView,
-    vscode.commands.registerCommand("ibis.memory.refresh", () => provider.refresh()),
+    vscode.commands.registerCommand("ibis.memory.refresh", async () => {
+      // Visible feedback (owner request 03/11): a spinner in the view title
+      // while the re-fetch cycle runs — the fire() → getChildren work happens
+      // inside VS Code's render, so the wait is a bounded grace period.
+      await vscode.window.withProgress(
+        { location: { viewId: "ibis.memoryExplorer" }, title: "Ibis: refreshing memory…" },
+        async () => {
+          provider.refresh();
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        },
+      );
+    }),
     vscode.commands.registerCommand("ibis.memory.search", async () => {
       const query = await vscode.window.showInputBox({
         title: "Ibis Assistant: Search Memory",
