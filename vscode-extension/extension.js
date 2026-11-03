@@ -128,6 +128,7 @@ async function activate(context) {
     { getConfig, resolveBackend, logLine, kinds: REMEMBER_KINDS },
     host,
   );
+  prewarmRuntime(host, cfg);
 
   context.subscriptions.push(
     vscode.commands.registerCommand("ibis.openSettings", async () => {
@@ -304,6 +305,39 @@ async function resolveBackend(host, cfg) {
   }
   logVerbose(cfg, `backend: spawn ${backend.command} ${backend.args.join(" ")}`);
   return backend;
+}
+
+/**
+ * Pay the plugin boot at activation instead of on the first tree
+ * interaction (S1.3 cold target): fire-and-forget spawn of the persistent
+ * session child — MCP handshake + one cheap read-only call — so the
+ * SurrealDB sidecar boot (1.4–4.9s, up to ~17s with Ollama down) is paid
+ * during VS Code startup. The first real interaction reuses this warm
+ * session; a failure only means the boot is paid later, transparently.
+ * @param {Awaited<ReturnType<typeof loadIdeHost>>} host
+ * @param {vscode.WorkspaceConfiguration} cfg
+ */
+function prewarmRuntime(host, cfg) {
+  resolveBackend(host, cfg)
+    .then((backend) => {
+      if (backend.mode !== "spawn") {
+        return;
+      }
+      const started = Date.now();
+      host
+        .callMcpTool(backend, "ticket_get_capabilities", {})
+        .then(() =>
+          logLine(
+            `pre-warm: runtime session ready in ${Date.now() - started}ms (boot paid at activation)`,
+          ),
+        )
+        .catch((err) =>
+          logLine(
+            `pre-warm failed after ${Date.now() - started}ms: ${err && err.message ? err.message : err}`,
+          ),
+        );
+    })
+    .catch((err) => logLine(`pre-warm skipped: ${err && err.message ? err.message : err}`));
 }
 
 /**

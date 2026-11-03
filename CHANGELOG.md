@@ -4,6 +4,16 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(vsix): 1.0.2 — runtime pre-warm at activation** - `activate()` now
+  fires a fire-and-forget pre-warm: the persistent ide-host session child is
+  spawned, the MCP handshake paid, and one cheap read-only call
+  (`ticket_get_capabilities`) issued while VS Code starts up, so the plugin
+  boot tax (SurrealDB sidecar 1–4s + checks + probes; up to ~17s with Ollama
+  down) no longer lands on the first memory-tree interaction (S1.3 cold
+  target, owner decision 03/11: option 1). Evidence lands in the Output
+  channel (`pre-warm: runtime session ready in Nms`); the first real
+  interaction reuses the same warm session (same backend identity).
+
 - **feat(search): RRF channel fusion behind `search.fusion` (A2 ddofds)** -
   `ask_project` merges the four channels by per-channel rank with Reciprocal
   Rank Fusion (`rrf_fuse`, k=60, cross-channel contributions sum) instead of
