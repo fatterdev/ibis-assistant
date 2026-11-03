@@ -2,6 +2,7 @@ const vscode = require("vscode");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { spawn } = require("node:child_process");
 
 const { registerMemoryTree } = require("./memory-tree");
 const { registerRememberSelection } = require("./remember-selection");
@@ -148,7 +149,9 @@ async function activate(context) {
 
   const cfg = getConfig();
   bindHostDispose(host);
-  if (!configuredAttach(cfg, host).attach) {
+  // The VSIX spawns a plugin child only in explicit `spawn` mode now; the
+  // dual-child warning targets that spawn + daemon/plugin combination.
+  if (resolveBackendSelection(cfg, host).mode === "spawn") {
     host.warnDualPluginChildren();
   }
 
@@ -186,8 +189,35 @@ async function activate(context) {
     }),
     vscode.commands.registerCommand("ibis.status", async () => {
       const live = getConfig();
+      const selection = resolveBackendSelection(live, host);
+      if (
+        selection.mode === "daemon" &&
+        !(await probeReachable(selection.url, probeTimeoutMs(live)))
+      ) {
+        const pick = await vscode.window.showErrorMessage(
+          `Ibis personal daemon offline (${selection.url})`,
+          "Start Daemon",
+          "Details",
+        );
+        if (pick === "Start Daemon") {
+          await startDaemon(host, live);
+          return;
+        }
+        if (pick !== "Details") {
+          return;
+        }
+      }
       const message = await buildStatus(host, live);
       await reportStatus(live, message);
+    }),
+    vscode.commands.registerCommand("ibis.startDaemon", async () => {
+      try {
+        await startDaemon(host, getConfig());
+      } catch (err) {
+        vscode.window.showErrorMessage(
+          `Ibis Start Daemon failed: ${err && err.message ? err.message : err}`,
+        );
+      }
     }),
     vscode.commands.registerCommand("ibis.remember", async () => {
       try {
@@ -242,24 +272,30 @@ async function activate(context) {
 }
 
 /**
- * Attach decision without probing: explicit `attach` mode, or `IBIS_MCP_URL`
- * while `ibis.runtime.mode` was never set explicitly.
+ * Backend selection without probing (F4 §A.1):
+ * - `daemon` (runtime.mode `auto`, the default): attach to the always-on
+ *   personal daemon — `IBIS_MCP_URL` overrides the endpoint, else the
+ *   explicit `runtime.mcpUrl`, else `DEFAULT_MCP_URL`.
+ * - `attach`: explicit endpoint pin via `runtime.mcpUrl`/`IBIS_MCP_URL`.
+ * - `spawn`: legacy isolated child (explicit selection only, bit-for-bit).
  * @param {vscode.WorkspaceConfiguration} cfg
  * @param {{ DEFAULT_MCP_URL: string }} host
+ * @returns {{ mode: "daemon" | "attach" | "spawn", url: string }}
  */
-function configuredAttach(cfg, host) {
-  const mode = cfg.get("runtime.mode", "spawn");
-  const envUrl = (process.env.IBIS_MCP_URL || "").trim();
-  if (mode === "attach") {
-    const url = String(
-      settingOrEnv(cfg, "runtime.mcpUrl", "IBIS_MCP_URL", "") || host.DEFAULT_MCP_URL,
-    ).trim();
-    return { attach: true, url: url || host.DEFAULT_MCP_URL };
+function resolveBackendSelection(cfg, host) {
+  const mode = cfg.get("runtime.mode", "auto");
+  if (mode === "spawn") {
+    return { mode: "spawn", url: "" };
   }
-  if (!isExplicitlyConfigured(cfg, "runtime.mode") && envUrl) {
-    return { attach: true, url: envUrl };
-  }
-  return { attach: false, url: "" };
+  const url = String(
+    settingOrEnv(cfg, "runtime.mcpUrl", "IBIS_MCP_URL", "") || host.DEFAULT_MCP_URL,
+  ).trim();
+  return { mode: mode === "attach" ? "attach" : "daemon", url: url || host.DEFAULT_MCP_URL };
+}
+
+/** Probe timeout shared by daemon/auto-attach/settings checks. */
+function probeTimeoutMs(cfg) {
+  return cfg.get("settings.probeTimeoutMs", 800);
 }
 
 /**
@@ -268,7 +304,14 @@ function configuredAttach(cfg, host) {
  */
 async function probeReachable(url, timeoutMs) {
   try {
-    await fetch(url, { method: "GET", signal: AbortSignal.timeout(timeoutMs) });
+    const res = await fetch(url, { method: "GET", signal: AbortSignal.timeout(timeoutMs) });
+    // The MCP endpoint may answer GET with an open SSE stream: drop the body
+    // right away so repeated probes never leak connections.
+    try {
+      await res.body?.cancel();
+    } catch {
+      /* already closed */
+    }
     return true;
   } catch {
     return false;
@@ -311,16 +354,15 @@ function buildSpawnEnv(cfg) {
  * @returns {Promise<{ mode: "spawn"; command: string; args: string[]; env: NodeJS.ProcessEnv } | { mode: "http"; url: string }>}
  */
 async function resolveBackend(host, cfg) {
-  const attach = configuredAttach(cfg, host);
-  if (attach.attach) {
-    logVerbose(cfg, `backend: attach ${attach.url}`);
-    return { mode: "http", url: attach.url };
+  const selection = resolveBackendSelection(cfg, host);
+  if (selection.mode !== "spawn") {
+    logVerbose(cfg, `backend: ${selection.mode} ${selection.url}`);
+    return { mode: "http", url: selection.url };
   }
 
   if (cfg.get("runtime.autoAttach", false)) {
-    const timeoutMs = cfg.get("settings.probeTimeoutMs", 800);
     for (const url of cfg.get("runtime.autoAttachProbeUrls", []) || []) {
-      if (await probeReachable(url, timeoutMs)) {
+      if (await probeReachable(url, probeTimeoutMs(cfg))) {
         logVerbose(cfg, `backend: auto-attach ${url} (reachable)`);
         return { mode: "http", url };
       }
@@ -375,6 +417,112 @@ function prewarmRuntime(host, cfg) {
         );
     })
     .catch((err) => logLine(`pre-warm skipped: ${err && err.message ? err.message : err}`));
+}
+
+/**
+ * One-shot child run with captured output (used for `ibis start`); resolves
+ * with `code: null` on spawn error or timeout.
+ * @param {string} binary
+ * @param {string[]} args
+ * @param {NodeJS.ProcessEnv} env
+ * @param {number} timeoutMs
+ * @returns {Promise<{ code: number | null, output: string }>}
+ */
+function runOneShot(binary, args, env, timeoutMs) {
+  return new Promise((resolve) => {
+    /** @type {string[]} */
+    const chunks = [];
+    let settled = false;
+    const child = spawn(binary, args, {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    const finish = (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      resolve({ code, output: chunks.join("").trim() });
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        /* ignore */
+      }
+      finish(null);
+    }, timeoutMs);
+    child.stdout?.on("data", (chunk) => chunks.push(String(chunk)));
+    child.stderr?.on("data", (chunk) => chunks.push(String(chunk)));
+    child.on("error", (err) => {
+      chunks.push(String(err && err.message ? err.message : err));
+      finish(null);
+    });
+    child.on("exit", (code) => finish(code));
+  });
+}
+
+/**
+ * Start the personal daemon: one-shot `<binary> start` — the runtime's own
+ * PID-file daemon verb, which spawns `ibis run` detached (stdout/stderr to
+ * server.log next to the binary) so the daemon outlives VS Code — then
+ * re-probe the MCP endpoint. If the host job refuses the breakaway or the
+ * daemon never comes up, fall back to instructing a manual start.
+ * @param {Awaited<ReturnType<typeof loadIdeHost>>} host
+ * @param {vscode.WorkspaceConfiguration} cfg
+ */
+async function startDaemon(host, cfg) {
+  const selection = resolveBackendSelection(cfg, host);
+  const url = selection.mode === "spawn" ? host.DEFAULT_MCP_URL : selection.url;
+  const binary =
+    String(settingOrEnv(cfg, "runtime.binaryPath", "IBIS_BIN", "ibis")).trim() || "ibis";
+
+  const report = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `Ibis: starting personal daemon ("${binary} start")…`,
+    },
+    async () => {
+      logLine(`start daemon: spawning "${binary} start" (daemon endpoint ${url})`);
+      const res = await runOneShot(binary, ["start"], buildSpawnEnv(cfg), 20_000);
+      if (res.output) {
+        logLine(
+          `start daemon: exit=${res.code === null ? "error/timeout" : res.code} — ${
+            res.output.replace(/\s+/g, " ").slice(0, 400)
+          }`,
+        );
+      }
+      if (res.code === null) {
+        return {
+          ok: false,
+          detail: `"${binary} start" failed to run (${res.output || "spawn error or timeout"})`,
+        };
+      }
+      // The PID file lands immediately, but the daemon boots its SurrealDB
+      // sidecar before the MCP endpoint answers: re-probe for up to ~15s.
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        if (await probeReachable(url, probeTimeoutMs(cfg))) {
+          return { ok: true, detail: res.output };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      return { ok: false, detail: res.output || `endpoint ${url} never answered` };
+    },
+  );
+
+  await refreshStatusBar(host);
+  if (report.ok) {
+    logLine(`start daemon: reachable at ${url}`);
+    await vscode.window.showInformationMessage(`Ibis personal daemon started (${url})`);
+  } else {
+    logLine(`start daemon failed: ${report.detail}`);
+    await vscode.window.showErrorMessage(
+      `Ibis daemon still offline: ${report.detail}. Start it manually: "${binary} start" or "${binary} run" in a terminal.`,
+    );
+  }
 }
 
 /**
@@ -607,6 +755,8 @@ function createStatusBarItem(context, host) {
 
 /**
  * Re-render the status bar from live settings and current bridge/provider state.
+ * Daemon mode probes the endpoint: reachable renders as `Ibis attach`,
+ * unreachable as `$(error) Ibis daemon offline` (F4 §A.1).
  * @param {Awaited<ReturnType<typeof loadIdeHost>>} host
  */
 async function refreshStatusBar(host) {
@@ -614,6 +764,16 @@ async function refreshStatusBar(host) {
     return;
   }
   const cfg = getConfig();
+  const selection = resolveBackendSelection(cfg, host);
+  if (selection.mode === "daemon") {
+    const reachable = await probeReachable(selection.url, probeTimeoutMs(cfg));
+    if (!reachable) {
+      statusBarItem.text = `$(error) Ibis daemon offline`;
+      statusBarItem.tooltip = `Personal daemon unreachable at ${selection.url}.\nClick for details; run "Ibis Assistant: Start Daemon".`;
+      statusBarItem.show();
+      return;
+    }
+  }
   let backend;
   try {
     backend = await resolveBackend(host, cfg);
@@ -642,16 +802,27 @@ async function refreshStatusBar(host) {
  * @param {vscode.WorkspaceConfiguration} cfg
  */
 async function buildStatus(host, cfg) {
-  const backend = await resolveBackend(host, cfg);
   const lines = [];
-  if (backend.mode === "http") {
-    lines.push(`Backend: attach ${backend.url} (shared runtime)`);
+  const selection = resolveBackendSelection(cfg, host);
+  if (selection.mode === "daemon") {
+    const reachable = await probeReachable(selection.url, probeTimeoutMs(cfg));
+    lines.push(
+      reachable
+        ? `Personal daemon: reachable at ${selection.url} (shared runtime)`
+        : `Personal daemon: OFFLINE at ${selection.url} — run "Ibis Assistant: Start Daemon" (or "ibis start" / "ibis run" in a terminal)`,
+    );
+    lines.push("Daemon lifecycle: ibis start / ibis stop (background, PID file, server.log)");
   } else {
-    lines.push(`Backend: spawn ${backend.command} (isolated child)`);
-    lines.push(`Runtime args: ${backend.args.join(" ")}`);
+    const backend = await resolveBackend(host, cfg);
+    if (backend.mode === "http") {
+      lines.push(`Backend: attach ${backend.url} (shared runtime)`);
+    } else {
+      lines.push(`Backend: spawn ${backend.command} (isolated child)`);
+      lines.push(`Runtime args: ${backend.args.join(" ")}`);
+    }
+    lines.push(`Plugin data dir: ${(backend.mode === "spawn" && backend.env.IBIS_DATA_DIR) || "default"}`);
+    lines.push(`Workspace: ${(backend.mode === "spawn" && backend.env.IBIS_WORKSPACE) || "not bound"}`);
   }
-  lines.push(`Plugin data dir: ${(backend.mode === "spawn" && backend.env.IBIS_DATA_DIR) || "default"}`);
-  lines.push(`Workspace: ${(backend.mode === "spawn" && backend.env.IBIS_WORKSPACE) || "not bound"}`);
   if (!cfg.get("lmBridge.enabled", true)) {
     lines.push("IDE LM bridge: disabled (ibis.lmBridge.enabled)");
   } else {

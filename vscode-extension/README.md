@@ -6,7 +6,7 @@
 
 **Living project memory over MCP.** Ibis turns a real codebase — Git history, polyglot AST structure, logs, tickets and PRs — into a queryable knowledge graph in SurrealDB, then keeps team decisions and session state on that same graph.
 
-This extension is the VS Code packaging: it spawns an isolated Ibis Assistant stdio child or attaches to a shared personal runtime, registers the MCP server for VS Code agent mode, and bridges IDE-provided language models back to the runtime.
+This extension is the VS Code packaging: it attaches to the always-on Ibis Assistant personal daemon by default (spawning an isolated stdio child only when explicitly configured), registers the MCP server for VS Code agent mode, and bridges IDE-provided language models back to the runtime.
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/fatterdev/ibis-assistant/blob/main/LICENSE)
 [![VS Code](https://img.shields.io/badge/VS%20Code-%E2%89%A51.144-007ACC.svg)](https://code.visualstudio.com/)
@@ -14,8 +14,9 @@ This extension is the VS Code packaging: it spawns an isolated Ibis Assistant st
 
 ## What you get
 
-- **MCP server provider** — VS Code's MCP integration (`registerMcpServerDefinitionProvider`) starts `ibis -mode stdio -runtime-mode plugin` automatically, or attaches to a shared runtime over Streamable HTTP.
-- **Status bar item** — shows the effective backend (spawn/attach) plus LM-bridge and MCP-provider indicators; click it to run **Ibis Assistant: Status**.
+- **MCP server provider** — VS Code's MCP integration (`registerMcpServerDefinitionProvider`) attaches to the personal daemon over Streamable HTTP by default, or spawns `ibis -mode stdio -runtime-mode plugin` when `ibis.runtime.mode=spawn` is selected.
+- **Status bar item** — shows the effective backend (attach/offline/spawn) plus LM-bridge and MCP-provider indicators; click it to run **Ibis Assistant: Status**, which offers **Start Daemon** when the personal daemon is unreachable.
+- **Start Daemon** — **Ibis Assistant: Start Daemon** launches `ibis start` detached (the daemon outlives VS Code) and re-probes the endpoint until the MCP server answers.
 - **Memory tree view** — activity-bar view browses typed memory by kind via MCP `memory_search`, with semantic search, refresh, and a read-only detail editor (MCP `memory_expand`).
 - **Remember with provenance** — **Ibis Assistant: Remember Selection** (editor context menu) captures the selection plus `file:start-end` range, and **Ibis Assistant: Remember File** (editor/Explorer context menu) captures a fact about a whole file; both bind `memory_add` to the source file via `source_path` + sha256 `source_hash`, so they go stale when the file changes.
 - **Session contract for agents** — the `ibis-session-contract` chat instruction (attach it in chat via *Add Instructions*) teaches agent sessions the tool selection map and memory hygiene; the **Get Started** walkthrough covers onboarding.
@@ -38,7 +39,7 @@ Local VSIX (recommended while the Marketplace publishing is pending):
 cd vscode-extension
 npm install
 npx --yes @vscode/vsce package --no-dependencies
-code --install-extension .\ibis-assistant-1.0.11.vsix
+code --install-extension .\ibis-assistant-1.0.12.vsix
 ```
 
 For iterative development open this folder in an **Extension Development Host** (`F5`) instead of `code --install-extension` on the source directory (that CLI only accepts an extension id or a `.vsix` file).
@@ -46,18 +47,15 @@ For iterative development open this folder in an **Extension Development Host** 
 ## Quick start
 
 1. Put `ibis` on `PATH` (Windows: `ibis.exe`) and run it once so the wizard writes `config.json` (`config fast`, or `config full` for DB/SMTP/ticketing).
-2. Reload VS Code. The extension starts an isolated plugin child bound to the opened folder and registers the Ibis Assistant MCP server.
+2. Reload VS Code. The extension attaches to the personal daemon on `127.0.0.1:3030` — when it is offline the status bar shows **Ibis daemon offline**; run **Ibis Assistant: Start Daemon** (or `ibis start` in a terminal) once and it stays up across windows and restarts.
 3. Ask your agent about the repo, or call `init_project` once in a Git checkout.
-4. Optional — share **one** brain between Cursor and VS Code:
+4. Optional — share the same daemon with Cursor, or pin a custom endpoint:
 
    ```powershell
-   ibis run                        # personal daemon on 127.0.0.1:3030
-   # then set in VS Code settings:
-   #   ibis.runtime.mode = attach
-   #   ibis.runtime.mcpUrl = http://127.0.0.1:3030/mcp
+   ibis start                        # personal daemon on 127.0.0.1:3030 (detached; ibis stop to halt)
+   # Cursor and VS Code both attach to http://127.0.0.1:3030/mcp by default;
+   # a custom endpoint goes in ibis.runtime.mcpUrl (or IBIS_MCP_URL).
    ```
-
-   Equivalently, set the `IBIS_MCP_URL` environment variable while leaving `ibis.runtime.mode` at its default `spawn`.
 
 ## Commands
 
@@ -66,7 +64,8 @@ For iterative development open this folder in an **Extension Development Host** 
 | **Ibis Assistant: Open Settings** | Opens the Ibis browser Settings UI (hybrid AI, cloud keys, local models, paths, Memory browser). Probes personal HTTP first, then MCP `settings_open_ui`. |
 | **Ibis Assistant: Open Extension Settings (VS Code)** | Opens VS Code Settings filtered to this extension (`@ext:fatterdev.ibis-assistant`). |
 | **Ibis Assistant: Show Output** | Reveals the Ibis Assistant output channel with activation and status logs. |
-| **Ibis Assistant: Status** | Reports the effective backend (spawn vs attach), plugin data dir, bound workspace, LM bridge, and memory defaults. Output destination follows `ibis.status.outputMode`. |
+| **Ibis Assistant: Status** | Reports the daemon state (reachable/offline + endpoint) or the effective backend (attach vs spawn), plugin data dir, bound workspace, LM bridge, and memory defaults. Offers **Start Daemon** when the daemon is offline. Output destination follows `ibis.status.outputMode`. |
+| **Ibis Assistant: Start Daemon** | Launches `ibis start` detached and re-probes the MCP endpoint until it answers (manual-start hint on failure). |
 | **Ibis Assistant: Remember** | Typed durable memory (`memory_add`) with kind quick pick and configurable default kind/visibility. |
 | **Ibis Assistant: Set working state** | Branch/session scratchpad (`set_working_state`), optionally with the workspace folder as project name. |
 
@@ -78,14 +77,14 @@ All settings live under `ibis.*` in VS Code Settings. Precedence is **explicit V
 
 | Setting | Default | Description | Env equivalent |
 |---------|---------|-------------|----------------|
-| `ibis.runtime.mode` | `spawn` | `spawn` an isolated `ibis -mode stdio -runtime-mode plugin` child, or `attach` to a shared Streamable HTTP runtime. | — |
-| `ibis.runtime.mcpUrl` | `http://127.0.0.1:3030/mcp` | Endpoint used when mode is `attach`. | `IBIS_MCP_URL` (honored while mode is untouched) |
-| `ibis.runtime.binaryPath` | `ibis` | Command or absolute path of the binary used when spawning. | `IBIS_BIN` |
+| `ibis.runtime.mode` | `auto` | `auto` attaches to the always-on personal daemon (offline state + **Start Daemon**), `spawn` keeps the isolated `ibis -mode stdio -runtime-mode plugin` child, `attach` pins the endpoint below without the daemon UX. | — |
+| `ibis.runtime.mcpUrl` | `http://127.0.0.1:3030/mcp` | Daemon endpoint used when mode is `auto` or `attach`. | `IBIS_MCP_URL` (honored while `mcpUrl` is untouched) |
+| `ibis.runtime.binaryPath` | `ibis` | Command or absolute path of the binary used when spawning and by **Start Daemon**. | `IBIS_BIN` |
 | `ibis.runtime.dataDir` | *(empty)* | Overrides the plugin data directory (default `%LOCALAPPDATA%\ibis\plugin` or platform equivalent). | `IBIS_DATA_DIR` |
 | `ibis.runtime.runtimeMode` | `plugin` | Passed to `-runtime-mode`. Keep `plugin` for IDE-owned children. | `RUNTIME_MODE` (forced for the child) |
 | `ibis.runtime.extraArgs` | `[]` | Extra CLI arguments appended after the standard spawn arguments. | — |
 | `ibis.runtime.workspaceOverride` | *(empty)* | Explicit opened-folder path; empty auto-detects the first workspace folder. | `IBIS_WORKSPACE` |
-| `ibis.runtime.autoAttach` | `false` | Probe the URLs below and attach to a reachable personal runtime instead of spawning. | — |
+| `ibis.runtime.autoAttach` | `false` | Only in explicit `spawn` mode: probe the URLs below and attach to a reachable personal runtime instead of spawning. | — |
 | `ibis.runtime.autoAttachProbeUrls` | `["http://127.0.0.1:3030/mcp", "http://127.0.0.1:3031/mcp"]` | Loopback MCP endpoints probed in order when auto-attach is on. | — |
 
 ### MCP and LM bridge
@@ -120,8 +119,8 @@ All settings live under `ibis.*` in VS Code Settings. Precedence is **explicit V
 
 The extension contributes the `ibis` MCP server-definition provider. On VS Code 1.144+ the server appears in the MCP servers list and is started on demand in agent mode. The definition is recomputed from live settings on every request, so changes to runtime settings apply to the next session without a reload (LM bridge port and provider registration need a window reload).
 
-- **Spawn (default):** VS Code runs `ibis -mode stdio -runtime-mode plugin` with `RUNTIME_MODE=plugin` and the resolved `IBIS_*` environment.
-- **Attach:** VS Code connects to `ibis.runtime.mcpUrl` (Streamable HTTP, e.g. the personal daemon's `/mcp`).
+- **Attach (default `auto` + explicit `attach`):** VS Code connects to the personal daemon endpoint (Streamable HTTP, default `http://127.0.0.1:3030/mcp`); the MCP definition advertises the HTTP server to agent mode.
+- **Spawn (explicit `spawn`):** VS Code runs `ibis -mode stdio -runtime-mode plugin` with `RUNTIME_MODE=plugin` and the resolved `IBIS_*` environment.
 
 ## IDE LM bridge
 
@@ -137,9 +136,10 @@ When enabled, the extension registers a `vscode.lm` handler and listens on `127.
 
 | Setup | Unique process / DB? |
 |-------|----------------------|
-| VS Code only, default spawn | **Yes** — one stdio child, plugin data dir |
-| Cursor plugin + VS Code, both default spawn | **No** — two children; never share one SurrealDB silently |
-| Both attach to a personal daemon (`ibis run` + `ibis.runtime.mode=attach`) | **Yes** — one personal daemon, the recommended shared setup |
+| VS Code only, default `auto` | **Yes** — one personal daemon (start it with **Start Daemon** / `ibis start` if offline) |
+| Cursor plugin + VS Code, both default `auto` | **Yes** — both attach to the same personal daemon (Cursor via its http variant / `IBIS_MCP_URL`) |
+| Explicit spawn + agent plugin child | **No** — two children; never share one SurrealDB silently — switch the plugin `mcp.json` to the http variant (team setup, [docs/team_server.md](https://github.com/fatterdev/ibis-assistant/blob/main/docs/team_server.md)) |
+| Both attach to a personal daemon (`ibis run`/`ibis start` + `attach` mode) | **Yes** — one personal daemon, the recommended shared setup |
 
 See [docs/runtime_modes.md](https://github.com/fatterdev/ibis-assistant/blob/main/docs/runtime_modes.md) and [docs/ide_host_and_lm_bridge.md](https://github.com/fatterdev/ibis-assistant/blob/main/docs/ide_host_and_lm_bridge.md).
 
@@ -152,10 +152,11 @@ Memory is sharing-first, stored in the SurrealDB owned by the attached runtime: 
 | Symptom | Fix |
 |---------|-----|
 | `ibis is not recognized` / spawn fails | Put the binary on `PATH`, or set an absolute `ibis.runtime.binaryPath`. The binary is spawned without the repo as cwd. |
+| Status bar shows **Ibis daemon offline** | Run **Ibis Assistant: Start Daemon** (or `ibis start` / `ibis run` in a terminal); adjust `ibis.runtime.mcpUrl` for non-default ports. |
 | No Ibis MCP server in agent mode | Requires VS Code 1.144+; check **Ibis Assistant: Status** (`MCP provider: registered`) and reload after changing `ibis.mcp.registerProvider`. |
 | `LM bridge not started` in the output channel | `vscode.lm` is unavailable, `ibis.lmBridge.enabled` is off, or the port is busy — change `ibis.lmBridge.port` and reload. |
-| **Ibis Assistant: Open Settings** cannot reach the UI | Start a personal daemon (`ibis run`) or let it fall back to the ephemeral loopback URL from `settings_open_ui`; adjust `ibis.settings.probeUrls` for non-default ports. |
-| Two IDEs, memories not shared | Attach both to one personal daemon (`ibis.runtime.mode=attach` + `ibis run`); do not point two plugin children at one SurrealDB. |
+| **Ibis Assistant: Open Settings** cannot reach the UI | Start the personal daemon (**Start Daemon** or `ibis run`) or let it fall back to the ephemeral loopback URL from `settings_open_ui`; adjust `ibis.settings.probeUrls` for non-default ports. |
+| Two IDEs, memories not shared | Attach both to one personal daemon (default `auto` + `ibis start`); do not point two plugin children at one SurrealDB. |
 
 ## Documentation
 

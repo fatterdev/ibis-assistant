@@ -2,7 +2,7 @@
   "name": "ibis-assistant",
   "displayName": "Ibis Assistant",
   "description": "Living project memory over MCP for VS Code. Spawns an isolated Ibis Assistant (Rust) stdio child or attaches to a shared personal runtime for graph, logs, tickets, and typed memory.",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "publisher": "fatterdev",
   "license": "Apache-2.0",
   "icon": "assets/icon.png",
@@ -55,6 +55,10 @@
       {
         "command": "ibis.status",
         "title": "Ibis Assistant: Status"
+      },
+      {
+        "command": "ibis.startDaemon",
+        "title": "Ibis Assistant: Start Daemon"
       },
       {
         "command": "ibis.remember",
@@ -225,31 +229,33 @@
         "ibis.runtime.mode": {
           "type": "string",
           "enum": [
+            "auto",
             "spawn",
             "attach"
           ],
           "enumDescriptions": [
-            "Spawn an isolated `ibis -mode stdio -runtime-mode plugin` child (one per IDE, plugin data dir).",
-            "Attach to an already running shared runtime over Streamable HTTP (`#ibis.runtime.mcpUrl#`)."
+            "Attach to the always-on personal daemon (default endpoint `http://127.0.0.1:3030/mcp`); the status bar shows **Ibis daemon offline** when it is unreachable and **Ibis Assistant: Start Daemon** can launch it detached.",
+            "Spawn an isolated `ibis -mode stdio -runtime-mode plugin` child (one per IDE, plugin data dir). Legacy/CI behavior, bit-for-bit.",
+            "Attach to the runtime at `#ibis.runtime.mcpUrl#` over Streamable HTTP without the daemon on/offline UX."
           ],
-          "default": "spawn",
+          "default": "auto",
           "scope": "machine-overridable",
           "order": 1,
-          "markdownDescription": "How the extension reaches Ibis MCP. `attach` is equivalent to setting the `IBIS_MCP_URL` environment variable and is the recommended way to share one personal daemon between Cursor and VS Code. The `IBIS_MCP_URL` environment variable is only honored while this setting is left at its default."
+          "markdownDescription": "How the extension reaches Ibis MCP. `auto` attaches to the always-on personal daemon (`ibis run` / `ibis start`, default `http://127.0.0.1:3030/mcp`); `spawn` keeps the per-window isolated child; `attach` pins a custom endpoint. The `IBIS_MCP_URL` environment variable overrides the endpoint while `mcpUrl` is left at its default."
         },
         "ibis.runtime.mcpUrl": {
           "type": "string",
           "default": "http://127.0.0.1:3030/mcp",
           "scope": "machine-overridable",
           "order": 2,
-          "markdownDescription": "Streamable HTTP MCP endpoint used when `#ibis.runtime.mode#` is `attach` (equivalent of the `IBIS_MCP_URL` environment variable). Start the daemon with `ibis run`."
+          "markdownDescription": "Streamable HTTP MCP endpoint used when `#ibis.runtime.mode#` is `auto` or `attach` (equivalent of the `IBIS_MCP_URL` environment variable). Start the daemon with **Ibis Assistant: Start Daemon**, `ibis start`, or `ibis run`."
         },
         "ibis.runtime.binaryPath": {
           "type": "string",
           "default": "ibis",
           "scope": "machine-overridable",
           "order": 3,
-          "markdownDescription": "Command name or absolute path of the Ibis Assistant binary used when spawning (equivalent of the `IBIS_BIN` environment variable)."
+          "markdownDescription": "Command name or absolute path of the Ibis Assistant binary used when spawning (equivalent of the `IBIS_BIN` environment variable) and by **Ibis Assistant: Start Daemon**."
         },
         "ibis.runtime.dataDir": {
           "type": "string",
@@ -292,7 +298,7 @@
           "default": false,
           "scope": "machine-overridable",
           "order": 8,
-          "markdownDescription": "When spawning would be used, first probe `#ibis.runtime.autoAttachProbeUrls#` and attach to a reachable personal runtime instead of starting an isolated child."
+          "markdownDescription": "Only in explicit `spawn` mode: first probe `#ibis.runtime.autoAttachProbeUrls#` and attach to a reachable personal runtime instead of starting an isolated child."
         },
         "ibis.runtime.autoAttachProbeUrls": {
           "type": "array",

@@ -243,6 +243,37 @@ check(
   `${menuCommands.length} menu refs`,
 );
 
+// F4-A1: daemon attach default + Start Daemon + provider http definition.
+const extensionSource = readFileSync(join(root, "vscode-extension", "extension.js"), "utf8");
+const runtimeModeSetting = (((vsixPkg.contributes || {}).configuration || {}).properties || {})[
+  "ibis.runtime.mode"
+];
+check(
+  "vscode-extension: runtime.mode defaults to auto (daemon attach) with spawn/attach back-compat",
+  Boolean(runtimeModeSetting) && runtimeModeSetting.default === "auto" &&
+    Array.isArray(runtimeModeSetting.enum) && runtimeModeSetting.enum.includes("spawn") &&
+    runtimeModeSetting.enum.includes("attach"),
+  runtimeModeSetting ? `enum=${runtimeModeSetting.enum.join(",")}` : "missing setting",
+);
+check(
+  "vscode-extension: Start Daemon command contributed + registered with ibis start probe loop",
+  commandIds.includes("ibis.startDaemon") && extensionSource.includes('"ibis.startDaemon"') &&
+    extensionSource.includes('"start"') && extensionSource.includes("probeReachable"),
+  "feat(vscode): attach to the personal daemon by default",
+);
+check(
+  "vscode-extension: MCP provider emits the http definition in attach/daemon mode",
+  extensionSource.includes("McpHttpServerDefinition") &&
+    ((vsixPkg.contributes.mcpServerDefinitionProviders || [])[0] || {}).id === "ibis",
+  "provider definition { type: http, url }",
+);
+check(
+  "vscode-extension: warnDualPluginChildren fires only in explicit spawn mode",
+  extensionSource.includes('resolveBackendSelection(cfg, host).mode === "spawn"') &&
+    !extensionSource.includes("configuredAttach"),
+  "dual-child warning targets spawn + daemon combination",
+);
+
 const instructions = (vsixPkg.contributes && vsixPkg.contributes.chatInstructions) || [];
 const instructionFile = instructions.length === 1
   ? join(root, "vscode-extension", instructions[0].path.replace("./", ""))

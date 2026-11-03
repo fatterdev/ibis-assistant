@@ -5,6 +5,18 @@ The runtime changelog lives in the [repository root](https://github.com/fatterde
 
 ## [Unreleased]
 
+- **Daemon attach by default (F4-A1)** — `ibis.runtime.mode` gains `auto`
+  (new default): the extension attaches to the always-on personal daemon
+  (`http://127.0.0.1:3030/mcp`, overridable via `#ibis.runtime.mcpUrl#` /
+  `IBIS_MCP_URL`) instead of spawning a plugin child per window. The status
+  bar shows **Ibis attach** when the daemon is reachable and
+  **Ibis daemon offline** when it is not; the new command
+  **Ibis Assistant: Start Daemon** launches `ibis start` detached and
+  re-probes the endpoint (falling back to a manual-start hint). Explicit
+  `spawn` keeps the per-window isolated child bit-for-bit; the MCP
+  server-definition provider now advertises the HTTP definition of the
+  daemon. `warnDualPluginChildren` targets the plugin-spawn + daemon
+  combination with the documented team fix (plugin `mcp.json` http variant).
 - **Revert product naming to Ibis Assistant** — VSIX id `fatterdev.ibis-assistant`,
   settings prefix `ibis.*`, commands "Ibis Assistant: *", MCP server label
   `Ibis`, vendored `@ibis/ide-host`, fixed `@ext:fatterdev.ibis-assistant`

@@ -1,10 +1,12 @@
 /**
  * Resolve how the IDE should reach Ibis MCP.
  *
- * Default: spawn an isolated `ibis` stdio child (RUNTIME_MODE=plugin).
- * Shared runtime: set IBIS_MCP_URL (e.g. http://127.0.0.1:3030/mcp) to attach to
- * a personal HTTP daemon instead of spawning. Never silently share one SurrealDB
- * across two plugin stdio children.
+ * VSIX default (F4 §A.1): attach to the always-on personal daemon at
+ * DEFAULT_MCP_URL (the VSIX resolveBackendSelection probes it and offers
+ * Start Daemon when offline). This module's env-based resolveBackend keeps
+ * the IBIS_MCP_URL override and the explicit spawn fallback (RUNTIME_MODE=plugin
+ * stdio child) — the legacy path, now selected only explicitly by the IDE.
+ * Never silently share one SurrealDB across two plugin stdio children.
  *
  * Stdio contract (this repo): newline-delimited JSON-RPC. Content-Length framing
  * is accepted as an optional ingress format; egress to the IDE is always NDJSON.
@@ -798,6 +800,6 @@ export function extractSettingsURL(text) {
 
 export function warnDualPluginChildren() {
   process.stderr.write(
-    "[ibis-mcp-host] warning: two IDE plugin stdio children must not share one SurrealDB; use IBIS_MCP_URL + personal daemon for a unique shared runtime\n",
+    "[ibis-mcp-host] warning: stdio spawn keeps a plugin child while a personal daemon (or a second plugin child) may be running — one shared runtime is the supported topology; point this client's mcp.json at the daemon (http variant, docs/team_server.md)\n",
   );
 }
