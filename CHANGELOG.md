@@ -4,6 +4,16 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **fix(ai): usage-flush batch test is load-independent** -
+  `usage_flush_batches_updates` tied its assertion to wall-clock time (50
+  sequential embeds had to finish within ~1s to stay under the `< 10` save
+  bound); under parallel test load the embed window stretches and every
+  100ms flusher tick that finds fresh usage saves once (missed-tick
+  catch-up included), so the test failed non-deterministically (verified on
+  a clean tree, ~1 run in 2). The bound is now derived from the measured
+  embed window (`loop_ms/100 + 5`, covering the 250ms tail and the stop
+  flush) with a `>= 1` flush guard: the pinned invariant is coalescing
+  (per-call persistence would give ~50 saves), not an absolute cadence.
 - **chore(search): S1.4 — search timing demoted to debug, list/expand timed** -
   the S1.3 measurement instrumentation on `memory_search` (start / embedded /
   querying db / db query returned / rows / boosting / linked_symbols / done)

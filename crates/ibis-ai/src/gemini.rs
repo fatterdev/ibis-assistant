@@ -1435,16 +1435,26 @@ mod tests {
             Some(store.clone() as Arc<dyn UsageStore>),
             &base_url,
         );
+        let started = std::time::Instant::now();
         for _ in 0..50 {
             provider.embed_text("test").await.unwrap();
         }
+        // The save bound scales with wall-clock: under parallel test load the
+        // 50 sequential embeds can stretch past 1s and every 100ms tick that
+        // finds fresh usage saves once (missed-tick catch-up included). What
+        // is pinned here is coalescing — per-call persistence would give ~50
+        // saves — not an absolute cadence, so the bound is derived from the
+        // measured loop window plus the 250ms tail and the stop flush.
+        let loop_ms = started.elapsed().as_millis() as u64;
         tokio::time::sleep(Duration::from_millis(250)).await;
         provider.stop().await;
         let updates = store.saves.load(Ordering::SeqCst);
+        let bound = loop_ms / 100 + 5;
         assert!(
-            updates < 10,
-            "Too many DB updates! Got {updates}, expected < 10"
+            updates <= bound,
+            "Too many DB updates! Got {updates}, expected <= {bound} (embed loop {loop_ms}ms)"
         );
+        assert!(updates >= 1, "usage never flushed to the store");
     }
 
     // ---------- wire contracts ----------
