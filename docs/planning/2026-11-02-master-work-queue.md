@@ -14,7 +14,7 @@
 
 | ID | Stream | Doc di riferimento | Stato (02/11) | Prossimo passo (uno solo) | Sbloccato da | Sblocca |
 |---|---|---|---|---|---|---|
-| WQ-1 | **R3/R4 gate** — VSIX 1.0.1 + plugin agent (Parte B) | [review-r3r4-checklist.md](./review-r3r4-checklist.md), [runbook R3.3](./2026-11-03-r33-closure-runbook.md), [analisi tempi S1.3](./2026-11-03-s13-timing-analysis.md) | Parte A 26/26 PASS; Parte B: R3.1 ✅ R3.2 ✅ **R3.3 in chiusura** (owner run 03/11 concluso, zero orfani alla chiusura; numerino parent + refresh feedback in **1.0.1**; strumentazione debug rimossa; analisi tempi: warm PASS ampio 1.5–10ms, cold FALLITO per boot tax 1.4–17s) | **decisione owner sul cold target** (analisi §5: 1 pre-warm all'attivazione / 2 ridefinire target / 3 ridurre boot SurrealDB) + evidenze R3.3 in checklist | decisione owner | R3.4–R3.8, P4.1–P4.6, publish gate |
+| WQ-1 | **R3/R4 gate** — VSIX 1.0.1 + plugin agent (Parte B) | [review-r3r4-checklist.md](./review-r3r4-checklist.md), [runbook R3.3](./2026-11-03-r33-closure-runbook.md), [analisi tempi S1.3](./2026-11-03-s13-timing-analysis.md) | Parte A 26/26 PASS; Parte B: R3.1 ✅ R3.2 ✅ **R3.3 ✅ (chiusa 03/11)** — frasi B/C ok su 1.0.1 (numerino parent + refresh spinner verificati, zero orfani alla chiusura; warm PASS ampio 1.5–10ms, cold FALLITO per boot tax 1.4–17s; gap evidenze UI non persistite, §6.4 analisi) | **decisione owner sul cold target** (analisi §5: 1 pre-warm all'attivazione / 2 ridefinire target / 3 ridurre boot SurrealDB) | decisione owner | R3.4–R3.8, P4.1–P4.6, publish gate |
 | WQ-2 | **Publish gate** (azioni ② ③ ⑤ + `publish-vscode.yml`) | [review-r3r4-checklist.md §Publish gate](./review-r3r4-checklist.md) | ☐ non iniziato | azioni manuali ②③ (Trusted Publishing OIDC, Open VSX token) | WQ-1 (R3/R4 PASS) | WQ-3, WQ-4 |
 | WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | Approved; 9 sub-fasi (F4-B1..B4 ∥ F4-A1..A5) + gate R7 da fare | **F4-B1** — reconciliation Layer 3 (ledger + liveness + start-time) | WQ-2 | gate R7 → F3 docs → Track D |
 | WQ-4 | **Track D** — benchmark DevAX/Scope (D1–D5) | [PLAN.md §9](./PLAN.md), [evaluations/scope/README.md](../evaluations/scope/README.md) | Pianificato (scaffold presente; profili con placeholder `TODO-verify-*` by design, pre-D2) | D1 — pin immagine compose + seed su istanza Scope live | WQ-3 (gate R7), azione D1 | D2–D5, R6 close |
@@ -57,6 +57,11 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   albero + runbook + [analisi tempi](./2026-11-03-s13-timing-analysis.md)
   (warm PASS ampio, cold fallito per boot tax — SurrealDB 1–4s, Ollama giù
   +8.7s). Chiusura VS Code verificata: zero processi orfani (job object ok).
+- **R3.3 chiusa (03/11, registrata in checklist)** — frasi B/C verificate su
+  1.0.1 dal run owner (raffiche `memory_list`/`memory_expand`/refresh ok in
+  plugin.log 07:05–07:10 UTC); pass di misura S1.3 registrato (S1.3 done).
+  Gap noto: cartella evidenze `artifacts/ui-tests/<run>-r33/` mai
+  persistita (§6.4 analisi).
 - Aperto: decisione owner sul cold target (analisi §5) → eventuale pre-warm
   ide-host → S1.4 demote log info→debug (azione agente) → R3.4–R3.8 →
   P4.1–P4.6 → publish gate.

@@ -106,13 +106,27 @@ check 1.2s + probe), non dalla latenza delle chiamate. Tre opzioni:
    `output-channel.txt` ma la cartella `artifacts/ui-tests/*-r33*` non esiste
    — i numeri `tools/call … in Xms` e `session cold init` di oggi sono
    persi. Per il prossimo run: `code > Output > Ibis Assistant → copia` o
-   attivare un sink su file.
+   attivare un sink su file. **Chiusura R3.3 (03/11) registrata comunque in
+   checklist** su plugin.log + numeri build strumentate (gap qui descritto).
+5. **`BatchManager: Failed to fetch pending commits` (ripetuto, ~10s)** —
+   deserializzazione `CommitRow.date`: `Expected string, got datetime`
+   (`SELECT … FROM commit WHERE batch_status = 'pending'`) — righe con
+   `date` datetime non decodificano nel tipo `none | string`. Error lane
+   background (ingest), non tocca il path tree-view di R3.3; da fixare a
+   parte (mapping datetime → string nel deserializer o nella query).
+6. **`BatchManager: Failed to embed batch: batch_embed_text is not
+   supported by provider 'ibis-ai-client'`** — il provider adapter lato
+   server (client AI dell'httpserver) non implementa `batch_embed_text`
+   mentre il BatchManager lo chiama in fallback sincrono. Anche questa è
+   lane background: i chunk restano in coda (`Found 100 chunks`) senza
+   vettorizzare. Da attribuire a implementazione missing dell'adapter, non
+   a R3.3.
 
 ## 7. Cosa resta per chiudere S1.3
 
 - [ ] Decisione owner sul cold target (opzione 1/2/3 del §5).
 - [ ] Se opzione 1: pre-warm + nuovo run owner → la prima espansione misurata
       da canale Output (questa volta salvato).
-- [ ] Evidenze del run 1.1.2 (numerino + refresh con feedback) registrate
-      nella checklist §Esito.
+- [x] Evidenze del run 1.1.2 (numerino + refresh con feedback) registrate
+      nella checklist §Esito (03/11: R3.3 → PASS, con nota sul gap §6.4).
 - [ ] S1.4 (demote info→debug) solo dopo il verdetto.

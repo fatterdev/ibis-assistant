@@ -183,7 +183,7 @@ Pre-flight: cartella `plugin/` del repo.
 | Item | Parte A (automatizzata) | Parte B (VS Code 1.144, owner) |
 |---|---|---|
 | Plugin scaffold + hook contract | **26/26 PASS** (30/10/2026) | P4.1–P4.6: ☐ |
-| VSIX packaging + contributions | 4/4 PASS | R3.1 ✅ R3.2 ✅ R3.3 ☐ (parziale) — R3.4–R3.8 ☐ |
+| VSIX packaging + contributions | 4/4 PASS | R3.1 ✅ R3.2 ✅ R3.3 ✅ — R3.4–R3.8 ☐ |
 | Publish pipeline | manifest + badge verificati | ☐ (post ②③⑤) |
 
 **Avanzamento Parte B (30/10/2026, run `artifacts/ui-tests/202610301404-r3r4`):**
@@ -195,21 +195,37 @@ Pre-flight: cartella `plugin/` del repo.
   con `Backend: spawn ibis -mode stdio -runtime-mode plugin`, workspace
   bindato, LM bridge listening, MCP provider registered, memory default
   ask/team. Evidenze: toast owner + screenshot.
-- **R3.3 PARZIALE** — tree view con tutti gli 8 kind e icone corrette (evidenza
-  screenshot). Finding: alla prima espansione `error: timeout waiting for MCP
-  response id=1` (inizializzazione del plugin store > 15s) → **risolto** con
-  timeout configurabile 60s in ide-host (`9124c84`); seconda attesa su id=2
-  ricondotta al **binario stale** su PATH (`C:\devbin\cargo\bin\ibis.exe`
-  0.1.0 pre-fix BatchManager, log loop in plugin.log) → da ricostruire, vedi
-  `sidecar-lifecycle-plan.md` §Stato di esecuzione (punti 1–3). Dopo rebuild:
-  ripetere frasi B/C di R3.3 (l'albero è vuoto finché R3.4 non crea memorie).
+- **R3.3 PASS (chiusura 03/11/2026)** — run owner concluso (frasi B/C su
+  build 1.0.1, cronometro; 1.0.1 = numerino sul tree parent + refresh con
+  spinner, zero processi orfani alla chiusura VS Code — job object ok).
+  Frase B: espansione kind via `memory_list` — raffiche `5× memory_list`
+  nel plugin.log (07:10:03–13 UTC, 5 kind espansi) tutte ok; warm
+  **~1–10ms** runtime (pattern di arrivo) e **1.5–1.8ms** end-to-end sulle
+  build strumentate 1.1.x. Frase C: `memory_expand` ok (dettaglio con
+  metadati). Search Memory + 5 click refresh (07:07:23–30): refetch reale
+  confermato, difetto era solo di feedback → chiuso in 1.0.1 (spinner +
+  numerino). Cold: **FALLITO per boot tax** (spawn→ready 1.4–4.9s con Ollama
+  su, ~17s con Ollama giù — SurrealDB 1–4s domina): non è un difetto del
+  path di query → **decisione owner** sulle 3 opzioni dell'[analisi tempi
+  §5](./2026-11-03-s13-timing-analysis.md). Numeri e decomposizione
+  completi: [analisi S1.3](./2026-11-03-s13-timing-analysis.md).
+  **Gap evidenze**: la cartella `artifacts/ui-tests/<run>-r33/` NON è stata
+  persistita dal run (gap §6.4 dell'analisi) — la chiusura si basa su
+  `plugin.log` + i numeri delle build strumentate 1.1.x; per i run
+  successivi salvare il canale Output su file.
+  Storia del finding (30/10): la prima espansione incassava
+  `error: timeout waiting for MCP response id=1` (inizializzazione del
+  plugin store > 15s) → **risolto** con timeout configurabile 60s in
+  ide-host (`9124c84`); seconda attesa su id=2 ricondotta al **binario
+  stale** su PATH (`C:\devbin\cargo\bin\ibis.exe` 0.1.0 pre-fix
+  BatchManager, log loop in plugin.log) → ricostruito (S1.2, `ibis 0.2.0`).
 - Contesto macchina: engine locale Strix (`C:\devbin\paoai-strix-engine`,
   servizio `StrixUITars` :8082 con UI-TARS-7B-DPO per il computer-use) e runner
   `scripts/ui-test/run-ui-tests.mjs` (`screenshot`, `mark`, `collect`).
 
-**Stato: PARTIE A COMPLETA (26/26), PARTIE B in esecuzione (R3.1–R3.2 PASS)**
-(azioni ② ③ ⑤ ancora da fare). Registrare qui le evidenze (screenshot/log)
-come fatto per R2.
+**Stato: PARTE A COMPLETA (26/26), PARTE B: R3.1–R3.3 PASS — R3.4–R3.8 e
+P4.1–P4.6 aperti** (azioni ② ③ ⑤ ancora da fare). Registrare qui le evidenze
+(screenshot/log) come fatto per R2.
 
 **Aggiornamento S1 (01/11/2026) — chiusura debug "blocchi e lentezze":**
 - **S1.1 done** — client stdio persistente in ide-host (sessione per backend
@@ -225,10 +241,14 @@ come fatto per R2.
   la sessione per causa esterna — da riverificare a freddo che non torni);
   `debug-353a81.log` archiviato in `artifacts/debug/` (era alla root, evidence
   del vecchio runtime Go lanciato alle 19:56 del 30/10 con CLI `-mode stdio`).
-- **S1.3 pending (pass di misura)** — riverificare R3.3 frasi B/C con la
-  strumentazione timing ancora a `info` nel log runtime; target: espansione
-  freddo < 2s, caldo < 500ms. **S1.4 pending**: solo dopo la misura, demote
-  `info`→`debug` delle timing (memory_search/embed/boost).
+- **S1.3 done (misura 03/11, run owner)** — frasi B/C riverificate su build
+  con client stdio persistente + fix 1.0.1; numeri: warm **PASS ampio**
+  (`memory_list` ~1–10ms, `memory_search` warm 1.5–1.8ms), cold **FALLITO
+  per boot tax** (1.4–4.9s con Ollama su, ~17s giù — SurrealDB 1–4s + check
+  ~1.2s + probe). Decomposizione e 3 opzioni di rimozione boot tax:
+  [2026-11-03-s13-timing-analysis.md](./2026-11-03-s13-timing-analysis.md).
+  **S1.4 pending**: demote `info`→`debug` delle timing SOLO dopo il verdetto
+  owner sul cold target.
   Runbook passo-passo owner (failure-first, pre-flight, matrice guasti,
   evidenze): [2026-11-03-r33-closure-runbook.md](./2026-11-03-r33-closure-runbook.md).
   Seed albero (3 memorie, 02/11) via `scripts/seed-memory-r33.mjs` — fatto:
