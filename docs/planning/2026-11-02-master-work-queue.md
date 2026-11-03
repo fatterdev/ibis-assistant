@@ -14,7 +14,7 @@
 
 | ID | Stream | Doc di riferimento | Stato (02/11) | Prossimo passo (uno solo) | Sbloccato da | Sblocca |
 |---|---|---|---|---|---|---|
-| WQ-1 | **R3/R4 gate** — VSIX 1.0.2 + plugin agent (Parte B) | [review-r3r4-checklist.md](./review-r3r4-checklist.md), [runbook R3.3](./2026-11-03-r33-closure-runbook.md), [analisi tempi S1.3](./2026-11-03-s13-timing-analysis.md) | Parte A 26/26 PASS; Parte B: R3.1 ✅ R3.2 ✅ R3.3 ✅ — warm PASS ampio, cold FALLITO per boot tax → **verdetto owner 03/11: opzione 1 pre-warm**; atterrati: pre-warm in 1.0.2 (`bf824b1`) e S1.4 (`e9b85b8` — timing `memory_search` demotati a debug, righe nuove `memory_list`/`memory_expand` a info) | **run owner**: verifica pre-warm (Reload Window → prima espansione warm-like, riga `pre-warm: …` su canale Output salvata) + R3.4–R3.8 → P4.1–P4.6 | run owner (azioni ②③ restano per il publish) | publish gate (WQ-2) |
+| WQ-1 | **R3/R4 gate** — VSIX 1.0.3 + plugin agent (Parte B) | [review-r3r4-checklist.md](./review-r3r4-checklist.md), [runbook R3.3](./2026-11-03-r33-closure-runbook.md), [analisi tempi S1.3](./2026-11-03-s13-timing-analysis.md) | Parte A 26/26 PASS; Parte B: R3.1 ✅ R3.2 ✅ R3.3 ✅ — warm PASS ampio, cold FALLITO per boot tax → **verdetto owner 03/11: opzione 1 pre-warm**; atterrati: pre-warm in 1.0.3 (`bf824b1` + fix null call) e S1.4 (`e9b85b8` — timing `memory_search` demotati a debug, righe nuove `memory_list`/`memory_expand` a info) | **run owner**: verifica pre-warm (Reload Window → prima espansione warm-like, riga `pre-warm: …` su canale Output salvata) + R3.4–R3.8 → P4.1–P4.6 | run owner (azioni ②③ restano per il publish) | publish gate (WQ-2) |
 | WQ-2 | **Publish gate** (azioni ② ③ ⑤ + `publish-vscode.yml`) | [review-r3r4-checklist.md §Publish gate](./review-r3r4-checklist.md) | ☐ non iniziato | azioni manuali ②③ (Trusted Publishing OIDC, Open VSX token) | WQ-1 (R3/R4 PASS) | WQ-3, WQ-4 |
 | WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | Approved; 9 sub-fasi (F4-B1..B4 ∥ F4-A1..A5) + gate R7 da fare | **F4-B1** — reconciliation Layer 3 (ledger + liveness + start-time) | WQ-2 | gate R7 → F3 docs → Track D |
 | WQ-4 | **Track D** — benchmark DevAX/Scope (D1–D5) | [PLAN.md §9](./PLAN.md), [evaluations/scope/README.md](../evaluations/scope/README.md) | Pianificato (scaffold presente; profili con placeholder `TODO-verify-*` by design, pre-D2) | D1 — pin immagine compose + seed su istanza Scope live | WQ-3 (gate R7), azione D1 | D2–D5, R6 close |
@@ -64,11 +64,14 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   Gap noto: cartella evidenze `artifacts/ui-tests/<run>-r33/` mai
   persistita (§6.4 analisi).
 - **Decisione cold target (03/11, opzione 1: pre-warm all'attivazione)** —
-  atterrata in VSIX **1.0.2** (`bf824b1`): fire-and-forget in `activate()` —
-  sessione stdio persistente + handshake + null call read-only
-  (`ticket_get_capabilities`); evidenza su canale Output (`pre-warm: runtime
-  session ready in Nms`); la prima interazione reale riusa la sessione calda
-  (stessa identità backend).
+  atterrata in VSIX **1.0.3** (`bf824b1` + fix): fire-and-forget in
+  `activate()` — sessione stdio persistente + handshake + null call
+  read-only `memory_list` (shape frase B dell'albero; 1.0.2 usava
+  `ticket_get_capabilities`, rifiutato dal dynamic tool discovery senza
+  ticketing — finding run owner 03/11: "pre-warm failed after 14944ms",
+  boot comunque pagato dall'handshake); evidenza su canale Output
+  (`pre-warm: runtime session ready in Nms`); la prima interazione reale
+  riusa la sessione calda (stessa identità backend).
 - **S1.4 atterrato (03/11, `e9b85b8`)** — timing `memory_search` demotati
   info→debug (invisibili al default INFO, tornano con `log_level DEBUG`);
   righe nuove a info `memory_list: done in … entries=N` /

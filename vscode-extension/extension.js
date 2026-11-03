@@ -312,8 +312,11 @@ async function resolveBackend(host, cfg) {
  * interaction (S1.3 cold target): fire-and-forget spawn of the persistent
  * session child — MCP handshake + one cheap read-only call — so the
  * SurrealDB sidecar boot (1.4–4.9s, up to ~17s with Ollama down) is paid
- * during VS Code startup. The first real interaction reuses this warm
- * session; a failure only means the boot is paid later, transparently.
+ * during VS Code startup. The null call mirrors the tree's phrase-B fetch
+ * shape (a `memory_list` core tool: ticketing tools are not announced
+ * without a configured provider and the runtime rejects them). The first
+ * real interaction reuses this warm session; a failure only means the boot
+ * is paid later, transparently.
  * @param {Awaited<ReturnType<typeof loadIdeHost>>} host
  * @param {vscode.WorkspaceConfiguration} cfg
  */
@@ -325,7 +328,7 @@ function prewarmRuntime(host, cfg) {
       }
       const started = Date.now();
       host
-        .callMcpTool(backend, "ticket_get_capabilities", {})
+        .callMcpTool(backend, "memory_list", { kind: "decision", limit: 1 })
         .then(() =>
           logLine(
             `pre-warm: runtime session ready in ${Date.now() - started}ms (boot paid at activation)`,

@@ -24,15 +24,19 @@ All notable changes to Ibis Assistant are documented here.
   `memory_list: done in … entries=N` and `memory_expand: done in … chain=N`
   at `info`, closing the evidence-parity gap (S1.3 analysis §6.3) for the
   next owner run.
-- **feat(vsix): 1.0.2 — runtime pre-warm at activation** - `activate()` now
+- **feat(vsix): 1.0.3 — runtime pre-warm at activation** - `activate()` now
   fires a fire-and-forget pre-warm: the persistent ide-host session child is
-  spawned, the MCP handshake paid, and one cheap read-only call
-  (`ticket_get_capabilities`) issued while VS Code starts up, so the plugin
-  boot tax (SurrealDB sidecar 1–4s + checks + probes; up to ~17s with Ollama
-  down) no longer lands on the first memory-tree interaction (S1.3 cold
-  target, owner decision 03/11: option 1). Evidence lands in the Output
-  channel (`pre-warm: runtime session ready in Nms`); the first real
-  interaction reuses the same warm session (same backend identity).
+  spawned, the MCP handshake paid, and one cheap read-only call issued while
+  VS Code starts up, so the plugin boot tax (SurrealDB sidecar 1–4s + checks
+  + probes; up to ~17s with Ollama down) no longer lands on the first
+  memory-tree interaction (S1.3 cold target, owner decision 03/11: option
+  1). The null call is a `memory_list` in the tree's phrase-B shape — 1.0.2
+  used `ticket_get_capabilities`, which dynamic tool discovery rejects when
+  ticketing is unconfigured (owner verification run: "pre-warm failed after
+  14944ms"; the boot was still paid by the handshake, but the readiness
+  evidence line was lost). Evidence lands in the Output channel (`pre-warm:
+  runtime session ready in Nms`); the first real interaction reuses the same
+  warm session (same backend identity).
 
 - **feat(search): RRF channel fusion behind `search.fusion` (A2 ddofds)** -
   `ask_project` merges the four channels by per-channel rank with Reciprocal
