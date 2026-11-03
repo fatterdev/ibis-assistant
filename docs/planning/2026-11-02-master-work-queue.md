@@ -16,7 +16,7 @@
 |---|---|---|---|---|---|---|
 | WQ-1 | **R3/R4 gate** — VSIX 1.0.11 + plugin agent (Parte B) | [review-r3r4-checklist.md](./review-r3r4-checklist.md), [runbook R3.3](./2026-11-03-r33-closure-runbook.md), [analisi tempi S1.3](./2026-11-03-s13-timing-analysis.md) | **CHIUSO (03/11)**: Parte A 26/26 PASS; Parte B completa (R3.1–R3.8 + P4.1–P4.6 PASS) — run interattivo con evidenza da log; cold target chiuso dal pre-warm (prima fetch 12–30ms dopo boot pagato all'attivazione, 3.3–4.7s con Ollama su); note: P4.1 UX (status in chat), P4.5 tool-ref fix + superficie = mode picker, noise hook da estensione Azure Tools (checklist §Esito) | **push differito (decisione owner 03/11)** — a fine sviluppo: riscrittura dell'intera storia in pochi commit precisi (include rimozione claim/fact di test) → push | — | F4 (WQ-3) sbloccata |
 | WQ-2 | **Publish gate** (azioni ② ③ ⑤ + `publish-vscode.yml`) | [review-r3r4-checklist.md §Publish gate](./review-r3r4-checklist.md) | **Differito (decisione owner 03/11)**: publish a sviluppo concluso, non a R3/R4 — vedi §3.6 | azioni manuali ②③ (Trusted Publishing OIDC, Open VSX token) al momento del publish | fine sviluppo (decisione owner su timing) | WQ-4 (D-CLAIMS gate pre-publishing) |
-| WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | **F4-B4 done (03/11, `9921d6e`)** — `deploy/Dockerfile` + `deploy/docker-compose.yml` + runbook `docs/team_server.md` (pin SurrealDB 3.3.5 = pin CI, ast-grep 0.51.1, `DB_AUTO_UPDATE=false`, non-root, healthcheck, CMD team con `--consolidate`); **Milestone B completa**, resta il gate R7; 6 sub-fasi A residue | **F4-A1** — attach default al daemon personale + Start Daemon + provider http definition (`feat(vscode): attach to the personal daemon by default`) | — (publish differito, §3.6) | gate R7 → F3 docs → Track D |
+| WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | **F4-A1 done (03/11, `81fa0d3`)** — VSIX 1.0.12: `runtime.mode` enum `auto` (nuovo default = attach al daemon personale) + **Start Daemon** (`ibis start` detached + re-probe) + provider http definition; Milestone B completa, resta il gate R7; 5 sub-fasi A residue | **F4-A2** — statusFilter current/all (`feat(vscode): memory tree status filter (current default)`) | — (publish differito, §3.6) | gate R7 → F3 docs → Track D |
 | WQ-4 | **Track D** — benchmark DevAX/Scope (D1–D5) | [PLAN.md §9](./PLAN.md), [evaluations/scope/README.md](../evaluations/scope/README.md) | Pianificato (scaffold presente; profili con placeholder `TODO-verify-*` by design, pre-D2) | D1 — pin immagine compose + seed su istanza Scope live | WQ-3 (gate R7), azione D1 | D2–D5, R6 close |
 | WQ-5 | **Miglioramenti ddofds** — fasi 0–5 (eval, retrieval, costi, memoria) | [analisi L1](./2026-11-01-dailydoseofds-improvement-analysis.md) → [L2](./2026-11-01-dailydoseofds-improvement-analysis-l2-flussi-funzionali.md) → [L3](./2026-11-01-dailydoseofds-improvement-analysis-l3-punti-di-aggancio.md); [piano A1](./2026-11-02-a1-retrieval-eval-plan.md); [validazione A2](./2026-11-03-a2-rrf-validation.md) | **Fase 0 (A1) done** (commit `9fb53da` 03/11): dataset 12 case + runner + CLI `ibis eval retrieval` + job CI `retrieval-eval`; baseline offline MRR 0.917 / r@5 0.958 / r@15 1.0, baseline ollama (additive) MRR 0.917 / r@5 1.0 / r@15 1.0. **Fase 1 (A2) implementata 03/11**: `rrf_fuse` + `FusionMode` + config `search.fusion` (default **additive**) + eval `--fusion` + campo `fusion` nel report; validazione: offline parità, ollama **regressione** (MRR 0.875, r@5 0.958 — perdita margine r05/r11). **Decisione owner A2 (03/11): opzione 2 — tuning RRF prima di decidere** (default resta additive) | **tuning RRF** (k più piccolo / ibride rank+cosine normalizzate, fuori scope A2) + re-run eval offline+ollama, poi decisione default | — | tuning A2; fasi 1–3 (C9/D13/B6); baseline per Track D D3 |
 | WQ-6 | **Track B** — ingest tracce Beacon (B0–B4, B3 se promossa) | [PLAN.md §9-bis](./PLAN.md) | Pianificato (approvato 03/11; solo piano, nessun codice) | B0 — installazione endpoint Beacon (azione manuale ⑥) + campionamento `runtime.jsonl` → nota `evaluations/beacon/campionamento.md` | azione manuale ⑥ (owner) | B1–B4, R8, B3 (se promossa) |
@@ -202,9 +202,35 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   (`surreal`@root tgz, `sg`+`ast-grep`@root zip), asset `include_dir` tutti
   git-tracked; prima build immagine reale al gate R7 (scenario compose su
   LAN, 2+ client).
-- Prossimo commit previsto: `feat(vscode): attach to the personal daemon
-  by default` (F4-A1 — daemon attach default + Start Daemon + provider
-  http definition).
+- **F4-A1 atterrata (03/11, `81fa0d3`)** — attach default al daemon personale
+  (F4 §A.1): VSIX **1.0.12** con `runtime.mode` enum `auto`/**spawn**/**attach**
+  e default `auto` → `resolveBackendSelection`: attach a `DEFAULT_MCP_URL`
+  (override `IBIS_MCP_URL` / `runtime.mcpUrl` esplicito), provider definition
+  `{ type: "http", url }` ora attiva di default e tutti i path comando via
+  `callMcpTool` http. Status bar in daemon mode sonda l'endpoint
+  (`settings.probeTimeoutMs`): reachable → `$(cloud) Ibis attach`, offline →
+  `$(error) Ibis daemon offline` (tooltip con hint Start Daemon). Nuovo comando
+  **Ibis Assistant: Start Daemon**: one-shot `<binary> start` (verbo PID-file
+  del runtime — daemon detached, log su `server.log`, quindi outlives VS Code)
+  + re-probe ~15s (boot SurrealDB sidecar); spawn error/timeout o endpoint mai
+  raggiungibile → messaggio con istruzione manuale (`ibis start`/`ibis run`);
+  **Status** in offline offre il pulsante Start Daemon. `spawn` esplicito resta
+  bit-for-bit (autoAttach + probe urls inclusi; `warnDualPluginChildren` solo
+  in spawn mode, messaggio aggiornato: spawn + daemon/plugin, fix team =
+  plugin `mcp.json` http variant). `probeReachable` hardened (cancel del body
+  SSE — il probe ora è hot path). `prewarmRuntime` resta spawn-only (il daemon
+  è sempre warm; il tree refresh paga il primo contatto). README + walkthrough
+  choose-backend (3 modalità) + CHANGELOG. Verifica: smoke-plugin 30/30 (4
+  check nuovi: enum auto/default, Start Daemon contribuito+registrato, provider
+  http shape, warning solo in spawn), ide-host test verdi (session 4/4,
+  framing, resolve — machineria stdio intoccata), `node --check`, `vsce
+  package` 1.0.12. Note: versione 1.0.12 (iterazione patch per build debug,
+  `1.1.0` resta riservato alla chiusura F4-A — §3.5); il comportamento
+  "outlives VS Code" del daemon (job del host) e il provider http su agent
+  mode reale restano da verificare al **gate R7**.
+- Prossimo commit previsto: `feat(vscode): memory tree status filter (current
+  default)` (F4-A2 — setting `ibis.memory.statusFilter` current/all, badge
+  view title, toggle command; tocca `memory_list`/`memory_search` args).
 - Dipendenza interna da rispettare: B.6 (reconciliation) è precondizione strutturale del Milestone B — **soddisfatta**.
 
 ### WQ-4 — Track D
