@@ -124,9 +124,15 @@ check 1.2s + probe), non dalla latenza delle chiamate. Tre opzioni:
 
 ## 7. Cosa resta per chiudere S1.3
 
-- [ ] Decisione owner sul cold target (opzione 1/2/3 del §5).
+- [x] Decisione owner sul cold target (opzione 1/2/3 del §5) — **opzione 1,
+      pre-warm all'attivazione (03/11)**: atterrata in VSIX 1.0.2 (`bf824b1`).
 - [ ] Se opzione 1: pre-warm + nuovo run owner → la prima espansione misurata
-      da canale Output (questa volta salvato).
+      da canale Output (questa volta salvato). Pre-warm atterrato; **run
+      owner da fare**: attesa riga `pre-warm: runtime session ready in Nms`
+      sul canale e prima espansione warm-like (cronometro + screenshot).
 - [x] Evidenze del run 1.1.2 (numerino + refresh con feedback) registrate
       nella checklist §Esito (03/11: R3.3 → PASS, con nota sul gap §6.4).
-- [ ] S1.4 (demote info→debug) solo dopo il verdetto.
+- [x] S1.4 (demote info→debug) dopo il verdetto — fatto 03/11 (`e9b85b8`):
+      timing `memory_search` a debug + righe nuove a info
+      `memory_list: done in …` / `memory_expand: done in …` (§6.3, parità
+      di evidenza per il prossimo run).

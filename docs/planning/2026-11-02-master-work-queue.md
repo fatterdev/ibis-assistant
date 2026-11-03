@@ -14,11 +14,11 @@
 
 | ID | Stream | Doc di riferimento | Stato (02/11) | Prossimo passo (uno solo) | Sbloccato da | Sblocca |
 |---|---|---|---|---|---|---|
-| WQ-1 | **R3/R4 gate** — VSIX 1.0.1 + plugin agent (Parte B) | [review-r3r4-checklist.md](./review-r3r4-checklist.md), [runbook R3.3](./2026-11-03-r33-closure-runbook.md), [analisi tempi S1.3](./2026-11-03-s13-timing-analysis.md) | Parte A 26/26 PASS; Parte B: R3.1 ✅ R3.2 ✅ **R3.3 ✅ (chiusa 03/11)** — frasi B/C ok su 1.0.1 (numerino parent + refresh spinner verificati, zero orfani alla chiusura; warm PASS ampio 1.5–10ms, cold FALLITO per boot tax 1.4–17s; gap evidenze UI non persistite, §6.4 analisi) | **decisione owner sul cold target** (analisi §5: 1 pre-warm all'attivazione / 2 ridefinire target / 3 ridurre boot SurrealDB) | decisione owner | R3.4–R3.8, P4.1–P4.6, publish gate |
+| WQ-1 | **R3/R4 gate** — VSIX 1.0.2 + plugin agent (Parte B) | [review-r3r4-checklist.md](./review-r3r4-checklist.md), [runbook R3.3](./2026-11-03-r33-closure-runbook.md), [analisi tempi S1.3](./2026-11-03-s13-timing-analysis.md) | Parte A 26/26 PASS; Parte B: R3.1 ✅ R3.2 ✅ R3.3 ✅ — warm PASS ampio, cold FALLITO per boot tax → **verdetto owner 03/11: opzione 1 pre-warm**; atterrati: pre-warm in 1.0.2 (`bf824b1`) e S1.4 (`e9b85b8` — timing `memory_search` demotati a debug, righe nuove `memory_list`/`memory_expand` a info) | **run owner**: verifica pre-warm (Reload Window → prima espansione warm-like, riga `pre-warm: …` su canale Output salvata) + R3.4–R3.8 → P4.1–P4.6 | run owner (azioni ②③ restano per il publish) | publish gate (WQ-2) |
 | WQ-2 | **Publish gate** (azioni ② ③ ⑤ + `publish-vscode.yml`) | [review-r3r4-checklist.md §Publish gate](./review-r3r4-checklist.md) | ☐ non iniziato | azioni manuali ②③ (Trusted Publishing OIDC, Open VSX token) | WQ-1 (R3/R4 PASS) | WQ-3, WQ-4 |
 | WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | Approved; 9 sub-fasi (F4-B1..B4 ∥ F4-A1..A5) + gate R7 da fare | **F4-B1** — reconciliation Layer 3 (ledger + liveness + start-time) | WQ-2 | gate R7 → F3 docs → Track D |
 | WQ-4 | **Track D** — benchmark DevAX/Scope (D1–D5) | [PLAN.md §9](./PLAN.md), [evaluations/scope/README.md](../evaluations/scope/README.md) | Pianificato (scaffold presente; profili con placeholder `TODO-verify-*` by design, pre-D2) | D1 — pin immagine compose + seed su istanza Scope live | WQ-3 (gate R7), azione D1 | D2–D5, R6 close |
-| WQ-5 | **Miglioramenti ddofds** — fasi 0–5 (eval, retrieval, costi, memoria) | [analisi L1](./2026-11-01-dailydoseofds-improvement-analysis.md) → [L2](./2026-11-01-dailydoseofds-improvement-analysis-l2-flussi-funzionali.md) → [L3](./2026-11-01-dailydoseofds-improvement-analysis-l3-punti-di-aggancio.md); [piano A1](./2026-11-02-a1-retrieval-eval-plan.md); [validazione A2](./2026-11-03-a2-rrf-validation.md) | **Fase 0 (A1) done** (commit `9fb53da` 03/11): dataset 12 case + runner + CLI `ibis eval retrieval` + job CI `retrieval-eval`; baseline offline MRR 0.917 / r@5 0.958 / r@15 1.0, baseline ollama (additive) MRR 0.917 / r@5 1.0 / r@15 1.0. **Fase 1 (A2) implementata 03/11**: `rrf_fuse` + `FusionMode` + config `search.fusion` (default **additive**) + eval `--fusion` + campo `fusion` nel report; validazione: offline parità, ollama **regressione** (MRR 0.875, r@5 0.958 — perdita margine r05/r11) | **decisione owner su A2** (validazione §Esito: 1 default additive + procedere con C9/D13/B6 / 2 tuning RRF / 3 girare default) | — (A2 atterrato con rollback a config) | fasi 1–3; baseline per Track D D3 |
+| WQ-5 | **Miglioramenti ddofds** — fasi 0–5 (eval, retrieval, costi, memoria) | [analisi L1](./2026-11-01-dailydoseofds-improvement-analysis.md) → [L2](./2026-11-01-dailydoseofds-improvement-analysis-l2-flussi-funzionali.md) → [L3](./2026-11-01-dailydoseofds-improvement-analysis-l3-punti-di-aggancio.md); [piano A1](./2026-11-02-a1-retrieval-eval-plan.md); [validazione A2](./2026-11-03-a2-rrf-validation.md) | **Fase 0 (A1) done** (commit `9fb53da` 03/11): dataset 12 case + runner + CLI `ibis eval retrieval` + job CI `retrieval-eval`; baseline offline MRR 0.917 / r@5 0.958 / r@15 1.0, baseline ollama (additive) MRR 0.917 / r@5 1.0 / r@15 1.0. **Fase 1 (A2) implementata 03/11**: `rrf_fuse` + `FusionMode` + config `search.fusion` (default **additive**) + eval `--fusion` + campo `fusion` nel report; validazione: offline parità, ollama **regressione** (MRR 0.875, r@5 0.958 — perdita margine r05/r11). **Decisione owner A2 (03/11): opzione 2 — tuning RRF prima di decidere** (default resta additive) | **tuning RRF** (k più piccolo / ibride rank+cosine normalizzate, fuori scope A2) + re-run eval offline+ollama, poi decisione default | — | tuning A2; fasi 1–3 (C9/D13/B6); baseline per Track D D3 |
 | WQ-6 | **Track B** — ingest tracce Beacon (B0–B4, B3 se promossa) | [PLAN.md §9-bis](./PLAN.md) | Pianificato (approvato 03/11; solo piano, nessun codice) | B0 — installazione endpoint Beacon (azione manuale ⑥) + campionamento `runtime.jsonl` → nota `evaluations/beacon/campionamento.md` | azione manuale ⑥ (owner) | B1–B4, R8, B3 (se promossa) |
 
 Storico chiuso (non più in sospeso): F0.1–F0.7, gate R2, runtime 0.2.0 — vedi [PLAN.md](./PLAN.md).
@@ -63,9 +63,20 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   plugin.log 07:05–07:10 UTC); pass di misura S1.3 registrato (S1.3 done).
   Gap noto: cartella evidenze `artifacts/ui-tests/<run>-r33/` mai
   persistita (§6.4 analisi).
-- Aperto: decisione owner sul cold target (analisi §5) → eventuale pre-warm
-  ide-host → S1.4 demote log info→debug (azione agente) → R3.4–R3.8 →
-  P4.1–P4.6 → publish gate.
+- **Decisione cold target (03/11, opzione 1: pre-warm all'attivazione)** —
+  atterrata in VSIX **1.0.2** (`bf824b1`): fire-and-forget in `activate()` —
+  sessione stdio persistente + handshake + null call read-only
+  (`ticket_get_capabilities`); evidenza su canale Output (`pre-warm: runtime
+  session ready in Nms`); la prima interazione reale riusa la sessione calda
+  (stessa identità backend).
+- **S1.4 atterrato (03/11, `e9b85b8`)** — timing `memory_search` demotati
+  info→debug (invisibili al default INFO, tornano con `log_level DEBUG`);
+  righe nuove a info `memory_list: done in … entries=N` /
+  `memory_expand: done in … chain=N` (parità di evidenza frasi B/C, analisi
+  §6.3). cargo test + clippy verdi.
+- Aperto: run owner verifica pre-warm (Reload Window → prima espansione
+  warm-like; riga `pre-warm: …` sul canale Output, salvata questa volta) →
+  R3.4–R3.8 → P4.1–P4.6 → publish gate.
 
 ### WQ-3 — F4
 - Nessun sub-fase iniziata. Primo commit previsto: `feat(runtime): sidecar reconciliation at startup (layer 3)` (F4-B1).
@@ -93,7 +104,11 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   di margine cosine, tradeoff noto). Default NON girato: **decisione owner**
   (opzione raccomandata: default additive, procedere con C9/D13/B6).
 - Fasi 0–3 specificate in L3 con criteri di accettazione per intervento;
-  dopo la decisione owner il prossimo è C9+D13+B6 (fase 1).
+  **decisione owner su A2 (03/11): opzione 2 — tuning RRF prima di decidere**:
+  default resta `additive` (rollback a config), il tuning (k più piccolo,
+  ibride rank+cosine normalizzate — fuori scope A2 come specificato, candidati
+  a chiudere il gap r05/r11) rivaluta su eval offline+ollama e solo poi si
+  decide il default. C9+D13+B6 restano la fase 1 dopo il verdetto RRF.
 
 ### WQ-6 — Track B
 - Nessun sub-fase iniziata: piano integrato in [PLAN.md §9-bis](./PLAN.md)

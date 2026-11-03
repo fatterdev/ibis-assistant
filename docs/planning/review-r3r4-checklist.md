@@ -247,8 +247,15 @@ P4.1–P4.6 aperti** (azioni ② ③ ⑤ ancora da fare). Registrare qui le evid
   per boot tax** (1.4–4.9s con Ollama su, ~17s giù — SurrealDB 1–4s + check
   ~1.2s + probe). Decomposizione e 3 opzioni di rimozione boot tax:
   [2026-11-03-s13-timing-analysis.md](./2026-11-03-s13-timing-analysis.md).
-  **S1.4 pending**: demote `info`→`debug` delle timing SOLO dopo il verdetto
-  owner sul cold target.
+  **S1.4 done (03/11, post-verdetto, `e9b85b8`)**: timing `memory_search`
+  demotati info→debug (tornano con `log_level DEBUG`) + righe nuove a info
+  `memory_list: done in …` / `memory_expand: done in …` (parità di evidenza
+  frasi B/C, analisi §6.3). **Verdetto cold target (03/11): opzione 1
+  pre-warm** — atterrato in VSIX **1.0.2** (`bf824b1`): fire-and-forget in
+  `activate()` (sessione persistente + handshake + null call
+  `ticket_get_capabilities`); evidenza attesa sul canale Output
+  (`pre-warm: runtime session ready in Nms`) e prima espansione warm-like —
+  da verificare nel prossimo run owner insieme a R3.4–R3.8.
   Runbook passo-passo owner (failure-first, pre-flight, matrice guasti,
   evidenze): [2026-11-03-r33-closure-runbook.md](./2026-11-03-r33-closure-runbook.md).
   Seed albero (3 memorie, 02/11) via `scripts/seed-memory-r33.mjs` — fatto:
