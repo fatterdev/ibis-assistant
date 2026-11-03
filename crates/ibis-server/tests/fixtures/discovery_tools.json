@@ -647,7 +647,7 @@
       "name": "memory_insights"
     },
     {
-      "description": "Browse memories by kind/status/visibility without embeddings (metadata list, most recent first). Use memory_search for semantic queries.",
+      "description": "Browse memories by kind/status/visibility/workstream without embeddings (metadata list, most recent first). Use memory_search for semantic queries.",
       "input_schema": {
         "properties": {
           "actor": {
@@ -668,6 +668,10 @@
           },
           "visibility": {
             "description": "team|personal|all (default: team + caller's own personal)",
+            "type": "string"
+          },
+          "workstream": {
+            "description": "Optional workstream name or id: only memories linked to it via part_of_workstream",
             "type": "string"
           }
         },
@@ -807,6 +811,15 @@
         "type": "object"
       },
       "name": "memory_update"
+    },
+    {
+      "description": "Browse workstreams: {id, name, status, current_count} rows ordered by most recently touched (read-only, no embeddings). Pair with memory_list(workstream=<name or id>) for a workstream's entries.",
+      "input_schema": {
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "memory_workstreams"
     },
     {
       "description": "Trigger the RAFT self-optimization loop to improve knowledge graph weights.",

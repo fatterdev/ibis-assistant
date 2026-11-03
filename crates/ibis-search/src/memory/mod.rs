@@ -27,6 +27,7 @@
 //! | | [`export`] | 6 |
 //! | | [`import`] | 6 |
 //! | | [`share`] | 6 |
+//! | | [`workstream`] | 2 |
 
 pub mod add;
 pub mod ancestry;
@@ -51,6 +52,7 @@ pub mod session;
 pub mod share;
 pub mod temporal;
 pub mod working_state;
+pub mod workstream;
 
 use ibis_db::value::Object;
 
@@ -339,6 +341,9 @@ pub struct MemoryListParams {
     pub kinds: Vec<String>,
     pub status: String,
     pub visibility: String,
+    /// Optional workstream (name or id): only memories linked through the
+    /// `part_of_workstream` edge (`in` = memory, `out` = workstream).
+    pub workstream: String,
     pub limit: usize,
     pub actor: String,
 }
@@ -575,6 +580,20 @@ impl crate::search::SearchService {
             let (filter, more) = temporal::memory_status_filter_sql(status);
             where_parts.push(filter);
             bindings.extend(more);
+        }
+        // F4 §A.3: the optional workstream filter resolves the argument
+        // (name or id) to a validated record id and selects memories
+        // through the `part_of_workstream` edge (`in` = memory, `out` =
+        // workstream); the resolved id is identifier-safe to interpolate.
+        // `SELECT VALUE in` (not `SELECT in`): the subquery must project raw
+        // record ids or the outer `id IN [...]` compares records to objects
+        // and matches nothing (verified against SurrealDB 3.3.5).
+        let workstream = params.workstream.trim();
+        if !workstream.is_empty() {
+            let workstream_id = self.resolve_workstream_id(workstream).await?;
+            where_parts.push(format!(
+                "id IN (SELECT VALUE in FROM {ES_PART_OF_WORKSTREAM} WHERE out = {workstream_id})"
+            ));
         }
         let sql = format!(
             "SELECT id, kind, title, content, status, confidence, visibility, owner, tags, branch, valid_from, valid_until, created_at, updated_at FROM memory WHERE {} ORDER BY updated_at DESC LIMIT {limit};",
@@ -1254,6 +1273,135 @@ mod tests {
         assert!(
             current_sql.contains("(status = 'current')"),
             "explicit current keeps the currentness predicate: {current_sql}"
+        );
+    }
+
+    /// F4 §A.3: the `workstream` filter resolves the name via a bound
+    /// lookup and filters through the `part_of_workstream` edge — edge
+    /// direction pinned (`in` = memory, `out` = workstream).
+    #[tokio::test]
+    async fn list_memories_workstream_filter_resolves_the_name_and_pins_the_edge() {
+        let fake = std::sync::Arc::new(crate::test_support::FakeDb::new(vec![
+            (
+                "FROM workstream",
+                crate::test_support::rows_of(vec![crate::test_support::obj(vec![(
+                    "id",
+                    ibis_db::value::Value::from_t("workstream:⟨auth_refactor⟩"),
+                )])]),
+            ),
+            ("FROM memory", crate::test_support::rows_of(vec![])),
+        ]));
+        let svc = crate::search::SearchService::new(Some(fake.clone()), Some(crate::test_support::fake_ai()));
+        svc.list_memories(
+            &crate::ActorContext::LOCAL,
+            MemoryListParams {
+                workstream: "Auth Refactor".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("workstream name resolves");
+
+        let lookup_sql = fake
+            .smart_calls
+            .lock()
+            .unwrap()
+            .clone()
+            .iter()
+            .find(|q| q.contains("FROM workstream"))
+            .cloned()
+            .expect("name lookup query");
+        assert!(
+            lookup_sql.contains("string::lowercase(name OR '') = $ws_name"),
+            "the name lookup binds a case-insensitive match: {lookup_sql}"
+        );
+        let vars = fake.smart_vars.lock().unwrap()[0].clone();
+        assert_eq!(
+            vars.get("ws_name"),
+            Some(&ibis_db::value::Value::from_t("auth refactor")),
+            "the user value rides a bound variable (F-002)"
+        );
+
+        let memory_sql = fake
+            .smart_calls
+            .lock()
+            .unwrap()
+            .clone()
+            .iter()
+            .rfind(|q| q.contains("FROM memory"))
+            .cloned()
+            .expect("memory query");
+        assert!(
+            memory_sql.contains(
+                "id IN (SELECT VALUE in FROM part_of_workstream WHERE out = workstream:⟨auth_refactor⟩)"
+            ),
+            "edge direction pinned (in = memory, out = workstream): {memory_sql}"
+        );
+    }
+
+    /// An explicit workstream id skips the name lookup; bare keys normalize
+    /// to the canonical wrapped form.
+    #[tokio::test]
+    async fn list_memories_workstream_id_skips_the_name_lookup() {
+        let fake = std::sync::Arc::new(crate::test_support::FakeDb::new(vec![(
+            "FROM memory",
+            crate::test_support::rows_of(vec![]),
+        )]));
+        let svc = crate::search::SearchService::new(Some(fake.clone()), Some(crate::test_support::fake_ai()));
+        svc.list_memories(
+            &crate::ActorContext::LOCAL,
+            MemoryListParams {
+                workstream: "workstream:auth".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("workstream id accepted");
+
+        assert!(
+            !fake
+                .calls()
+                .iter()
+                .any(|q| q.contains("FROM workstream WHERE")),
+            "explicit ids must not pay a lookup query"
+        );
+        let memory_sql = fake
+            .smart_calls
+            .lock()
+            .unwrap()
+            .clone()
+            .iter()
+            .rfind(|q| q.contains("FROM memory"))
+            .cloned()
+            .expect("memory query");
+        assert!(
+            memory_sql.contains("WHERE out = workstream:⟨auth⟩"),
+            "bare record keys wrap before interpolation: {memory_sql}"
+        );
+    }
+
+    /// An unknown workstream name errors so browse roots get the feedback
+    /// instead of a silently empty list.
+    #[tokio::test]
+    async fn list_memories_unknown_workstream_name_errors() {
+        let fake = std::sync::Arc::new(crate::test_support::FakeDb::new(vec![(
+            "FROM workstream",
+            crate::test_support::rows_of(vec![]),
+        )]));
+        let svc = crate::search::SearchService::new(Some(fake), Some(crate::test_support::fake_ai()));
+        let err = svc
+            .list_memories(
+                &crate::ActorContext::LOCAL,
+                MemoryListParams {
+                    workstream: "ghost".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("unknown workstream");
+        assert!(
+            err.to_string().contains("workstream not found"),
+            "error names the miss: {err}"
         );
     }
 }

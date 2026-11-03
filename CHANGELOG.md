@@ -4,6 +4,24 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(server): workstream browse (memory_workstreams, list filter)** -
+  F4-A3 (F4 §A.3): `memory_list` gains an optional `workstream` arg (name or
+  id) that filters rows through the `part_of_workstream` edge (`in` =
+  memory, `out` = workstream — edge direction pinned by unit test). Names
+  resolve via a bound case-insensitive lookup, explicit ids pass through
+  normalized and table-checked; an unknown name errors instead of silently
+  returning zero rows. New read-only tool `memory_workstreams` (no args →
+  `{id, name, status, current_count}` rows ordered by most recently touched
+  — touched = max member `updated_at` through the edge, superseded members
+  included; counts honor the caller's visibility and the same currentness
+  predicate as the tree's `current` browse). The `workstream` table declares
+  its browse fields (`name`/`status`/`created_at`/`updated_at` — the table
+  shipped fieldless as an Axon-like placeholder; additive `IF NOT EXISTS`
+  DDL). Tool surface 57 → 58: contract
+  tests, read-only annotation set, tools/list gates and the discovery
+  fixture updated together (D15 lockstep); smoke-mcp read-only set gains
+  `memory_list` (stale since `6447058` made it read-only) and
+  `memory_workstreams`.
 - **feat(server): status all marker for memory_list and memory_search** -
   F4-A2 prerequisite (F4 §A.2): the "explicit empty/all marker" the design
   references did not exist server-side — `memory_search` defaulted an empty

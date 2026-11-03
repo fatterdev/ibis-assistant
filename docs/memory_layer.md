@@ -64,7 +64,7 @@ Source of truth: the declarative tool registry `crates/ibis-server/src/registry.
 | Group | Tools |
 |-------|-------|
 | Capture / session | `capture_observation`, `load_session_context`, `store_rule`, `get_rules`, `set_working_state`, `get_working_state` |
-| CRUD / search | `memory_add`, `memory_search`, `memory_list`, `memory_expand`, `memory_update`, `memory_delete`, `memory_history` |
+| CRUD / search | `memory_add`, `memory_search`, `memory_list`, `memory_workstreams`, `memory_expand`, `memory_update`, `memory_delete`, `memory_history` |
 | Forensics | `recent_failures`, `why_changed` |
 | Lifecycle | `memory_consolidate`, `memory_share`, `memory_export`, `memory_import` |
 | Design / insights | `ingest_design_note`, `memory_insights` |

@@ -17,9 +17,10 @@
 //!   fill (e.g. chunk embeddings stay `NONE` on first write, preserving the
 //!   F-A03 partial-resume semantics);
 //! - tables with no writer yet (`batch_job`, `error_state`, `community`,
-//!   `process`, `branch`, `workstream`) are declared without fields: their
+//!   `process`, `branch`) are declared without fields: their
 //!   future porting lanes add their own `DEFINE FIELD` lines (loud failure
-//!   beats silent schema drift).
+//!   beats silent schema drift). `workstream` followed the same rule until
+//!   F4-A3 declared its browse fields (name/status/timestamps).
 //!
 //! Everything is born fresh: `contains.in` is typed `record<repo | source_file>`
 //! directly, `memory` defaults are baked into the field definitions, the legacy
@@ -263,6 +264,12 @@ pub const INIT_STATEMENTS: &[&str] = &[
     "DEFINE TABLE IF NOT EXISTS community SCHEMAFULL;",
     "DEFINE TABLE IF NOT EXISTS process SCHEMAFULL;",
     "DEFINE TABLE IF NOT EXISTS workstream SCHEMAFULL;",
+    // F4 §A.3 workstream browse: the lane declares its fields (the table
+    // shipped empty as an Axon-like placeholder). Additive, idempotent.
+    "DEFINE FIELD IF NOT EXISTS name ON TABLE workstream TYPE option<string>;",
+    "DEFINE FIELD IF NOT EXISTS status ON TABLE workstream TYPE option<string>;",
+    "DEFINE FIELD IF NOT EXISTS created_at ON TABLE workstream TYPE option<datetime>;",
+    "DEFINE FIELD IF NOT EXISTS updated_at ON TABLE workstream TYPE option<datetime>;",
     // ── Edge tables (written only via RELATE; extra writer fields declared) ──
     "DEFINE TABLE IF NOT EXISTS contains TYPE RELATION SCHEMAFULL;",
     // in may be repo (repo→branch/file) or source_file (file→symbol); out stays branch|source_file|symbol.

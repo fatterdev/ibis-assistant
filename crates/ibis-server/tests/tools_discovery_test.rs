@@ -193,7 +193,7 @@ async fn unconfigured_ticketing_hides_the_ticket_group() {
         .list_tools(Default::default())
         .await
         .expect("tools/list");
-    assert_eq!(listed.tools.len(), 57 - TICKETING_TOOLS.len());
+    assert_eq!(listed.tools.len(), 58 - TICKETING_TOOLS.len());
     assert!(
         ticket_names(&listed.tools).is_empty(),
         "ticket group must be hidden: {:?}",
@@ -226,7 +226,7 @@ async fn unconfigured_ticketing_hides_the_ticket_group() {
     client.shutdown().await;
 }
 
-/// The open gate: one registered provider announces the full 57-tool surface
+/// The open gate: one registered provider announces the full 58-tool surface
 /// and the ticket tools actually dispatch.
 #[tokio::test]
 async fn configured_ticketing_announces_the_full_surface() {
@@ -241,7 +241,7 @@ async fn configured_ticketing_announces_the_full_surface() {
         .list_tools(Default::default())
         .await
         .expect("tools/list");
-    assert_eq!(listed.tools.len(), 57);
+    assert_eq!(listed.tools.len(), 58);
     let announced = ticket_names(&listed.tools);
     assert_eq!(announced.len(), TICKETING_TOOLS.len(), "{announced:?}");
     for name in TICKETING_TOOLS {
@@ -326,7 +326,7 @@ async fn visibility_flip_broadcasts_tools_list_changed() {
         .list_tools(Default::default())
         .await
         .expect("tools/list");
-    assert_eq!(listed.tools.len(), 57 - TICKETING_TOOLS.len());
+    assert_eq!(listed.tools.len(), 58 - TICKETING_TOOLS.len());
 
     // A reload that keeps the gate closed is silent.
     let visible =
@@ -351,7 +351,7 @@ async fn visibility_flip_broadcasts_tools_list_changed() {
         "one tools/list_changed after the open flip"
     );
     let relisted = peer.list_tools(Default::default()).await.expect("re-list");
-    assert_eq!(relisted.tools.len(), 57);
+    assert_eq!(relisted.tools.len(), 58);
 
     // Closing the gate announces again and the re-list hides the group.
     let visible =
@@ -369,7 +369,7 @@ async fn visibility_flip_broadcasts_tools_list_changed() {
         "second tools/list_changed after the close flip"
     );
     let relisted = peer.list_tools(Default::default()).await.expect("re-list");
-    assert_eq!(relisted.tools.len(), 57 - TICKETING_TOOLS.len());
+    assert_eq!(relisted.tools.len(), 58 - TICKETING_TOOLS.len());
     assert!(ticket_names(&relisted.tools).is_empty());
 
     let _ = service.cancel().await;

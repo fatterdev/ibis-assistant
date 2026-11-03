@@ -1,5 +1,5 @@
 //! Contract gate:
-//! all 57 tool names present in the registry, the back-compat memory tools
+//! all 58 tool names present in the registry, the back-compat memory tools
 //! registered, export/import describe the runtime transfer, and the legacy
 //! `redmine_*` names forbidden. Data-driven against the D3 registry
 //! (name + description + schema) instead of grepping a source file.
@@ -8,10 +8,10 @@ use ibis_server::registry::{schemas, spec_of, TOOL_ANNOTATIONS, TOOL_SPECS};
 use serde_json::{json, Value};
 
 /// `TestToolContracts_TicketAndPRNamesPresent + the
-/// authoritative list: every one of the 57 tools must be registered.
+/// authoritative list: every one of the 58 tools must be registered.
 #[test]
-fn tool_contracts_all_57_names_present() {
-    let required: [&str; 57] = [
+fn tool_contracts_all_58_names_present() {
+    let required: [&str; 58] = [
         // Project session & ingest (4)
         "init_project",
         "update_project_status",
@@ -19,7 +19,7 @@ fn tool_contracts_all_57_names_present() {
         "ingest_code",
         // Git credentials (1)
         "git_configure_credentials",
-        // Memory (26)
+        // Memory (27)
         "provide_collaborative_memory",
         "save_reasoning_outcome",
         "memory_add",
@@ -28,6 +28,7 @@ fn tool_contracts_all_57_names_present() {
         "as_of_project",
         "memory_search",
         "memory_list",
+        "memory_workstreams",
         "memory_expand",
         "memory_update",
         "memory_delete",
@@ -79,11 +80,11 @@ fn tool_contracts_all_57_names_present() {
         // Logs (1)
         "analyze_logs",
     ];
-    assert_eq!(required.len(), 57, "the authoritative list has 57 tools");
+    assert_eq!(required.len(), 58, "the authoritative list has 58 tools");
     assert_eq!(
         TOOL_SPECS.len(),
-        57,
-        "registry registers exactly 57 tools (found {})",
+        58,
+        "registry registers exactly 58 tools (found {})",
         TOOL_SPECS.len()
     );
     for name in required {
@@ -222,11 +223,12 @@ fn tool_contracts_schema_wire_shapes() {
     assert_eq!(bootstrap["properties"]["dry_run"]["type"], "boolean");
 
     // Tools with no arguments expose an empty properties object
-    // (settings_get / ticket_get_capabilities).
+    // (settings_get / ticket_get_capabilities / memory_workstreams).
     for name in [
         "settings_get",
         "ticket_get_capabilities",
         "settings_open_ui",
+        "memory_workstreams",
     ] {
         let schema = schemas().get(name).expect(name);
         assert_eq!(
@@ -293,7 +295,7 @@ fn tool_annotations_complete_and_pinned() {
 
     // The read-only set is exactly the pure-read surface; everything else
     // is an explicit mutator (readOnlyHint: false).
-    let read_only: [&str; 23] = [
+    let read_only: [&str; 24] = [
         // Code search & analysis
         "ask_project",
         "analyze_blast_radius",
@@ -301,6 +303,7 @@ fn tool_annotations_complete_and_pinned() {
         // Memory reads
         "memory_search",
         "memory_list",
+        "memory_workstreams",
         "memory_expand",
         "memory_history",
         "memory_insights",

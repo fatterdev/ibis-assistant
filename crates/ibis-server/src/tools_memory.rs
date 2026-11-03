@@ -1,5 +1,5 @@
 //! Memory / knowledge-graph / temporal tool handlers — the
-//! AddTool closures for the 26 memory tools plus the 3 code-search
+//! AddTool closures for the 27 memory tools plus the 3 code-search
 //! tools (`ask_project`, `analyze_blast_radius`, `find_dead_code`).
 
 use std::sync::Arc;
@@ -36,6 +36,7 @@ pub async fn dispatch(
         "as_of_project" => as_of_project(state, &args).await,
         "memory_search" => memory_search(state, &args, actor).await,
         "memory_list" => memory_list(state, &args, actor).await,
+        "memory_workstreams" => memory_workstreams(state, actor).await,
         "memory_expand" => memory_expand(state, &args, actor).await,
         "memory_update" => memory_update(state, &args, actor).await,
         "memory_delete" => memory_delete(state, &args, actor).await,
@@ -500,6 +501,7 @@ async fn memory_list(
                 kinds,
                 status: get_string_arg(args, "status"),
                 visibility: get_string_arg(args, "visibility"),
+                workstream: get_string_arg(args, "workstream"),
                 limit,
                 actor: get_string_arg(args, "actor"),
             },
@@ -508,6 +510,16 @@ async fn memory_list(
     {
         Ok(results) => json_result(&results),
         Err(e) => error_result(format!("memory_list failed: {e}")),
+    }
+}
+
+/// Scenario: memory_workstreams — F4 §A.3 Workstreams view roots: the
+/// workstream rows with their current-member counts, most recently touched
+/// first; read-only browse without embeddings (no args).
+async fn memory_workstreams(state: &Arc<AppState>, actor: &ActorContext) -> ToolResult {
+    match state.search().list_workstreams(actor).await {
+        Ok(rows) => json_result(&rows),
+        Err(e) => error_result(format!("memory_workstreams failed: {e}")),
     }
 }
 

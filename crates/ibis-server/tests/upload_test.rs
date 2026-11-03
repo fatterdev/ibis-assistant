@@ -33,7 +33,7 @@ use rmcp::{tool, tool_handler, tool_router, RoleServer, ServerHandler};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
-/// Minimal MCP handler standing in for the 57-tool registry (the upload
+/// Minimal MCP handler standing in for the 58-tool registry (the upload
 /// scenarios never touch the MCP surface; the full registry rides the same
 /// mux in `discovery_snapshot_test.rs` and the e2e gate).
 #[derive(Clone)]

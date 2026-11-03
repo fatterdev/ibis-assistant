@@ -169,8 +169,9 @@ function lastNotification(method) {
   return null;
 }
 
-// F0.2 — the 15 core read-only tools (ticket_* reads stay hidden while
-// ticketing is unconfigured; F0.6 dynamic discovery).
+// F0.2 — the 17 core read-only tools (ticket_* reads stay hidden while
+// ticketing is unconfigured; F0.6 dynamic discovery). memory_list went
+// read-only in 6447058, memory_workstreams in F4-A3.
 const EXPECTED_READONLY = [
   "analyze_blast_radius",
   "as_of_project",
@@ -183,7 +184,9 @@ const EXPECTED_READONLY = [
   "memory_expand",
   "memory_history",
   "memory_insights",
+  "memory_list",
   "memory_search",
+  "memory_workstreams",
   "recent_failures",
   "settings_get",
   "why_changed",

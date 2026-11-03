@@ -131,7 +131,7 @@ pub static TOOL_SPECS: &[ToolSpec] = &[
             p!("ssh_private_key", "SSH Private Key (optional, for ssh auth)", String),
         ],
     },
-    // ---- Memory / knowledge graph / temporal (26) ----
+    // ---- Memory / knowledge graph / temporal (27) ----
     ToolSpec {
         name: "provide_collaborative_memory",
         description: "Inject collaborative memory/context for the project. Optional embeddings array can be provided to skip server-side AI embedding generation.",
@@ -218,14 +218,20 @@ pub static TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "memory_list",
-        description: "Browse memories by kind/status/visibility without embeddings (metadata list, most recent first). Use memory_search for semantic queries.",
+        description: "Browse memories by kind/status/visibility/workstream without embeddings (metadata list, most recent first). Use memory_search for semantic queries.",
         properties: &[
             p!("kind", "Optional comma-separated kind filter", String),
             p!("status", "Optional status filter (empty = all; the explicit all marker is equivalent)", String),
             p!("visibility", "team|personal|all (default: team + caller's own personal)", String),
+            p!("workstream", "Optional workstream name or id: only memories linked to it via part_of_workstream", String),
             p!("limit", "Optional max results (default 100)", Number),
             p!("actor", "Optional identity fallback", String),
         ],
+    },
+    ToolSpec {
+        name: "memory_workstreams",
+        description: "Browse workstreams: {id, name, status, current_count} rows ordered by most recently touched (read-only, no embeddings). Pair with memory_list(workstream=<name or id>) for a workstream's entries.",
+        properties: &[],
     },
     ToolSpec {
         name: "memory_expand",
@@ -748,7 +754,7 @@ pub static TOOL_ANNOTATIONS: &[ToolAnnotation] = &[
         title: "Configure Git Credentials",
         read_only: false,
     },
-    // ---- Memory / knowledge graph / temporal (26) ----
+    // ---- Memory / knowledge graph / temporal (27) ----
     ToolAnnotation {
         name: "provide_collaborative_memory",
         title: "Provide Collaborative Memory",
@@ -787,6 +793,11 @@ pub static TOOL_ANNOTATIONS: &[ToolAnnotation] = &[
     ToolAnnotation {
         name: "memory_list",
         title: "List Memories",
+        read_only: true,
+    },
+    ToolAnnotation {
+        name: "memory_workstreams",
+        title: "Browse Workstreams",
         read_only: true,
     },
     ToolAnnotation {
