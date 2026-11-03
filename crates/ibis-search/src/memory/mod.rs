@@ -556,6 +556,7 @@ impl crate::search::SearchService {
         actor_ctx: &crate::ActorContext,
         params: MemoryListParams,
     ) -> crate::Result<Vec<Memory>> {
+        let t0 = std::time::Instant::now();
         let db = self.require_db()?;
         let mut limit = params.limit;
         if limit == 0 {
@@ -583,7 +584,13 @@ impl crate::search::SearchService {
             .await
             .map_err(|e| SearchError::other(format!("list memories: {e}")))?;
         let rows_values = rows::normalize_rows(&outcome).unwrap_or_default();
-        Ok(memories_from_rows(&rows_values))
+        let memories = memories_from_rows(&rows_values);
+        tracing::info!(
+            "memory_list: done in {:?} entries={}",
+            t0.elapsed(),
+            memories.len()
+        );
+        Ok(memories)
     }
 
     /// Short semantic hits; call `expand_memory` for
@@ -594,7 +601,7 @@ impl crate::search::SearchService {
         params: MemorySearchParams,
     ) -> crate::Result<Vec<Memory>> {
         let t0 = std::time::Instant::now();
-        tracing::info!(
+        tracing::debug!(
             "memory_search: start (query_len={}, kinds={:?})",
             params.query.len(),
             params.kinds
@@ -611,7 +618,7 @@ impl crate::search::SearchService {
             );
             SearchError::wrap("embedding failed", e)
         })?;
-        tracing::info!("memory_search: embedded in {:?}", t0.elapsed());
+        tracing::debug!("memory_search: embedded in {:?}", t0.elapsed());
 
         let mut status = params.status.trim().to_string();
         if status.is_empty() {
@@ -660,7 +667,7 @@ impl crate::search::SearchService {
             where_parts.join(" AND ")
         );
         bindings.push(("vec".into(), crate::commit_meaning::vec_value_f32(&vector)));
-        tracing::info!(
+        tracing::debug!(
             "memory_search: querying db (fetch_limit={fetch_limit}, vector_len={}, elapsed={:?})",
             vector.len(),
             t0.elapsed()
@@ -669,19 +676,19 @@ impl crate::search::SearchService {
             .smart_query(&sql, bind(bindings))
             .await
             .map_err(|e| SearchError::other(format!("search memory: {e}")))?;
-        tracing::info!("memory_search: db query returned in {:?}", t0.elapsed());
+        tracing::debug!("memory_search: db query returned in {:?}", t0.elapsed());
         let rows_values = rows::normalize_rows(&outcome).unwrap_or_default();
         let mut memories = memories_from_rows(&rows_values);
-        tracing::info!(
+        tracing::debug!(
             "memory_search: rows={} elapsed={:?}",
             memories.len(),
             t0.elapsed()
         );
         let (keywords, entities) = crate::retrieval_boost::tokenize_query(&params.query);
-        tracing::info!("memory_search: boosting (elapsed={:?})", t0.elapsed());
+        tracing::debug!("memory_search: boosting (elapsed={:?})", t0.elapsed());
         let linked_symbols =
             crate::retrieval_boost::resolve_linked_symbols(self.db.as_ref(), &entities).await;
-        tracing::info!(
+        tracing::debug!(
             "memory_search: linked_symbols={} elapsed={:?}",
             linked_symbols.len(),
             t0.elapsed()
@@ -717,7 +724,7 @@ impl crate::search::SearchService {
                 break;
             }
         }
-        tracing::info!(
+        tracing::debug!(
             "memory_search: done in {:?} hits={}",
             t0.elapsed(),
             boosted.len()
@@ -764,6 +771,7 @@ impl crate::search::SearchService {
         depth: usize,
         explicit_actor: &str,
     ) -> crate::Result<MemoryExpansion> {
+        let t0 = std::time::Instant::now();
         let memories = self
             .expand_memory(actor_ctx, &[id.to_string()], explicit_actor)
             .await?;
@@ -792,6 +800,12 @@ impl crate::search::SearchService {
         }
 
         let workstream = self.memory_workstream(id).await?;
+        tracing::info!(
+            "memory_expand: done in {:?} id={} chain={}",
+            t0.elapsed(),
+            id,
+            history.len()
+        );
         Ok(MemoryExpansion {
             memory,
             supersedes_chain: history,

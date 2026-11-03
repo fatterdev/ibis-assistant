@@ -4,6 +4,16 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **chore(search): S1.4 — search timing demoted to debug, list/expand timed** -
+  the S1.3 measurement instrumentation on `memory_search` (start / embedded /
+  querying db / db query returned / rows / boosting / linked_symbols / done)
+  moves `info`→`debug`: invisible at the default INFO log level, back on
+  demand with `log_level DEBUG` (verdict landed, numbers registered in the
+  S1.3 analysis). `memory_list` and `memory_expand` — the memory-tree
+  phrase-B/C paths, previously silent in `plugin.log` — now emit
+  `memory_list: done in … entries=N` and `memory_expand: done in … chain=N`
+  at `info`, closing the evidence-parity gap (S1.3 analysis §6.3) for the
+  next owner run.
 - **feat(vsix): 1.0.2 — runtime pre-warm at activation** - `activate()` now
   fires a fire-and-forget pre-warm: the persistent ide-host session child is
   spawned, the MCP handshake paid, and one cheap read-only call
