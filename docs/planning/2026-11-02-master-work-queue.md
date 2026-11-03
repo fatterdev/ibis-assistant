@@ -92,6 +92,13 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   hook Azure Tools). Restano le azioni owner ②③ per il publish gate.
 - Aperto: azioni ②③ (Trusted Publishing OIDC, token Open VSX) → publish
   gate (azioni ⑤ già fatte per i review).
+- **Pulizia pre-push (registrata, owner: riscrittura storia attesa prima del
+  push)**: rimuovere le memorie di test — claim in-repo `mem_26f1730…`
+  (R3.4 selection, commit `b112bd7`) e `mem_973f67a…` (R3.5 file, commit
+  `1f64f7f`) da `.ibis/claims/`, più le due fact DB-only create in chat
+  ("Memoria fact di prova", "Quick Actions fact" `mem_ff975f41…`) via
+  `memory_delete`. **Restano** le 3 memorie seed (decision/fix/gotcha, claim
+  `a4cd24f`/`1d00552`: contenuto reale di progetto).
 
 ### WQ-3 — F4
 - Nessun sub-fase iniziata. Primo commit previsto: `feat(runtime): sidecar reconciliation at startup (layer 3)` (F4-B1).
