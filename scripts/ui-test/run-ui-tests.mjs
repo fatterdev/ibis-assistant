@@ -29,7 +29,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(join(here, "..", ".."));
 const manifestPath = join(here, "tasks.json");
 const evidenceRoot = join(root, "artifacts", "ui-tests");
-const vsixPath = join(root, "vscode-extension", "ibis-assistant-1.0.7.vsix");
+const vsixPath = join(root, "vscode-extension", "ibis-assistant-1.0.8.vsix");
 const uiTarsExe = process.env.UI_TARS_EXE || join(process.env.LOCALAPPDATA || "", "UiTars", "UI-TARS.exe");
 const vscodeExe = process.env.VSCODE_EXE || "code";
 

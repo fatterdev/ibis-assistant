@@ -4,6 +4,15 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(vscode): 1.0.8 — counts preloaded at activation, expand-all fixed** -
+  the memory tree now preloads all eight kind counts at activation (~8
+  parallel `memory_list`, ms-scale, right after the pre-warm session is
+  ready): the badges are visible on a virgin tree before any expansion, so
+  virgin/collapsed/expanded kinds behave uniformly (owner decision 03/11).
+  The expand-all command re-resolves the root nodes at every step (any
+  reveal can re-render and invalidate previous instances) and logs each
+  reveal outcome, instead of silently swallowing failures — the 1.0.7 loop
+  iterated stale nodes and did nothing.
 - **feat(vscode): 1.0.7 — tree updates after capture, expand-all button** -
   Remember Selection/File (and the Remember command) now refresh the memory
   tree automatically after a successful `memory_add` (counts + entries,
