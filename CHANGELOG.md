@@ -4,6 +4,15 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **fix(vscode): 1.0.10 — walkthrough ships valid step media** - the four
+  onboarding steps carried inline markdown in a top-level `markdown` key,
+  but the `walkthroughs` schema requires a `media` per step
+  (`{ image, altText }` or `{ markdown: <path> }`): without it VS Code
+  dropped the whole walkthrough and "Get Started with Ibis Assistant"
+  never appeared (Open Walkthrough empty; Parte A smoke checked manifest
+  structure only, not VS Code acceptance). Content moved to
+  `walkthrough/*.md` files referenced by `media.markdown`, `command:`
+  links preserved; `1.1.0` stays reserved for F4 so the bump is patch.
 - **refactor(vscode): 1.0.9 — expand-all button removed** - the custom
   expand-all title button is dropped (owner decision 03/11): VS Code custom
   views have no standard expand-all surface and no programmatic collapse,

@@ -38,7 +38,7 @@ Local VSIX (recommended while the Marketplace publishing is pending):
 cd vscode-extension
 npm install
 npx --yes @vscode/vsce package --no-dependencies
-code --install-extension .\ibis-assistant-1.0.9.vsix
+code --install-extension .\ibis-assistant-1.0.10.vsix
 ```
 
 For iterative development open this folder in an **Extension Development Host** (`F5`) instead of `code --install-extension` on the source directory (that CLI only accepts an extension id or a `.vsix` file).

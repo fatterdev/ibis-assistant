@@ -1,0 +1,3 @@
+Select code and run **Ibis Assistant: Remember Selection** (editor context menu) to capture it with `file:start-end` provenance, or use **Ibis Assistant: Remember File** for a fact about a whole file. Both pass `source_path` + sha256 `source_hash` to `memory_add`, so git-driven staleness can invalidate them when the file changes.
+
+[Try Remember](command:ibis.remember) · [Remember Selection](command:ibis.rememberSelection)
