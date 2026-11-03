@@ -4,6 +4,13 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(vscode): 1.0.11 — Quick Actions view in the Ibis container** - the
+  activity-bar container gains a second view, **Quick Actions**, next to
+  Memory: one-click access to Extension Settings, the runtime's own
+  Settings UI, Status, Show Output and the Get Started walkthrough (new
+  `ibis.openWalkthrough` deep link) — owner request 03/11 ("shortcut alle
+  impostazioni e varie altre cose" accanto alle memorie). Native tree, no
+  webview.
 - **fix(vscode): 1.0.10 — walkthrough ships valid step media** - the four
   onboarding steps carried inline markdown in a top-level `markdown` key,
   but the `walkthroughs` schema requires a `media` per step

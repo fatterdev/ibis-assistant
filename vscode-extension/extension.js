@@ -5,6 +5,7 @@ const path = require("node:path");
 
 const { registerMemoryTree } = require("./memory-tree");
 const { registerRememberSelection } = require("./remember-selection");
+const { registerQuickActions } = require("./quick-actions");
 
 const EXTENSION_ID = "fatterdev.ibis-assistant";
 
@@ -155,6 +156,7 @@ async function activate(context) {
   registerMcpProvider(context, host);
   createStatusBarItem(context, host);
   registerMemoryTree(context, { getConfig, resolveBackend, logLine }, host);
+  registerQuickActions(context);
   registerRememberSelection(
     context,
     { getConfig, resolveBackend, logLine, kinds: REMEMBER_KINDS },
