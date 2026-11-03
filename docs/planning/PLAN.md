@@ -9,11 +9,9 @@
 > prodotto; i riferimenti a `runtime/` nelle fasi vanno letti come root del repo.
 > **Aggiornamento 30/10/2026 — revert del rebrand**: prodotto = **Ibis Assistant**
 > (binario `ibis`, MCP label "Ibis", data dir `%LOCALAPPDATA%\ibis`, repo
-> `fatterdev/ibis-assistant`). Tutti i riferimenti `threski`/`threski-studio` nel resto
-> di questo documento (fasi F0.2–F0.7 eseguite, F1–F3, Track D) vanno letti con la
-> mappa di revert in [naming-map.md](naming-map.md): `threski`→`ibis`,
-> `threski-studio`→`ibis-assistant`. Le F0.2–F0.7 sono complete anche dopo il revert
-> (rename meccanico, zero cambi funzionali).
+> `fatterdev/ibis-assistant`). Le F0.2–F0.7 sono complete anche dopo il revert
+> (rename meccanico, zero cambi funzionali); la mappa del naming del rebrand
+> revertito resta come documento storico in [naming-map.md](naming-map.md).
 > **Aggiornamento 30/10/2026 — gate R2 chiuso**: review R2 superata (Parte A
 > protocollo 23/23 via `scripts/smoke-mcp.mjs`; Parte B B1–B5 con evidenza owner in
 > VS Code 1.144 — zero conferme read-only, `/ibis.*`, resources in Add Context,
@@ -33,10 +31,10 @@
 
 | Decisione | Esito |
 |---|---|
-| Prodotto | **Ibis Assistant** — living project memory for real codebases (revert 30/10/2026: il nome Threski è stato scartato dall'owner) |
+| Prodotto | **Ibis Assistant** — living project memory for real codebases (revert 30/10/2026: il nome del rebrand è stato scartato dall'owner) |
 | Radice brand | `ibis` (l'ibis sacro di Thoth, *Threskiornis aethiopicus* nella lore) — revert globale dal rebrand F0.1, zero eccezioni |
-| Crate Rust interni | `threski-*` → `ibis-*` (revert; solo `mcp-bridge` resta perché privo del prefisso) |
-| Env vars | `THRESKI_*` → `IBIS_*` |
+| Crate Rust interni | `ibis-*` (revert del prefisso F0.1; solo `mcp-bridge` resta perché privo del prefisso) |
+| Env vars | `IBIS_*` (revert del prefisso F0.1) |
 | Binario/CLI | `ibis` (`ibis run`, `ibis memory add`) — nome corto |
 | VSIX | `fatterdev.ibis-assistant`, display "Ibis Assistant", settings `ibis.*` |
 | Agent plugin | `ibis` (Agent Plugins 1.0; skill corte → slash `/ibis usage`), marketplace repo `fatterdev/ibis-marketplace` |
@@ -52,17 +50,17 @@
 
 | Superficie | Nome |
 |---|---|
-| Repo GitHub | `fatterdev/threski-studio` (redirect automatico dal vecchio) |
-| Binario/CLI | `threski` |
-| Data dir | `%LOCALAPPDATA%\threski\` |
-| MCP server (label per agenti) | "Threski"; prompts `/threski.<nome>`; risorse `threski://…` |
-| MCP registry (`server.json`) | `threski` |
-| VSIX | `fatterdev.threski-studio` — "Threski Studio" |
-| Plugin | `threski` — skill `usage/-readiness/-status/-remember/-set-working-state` (slash `/threski <nome>`; label MCP VSIX "Threski") |
-| Cursor plugin | binario `threski`, env `THRESKI_*`, skill/commands `threski-*` |
-| ide-host | `@threski/ide-host`, default `THRESKI_BIN="threski"`, clientInfo `threski-ide-host/1.0.0` |
-| Crate Rust | `threski-core`, `threski-server`, `threski-ai`, … (`mcp-bridge` invariato) |
-| MCP App | "Threski Studio Memory Curator" (`ui://threski/memory-curator`) |
+| Repo GitHub | `fatterdev/ibis-assistant` (redirect automatico dal nome del rebrand) |
+| Binario/CLI | `ibis` |
+| Data dir | `%LOCALAPPDATA%\ibis\` |
+| MCP server (label per agenti) | "Ibis"; prompts `/ibis.<nome>`; risorse `ibis://…` |
+| MCP registry (`server.json`) | `ibis` |
+| VSIX | `fatterdev.ibis-assistant` — "Ibis Assistant" |
+| Plugin | `ibis` — skill `usage/-readiness/-status/-remember/-set-working-state` (slash `/ibis <nome>`; label MCP VSIX "Ibis") |
+| Cursor plugin | binario `ibis`, env `IBIS_*`, skill/commands `ibis-*` |
+| ide-host | `@ibis/ide-host`, default `IBIS_BIN="ibis"`, clientInfo `ibis-ide-host/1.0.0` |
+| Crate Rust | `ibis-core`, `ibis-server`, `ibis-ai`, … (`mcp-bridge` invariato) |
+| MCP App | "Ibis Assistant Memory Curator" (`ui://ibis/memory-curator`) |
 | Lore README | Thoth, l'ibis sacro (*Threskiornis aethiopicus*), Casa della Vita — i riferimenti all'uccello "ibis" nei testi di lore sono **intenzionali** |
 
 ## 3. Convenzioni di lavoro
@@ -74,7 +72,7 @@
 
 ## 4. Azioni manuali dell'owner (fuori codice)
 
-1. Rename repo GitHub → `threski-studio` (redirect automatico) + update remote locale.
+1. Rename repo GitHub → `ibis-assistant` (redirect automatico dal nome del rebrand) + update remote locale.
 2. Partner Center: publisher `fatterdev` + policy **Trusted Publishing** (OIDC da GitHub Actions, vsce ≥ 4.0.2).
 3. Account Eclipse Foundation per **Open VSX** (canale separato, non Microsoft).
 4. Istanza **Scope** (docker-compose self-hosted) + preview/API key.
@@ -82,22 +80,17 @@
 
 ## 5. FASE 0 — Runtime (Rust)
 
-### F0.1 — Global rename `ibis` → `threski` (primo commit del prodotto)
-Strumento: `scripts/migrate/migrate-rename.ps1` (legge il repo sorgente in sola lettura, scrive l'albero migrato in `<repo>/runtime/`).
-
-| Sub | Azioni | Verifica | Commit |
-|---|---|---|---|
-| a | Rinomina directory + package dei crate `crates/ibis-*` → `crates/threski-*` (core, logger, git, db, ai, ingest-*, search, ticketing-*, repopr, settings, wizard, cli, httpserver, server, optimization, xtask; `mcp-bridge` invariato), workspace `Cargo.toml`, `use ibis_*` → `use threski_*`, fixture, test | `cargo test` green | `refactor!: rename crates ibis-* to threski-*` |
-| b | Binario: xtask → `dist/threski.exe`; env `THRESKI_*`; data dir `threski`; schema risorse `threski://`; clientInfo; wizard/testi CLI; default binario | `cargo test` + `cargo xtask dist` | `refactor!: binary, env vars and data dirs to threski` |
-| c | ide-host: `@threski/ide-host`, `THRESKI_BIN`, clientInfo; cursor-plugin: `mcp.json`, env, skill/commands `threski-*`, README/STATUS | framing test + `vsce package` | `refactor: ide surfaces to threski studio` |
-| d | VSIX: id/display/settings `threskiStudio.*`/commands "Threski Studio: *"/output channel/icona | `vsce package` + install locale | (unito a c) |
-| e | Docs: README (lore), `docs/*`, CHANGELOG root+vscode, scan `config_master.json`/`config/` | grep `ibis` residuo = solo lore | `docs: rebrand to threski studio with sacred-ibis lore` |
-| f | Azione manuale ①: rename repo GitHub + remote | — | — |
+### F0.1 — Migrazione del runtime con rename globale (primo commit del prodotto)
+Eseguita il 29/10/2026 con `scripts/migrate/migrate-rename.ps1` (legge il repo
+sorgente in sola lettura, scrive l'albero migrato in `<repo>/runtime/`); il rebrand
+fu poi revertito il 30/10/2026. Sub-fasi, commit-message e verifiche nello storico
+della migrazione: [scripts/migrate/migrate-checklist.md](../../scripts/migrate/migrate-checklist.md)
+e mappa [naming-map.md](naming-map.md) (documenti storici).
 
 **→ REVIEW R1**: cargo test green, dist builds, VSIX installa, repo rinominato.
 
 ### F0.2 — Tool annotations
-`threski-server/src/registry.rs`: `readOnlyHint: true` + `title` per tutti i read-only
+`ibis-server/src/registry.rs`: `readOnlyHint: true` + `title` per tutti i read-only
 (`ask_project`, `analyze_blast_radius`, `find_dead_code`, `memory_search/expand/history/insights`,
 `why_changed`, `as_of_project`, `knowledge_diff`, `get_working_state`, `load_session_context`,
 `recent_failures`, `settings_get`, `ticket_get/search/search_my/list_statuses/list_projects/search_users/get_capabilities`,
@@ -107,68 +100,68 @@ Commit: `feat(server): read-only tool annotations (readonlyhint, titles)`.
 ### F0.3 — MCP prompts
 `prompts/list` + `prompts/get`: `readiness`, `status`, `why_changed`, `blast_radius`, `remember`
 (testi derivati dal contratto di sessione, argomenti con completions). Test integrazione protocollo.
-Commit: `feat(server): mcp prompts (/threski.*)`.
+Commit: `feat(server): mcp prompts (/ibis.*)`.
 
 ### F0.4 — MCP resources + templates
-`resources/list/read` + templates `threski://memory/{kind}/{id}`, `threski://rules/{name}`,
-`threski://ticket/{id}`; `resources/subscribe` + notifiche `resources/updated` su mutazioni memoria (lane SSE).
+`resources/list/read` + templates `ibis://memory/{kind}/{id}`, `ibis://rules/{name}`,
+`ibis://ticket/{id}`; `resources/subscribe` + notifiche `resources/updated` su mutazioni memoria (lane SSE).
 Commit: `feat(server): memory, rules and tickets as mcp resources (templates + live updates)`.
 
 ### F0.5 — Reasoning via MCP sampling
-`threski-ai`: provider `mcp_sampling` (request `sampling/createMessage` sul canale MCP del client),
+`ibis-ai`: provider `mcp_sampling` (request `sampling/createMessage` sul canale MCP del client),
 catena fallback `sampling → lm_bridge → ollama`; setting `ai.reasoning.provider`
-(default `ide_sampling` in plugin mode); LM bridge deprecato ma funzionante (`THRESKI_LM_BRIDGE_*` solo fallback).
+(default `ide_sampling` in plugin mode); LM bridge deprecato ma funzionante (`IBIS_LM_BRIDGE_*` solo fallback).
 Verify: unit test fallback + e2e stdio. Commit: `feat(ai): reasoning via mcp sampling with lm-bridge fallback`.
 
 ### F0.6 — Dynamic tool discovery
 Annuncio solo tool core se ticketing non configurato; `notifications/tools/list_changed` al cambio
 config (anche via `settings_apply`). Commit: `feat(server): dynamic tool discovery for unconfigured ticketing`.
 
-### F0.7 — MCP App "Threski Studio Memory Curator"
-`threski-httpserver`: asset statico `ui://threski/memory-curator` (`text/html;profile=mcp-app`,
+### F0.7 — MCP App "Ibis Assistant Memory Curator"
+`ibis-httpserver`: asset statico `ui://ibis/memory-curator` (`text/html;profile=mcp-app`,
 SDK `@modelcontextprotocol/ext-apps`, CSP solo loopback); `memory_search`/`memory_expand`/`memory_add`
 tornano `_meta.ui.resourceUri` + **output testuale sempre presente**.
 Verify: manuale in VS Code (MCP Apps experimental) + test fallback. Commit: `feat(server): memory curator mcp app with text fallback`.
 
-**→ REVIEW R2**: smoke MCP in VS Code — zero conferme sui read-only, `/threski.*` in chat,
+**→ REVIEW R2**: smoke MCP in VS Code — zero conferme sui read-only, `/ibis.*` in chat,
 resources in "Add Context", sampling attivo, App visibile.
 
-## 6. FASE 1 — VSIX "Threski Studio" (parallela a Fase 2, dopo F0.2+)
+## 6. FASE 1 — VSIX "Ibis Assistant" (parallela a Fase 2, dopo F0.2+)
 
 | Sub | Contenuto | Commit |
 |---|---|---|
-| F1.1 | engines `^1.144.0`, `@types/vscode`, vsce 4.x, sync `@threski/ide-host` | `build(vscode): engine 1.144 and vsce 4.x` |
+| F1.1 | engines `^1.144.0`, `@types/vscode`, vsce 4.x, sync `@ibis/ide-host` | `build(vscode): engine 1.144 and vsce 4.x` |
 | F1.2 | StatusBarItem (spawn/attach/bridge/provider, click → status, refresh on config) | `feat(vscode): status bar item` |
-| F1.3 | TreeView "Threski Studio" (kinds → entries via `memory_search`, ricerca, dettaglio, refresh) | `feat(vscode): memory tree view` |
-| F1.4 | **"Threski Studio: Remember Selection"** da `editor/context` (selezione + file + righe → `memory_add` con provenance) + variante file | `feat(vscode): remember selection with provenance` |
-| F1.5 | `chatInstructions` "Threski Studio session contract" + walkthrough onboarding (4 step) | `feat(vscode): session-contract instructions and walkthrough` |
+| F1.3 | TreeView "Ibis Assistant" (kinds → entries via `memory_search`, ricerca, dettaglio, refresh) | `feat(vscode): memory tree view` |
+| F1.4 | **"Ibis Assistant: Remember Selection"** da `editor/context` (selezione + file + righe → `memory_add` con provenance) + variante file | `feat(vscode): remember selection with provenance` |
+| F1.5 | `chatInstructions` "Ibis Assistant session contract" + walkthrough onboarding (4 step) | `feat(vscode): session-contract instructions and walkthrough` |
 | F1.6 | CI publish: workflow OIDC (`vsce publish --oidc`), Open VSX (`ovsx`), `server.json` MCP registry, badge `vscode:mcp/install` | `build(vscode): oidc publishing, open vsx and mcp registry listing` |
 
 **→ REVIEW R3** (azioni manuali ② ③ ⑤ prima): VSIX installata, UI verificata; publish su Marketplace + Open VSX + registry.
 
-## 7. FASE 2 — Agent plugin "threski" (parallela a Fase 1)
+## 7. FASE 2 — Agent plugin "ibis" (parallela a Fase 1)
 
-> Aggiornamento 30/10/2026: l'id del plugin è `threski` (non `threski-studio`)
-> e le skill portano nomi corti, così i comandi slash sono `/threski usage`,
-> `/threski status`, … (la VS Code li renderizza come `<plugin> <skill>`).
+> Aggiornamento 30/10/2026: l'id del plugin è `ibis`
+> e le skill portano nomi corti, così i comandi slash sono `/ibis usage`,
+> `/ibis status`, … (la VS Code li renderizza come `<plugin> <skill>`).
 > Nessun `commands/` duplicato: le skill sono l'unica superficie slash.
 
 | Sub | Contenuto | Commit |
 |---|---|---|
-| F2.1 | `plugin/plugin.json` (Agent Plugins 1.0) + `plugin/mcp.json` (spawn `threski -mode stdio -runtime-mode plugin`; attach `THRESKI_MCP_URL`) | `feat(plugin): threski agent plugin scaffold` |
+| F2.1 | `plugin/plugin.json` (Agent Plugins 1.0) + `plugin/mcp.json` (spawn `ibis -mode stdio -runtime-mode plugin`; attach `IBIS_MCP_URL`) | `feat(plugin): ibis agent plugin scaffold` |
 | F2.2 | 5 skill (scaffold già in `plugin/skills/`): `usage` (contratto di sessione + mappa tool + igiene memoria), `readiness`, `status`, `remember`, `set-working-state` | `feat(plugin): skills incl. session-contract usage skill` |
 | F2.3 | `com.github.copilot/hooks/hooks.json` + script: `sessionStart` → contratto, `agentStop` → `capture_observation` condizionale (verificare payload con Copilot hooks reference) | `feat(plugin): session start/stop hooks` |
-| F2.4 | agents `threski-forensics.agent.md` (read-only), `threski-curator.agent.md` (la superficie slash resta solo le skill corte, senza `commands/` duplicati) | `feat(plugin): forensics/curator agents` |
+| F2.4 | agents `ibis-forensics.agent.md` (read-only), `ibis-curator.agent.md` (la superficie slash resta solo le skill corte, senza `commands/` duplicati) | `feat(plugin): forensics/curator agents` |
 | F2.5 | `automations/`: `nightly-ingest.automation.md`, `weekly-consolidate.automation.md` | `feat(plugin): ingest and consolidation automation templates` |
-| F2.6 | Repo `fatterdev/threski-marketplace` (marketplace.json schema Claude-compat) + README + badge `vscode://chat-plugin/install` + snippet team `.github/copilot/settings.json` | `feat(plugin): marketplace and workspace recommendations` |
+| F2.6 | Repo `fatterdev/ibis-marketplace` (marketplace.json schema Claude-compat) + README + badge `vscode://chat-plugin/install` + snippet team `.github/copilot/settings.json` | `feat(plugin): marketplace and workspace recommendations` |
 
 **→ REVIEW R4**: plugin installato da sorgente (`chat.pluginLocations`), skill in `/`, hooks fire, MCP server del plugin avviato.
 
 ## 8. FASE 3 — Docs/posizionamento (dopo R3/R4)
-README: "Threski Studio vs Copilot Memory" + feature matrix aggiornata; `docs/ide-integrations.md`
+README: "Ibis Assistant vs Copilot Memory" + feature matrix aggiornata; `docs/ide-integrations.md`
 (matrice VS Code / Copilot CLI / Copilot App / Claude Code / CLI); fix drift documentale
 (riferimenti Go in `CLAUDE_INTEGRATION.md`, `ide_host_and_lm_bridge.md`); skill sperimentale
-`threski-sync-copilot-memory`. Commit: `docs: positioning vs copilot memory and integration matrix`.
+`ibis-sync-copilot-memory`. Commit: `docs: positioning vs copilot memory and integration matrix`.
 **→ REVIEW R5**: docs review.
 
 ## 9. TRACK D — Microsoft Scope (dopo F0.3–0.6 + F2.2; azione manuale ④)
@@ -180,12 +173,12 @@ Scaffold già presente in `evaluations/scope/`.
 | Sub | Contenuto | Commit |
 |---|---|---|
 | D1 | Vendor upstream compose, pin immagine, `seed.mjs` (registra MCP, importa skill da GitHub, seed criteria/profiles) | `chore(evals): scope config-as-code scaffold and seed` |
-| D2 | `run.mjs` + `analysis.mjs`: matrice 2 worker (VS Code Copilot, Claude Code) × 3 profili (base / +Threski MCP / +MCP+skills+hooks+VSIX) × N task su fixture OSS + repo threski stesso | `chore(evals): benchmark runner and analysis` |
+| D2 | `run.mjs` + `analysis.mjs`: matrice 2 worker (VS Code Copilot, Claude Code) × 3 profili (base / +Ibis MCP / +MCP+skills+hooks+VSIX) × N task su fixture OSS + repo ibis-assistant stesso | `chore(evals): benchmark runner and analysis` |
 | D3 | **D-CLAIMS** esecuzione → findings. Claims: memoria→pass-rate/token; skills+hooks→igiene d'uso tool (1× `load_session_context`, kind corretti); annotations→attrito conferme; prompts→scoperta tool | `docs(evals): first benchmark results` |
-| D4 | **D-INSIGHTS**: `scripts/scope-insights-import.mjs` (insights upvoted → `memory_add` tipizzato, dedup `source_hash`, ciclo di vita downvote/block → delete/supersede) | `feat(scripts): scope insights to threski memory import` |
+| D4 | **D-INSIGHTS**: `scripts/scope-insights-import.mjs` (insights upvoted → `memory_add` tipizzato, dedup `source_hash`, ciclo di vita downvote/block → delete/supersede) | `feat(scripts): scope insights to ibis memory import` |
 | D5 | `docs/scope-devax.md` metodologia + risultati; numeri nel README se favorevoli | `docs: devax methodology and evidence` |
 
-Ciclo chiuso: **Scope finds → import → memoria Threski → skill/rules/descrizioni migliorano → Scope re-measures**.
+Ciclo chiuso: **Scope finds → import → memoria Ibis → skill/rules/descrizioni migliorano → Scope re-measures**.
 **→ REVIEW R6**: risultati D-CLAIMS → **gate di publish** del marketplace; D-INSIGHTS in loop continuo.
 
 ## 10. Sequencing, versioning, effort
@@ -215,7 +208,7 @@ F0.1 (rename) → R1 → F0.2..F0.7 → R2 → [F1 ∥ F2] → R3/R4 (publish 1.
 - MCP Dev Guide (corrente): `contributes.mcpServerDefinitionProviders` + `vscode.lm.registerMcpServerDefinitionProvider` validi; annotations (`readOnlyHint`), dynamic tool discovery, prompts, resources+templates, sampling, OAuth DCR, MCP Apps (`@modelcontextprotocol/ext-apps`), `vscode:mcp/install`, dev mode watch/debug.
 - Agent Plugins 1.0 (agent-plugins.org): `plugin.json`, `skills/`, `mcp.json`, namespace `com.github.copilot/` (agents, commands, rules, hooks), `automations/*.automation.md`, `${PLUGIN_ROOT}`/`${PLUGIN_DATA}`, marketplace Git (schema Claude Code compat), deep link `vscode://chat-plugin/install`, raccomandazioni team via `.github/copilot/settings.json` (`extraKnownMarketplaces`, `enabledPlugins`).
 - Hooks Copilot: eventi `sessionStart`, `userPromptSubmitted`, `preToolUse`, `postToolUse`, `preCompact`, `agentStop`, `sessionEnd`; command hook = JSON su stdin, decisione su stdout.
-- Copilot Memory: repository facts cloud con TTL 28 giorni — posizionamento Threski: memoria tipizzata, provenance git, self-hosted, grafo-aware.
+- Copilot Memory: repository facts cloud con TTL 28 giorni — posizionamento Ibis: memoria tipizzata, provenance git, self-hosted, grafo-aware.
 - Contribution points correnti: `chatAgents`, `chatInstructions`, `chatPromptFiles`, `chatSkills`, `languageModelTools`, `languageModelChatProviders`; **Chat Participants deprecati**.
 - Publishing: `vsce publish --oidc` (Trusted Publishing, GitHub Actions); Open VSX separato; MCP registry open-source con `server.json`.
 

@@ -9,7 +9,7 @@ scrittura e della memoria. `ibis` è il motore e binario CLI; **Ibis Assistant**
 ## Contenuto del planning kit
 
 1. **[PLAN.md](PLAN.md)** — piano di implementazione bloccato (Fasi 0–3 + Track D, con revert del naming del 30/10/2026).
-2. **[naming-map.md](naming-map.md)** — mappa canonica di revert `threski` → `ibis` / `Ibis Assistant`.
+2. **[naming-map.md](naming-map.md)** — documento storico: mappa di revert del rebrand (30/10/2026) a `ibis` / `Ibis Assistant`.
 3. **[vscode-platform-notes.md](vscode-platform-notes.md)** — note di ricerca piattaforma VS Code 1.144, Agent Plugins 1.0, MCP Apps e Microsoft Scope.
 4. **[review-r2-checklist.md](review-r2-checklist.md)** — gate R2 (Parte A protocollo automatizzato + Parte B smoke manuale in VS Code 1.144).
 5. **[review-r3r4-checklist.md](review-r3r4-checklist.md)** — gate R3/R4 (Parte A `smoke-plugin.mjs` 26/26 + Parte B runbook VSIX/plugin, con evidenze UI-TARS).
@@ -20,7 +20,7 @@ scrittura e della memoria. `ibis` è il motore e binario CLI; **Ibis Assistant**
    - `vscode-extension/` — estensione VSIX `fatterdev.ibis-assistant`.
    - `evaluations/scope/` — config-as-code per il benchmark DevAX con Microsoft Scope (criteri, profili, task prompt, seed/run/analysis).
    - `scripts/scope-insights-import.mjs` — D-INSIGHTS: import degli insights di Scope come memoria tipizzata Ibis (dedup + ciclo di vita).
-   - `scripts/migrate/` — storico migrazione F0.1 (`ibis → threski`, 29/10/2026) + script di revert (`rename-back-ibis.ps1`, 30/10/2026).
+   - `scripts/migrate/` — storico della migrazione F0.1 (29/10/2026) e dello script di revert (`rename-back-ibis.ps1`, 30/10/2026).
 
 ## Sequenza delle fasi
 

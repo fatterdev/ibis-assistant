@@ -217,8 +217,8 @@ come fatto per R2.
   morto): le interazioni VSIX non pagano più il boot del child per chiamata.
   Ripacchettata `ibis-assistant-1.0.0.vsix` (58.46 KB), `smoke-plugin.mjs`
   26/26, `session_test.mjs` 3/3 in CI. R3.3 va riverificato con QUESTA build.
-- **S1.2 done (igiene ambiente owner)** — `chat.pluginLocations` corretto da
-  `C:\devsrc\threski-studio\plugin` (percorso morto pre-revert) a
+- **S1.2 done (igiene ambiente owner)** — `chat.pluginLocations` corretto dal
+  percorso pre-revert (morto) a
   `C:\devsrc\ibis-assistant\plugin` (il plugin non si caricava da sorgente →
   P4.x bloccati); binario Go stale `ibis-assistant.exe` (18/09) non più
   risolvibile su PATH (`where.exe` vuoto; la dir `go\bin` è sparita durante

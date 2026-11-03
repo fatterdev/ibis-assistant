@@ -1,7 +1,7 @@
 # REVIEW R2 — Smoke MCP in VS Code (30/10/2026)
 
 > Gate R2 di [PLAN.md](PLAN.md): *smoke MCP in VS Code — zero conferme sui read-only,
-> `/ibis.*` in chat (mappa di revert da `/threski.*`), resources in "Add Context",
+> `/ibis.*` in chat, resources in "Add Context",
 > sampling attivo, App visibile (con fallback testuale sempre garantito)*.
 >
 > Nome server nel config: `ibis` → i prompt si renderizzano come `/ibis.<nome>`,
