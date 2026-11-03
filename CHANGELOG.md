@@ -4,6 +4,12 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **refactor(vscode): 1.0.9 — expand-all button removed** - the custom
+  expand-all title button is dropped (owner decision 03/11): VS Code custom
+  views have no standard expand-all surface and no programmatic collapse,
+  so the button was a non-standard hack that misbehaved. With the 1.0.8
+  activation preload the kind badges are visible on a virgin tree and the
+  built-in collapse-all stays the only tree-level toggle.
 - **feat(vscode): 1.0.8 — counts preloaded at activation, expand-all fixed** -
   the memory tree now preloads all eight kind counts at activation (~8
   parallel `memory_list`, ms-scale, right after the pre-warm session is

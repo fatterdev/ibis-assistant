@@ -133,8 +133,6 @@ class MemoryTreeDataProvider {
     this.counts = new Map();
     /** Last count label rendered per parent — the convergent fire guard. */
     this.renderedCounts = new Map();
-    /** Root nodes from the last render — identity targets for expandAll. */
-    this.lastRoots = [];
     this._onDidChangeTreeData = new vscode.EventEmitter();
     this.onDidChangeTreeData = this._onDidChangeTreeData.event;
   }
@@ -206,7 +204,6 @@ class MemoryTreeDataProvider {
           ),
         );
       }
-      this.lastRoots = roots;
       return roots;
     }
 
@@ -463,27 +460,6 @@ function registerMemoryTree(context, api, host) {
           api.logLine(`memory tree: refresh cycle complete in ${Date.now() - t0}ms`);
         },
       );
-    }),
-    vscode.commands.registerCommand("ibis.memory.expandAll", async () => {
-      // VS Code custom views ship collapse-all only (no programmatic
-      // collapse): expand every kind root via reveal. Nodes are re-resolved
-      // at each step — any reveal can trigger a re-render that invalidates
-      // the previously rendered root instances.
-      for (let i = 0; i < MEMORY_KINDS.length; i++) {
-        const node = provider.lastRoots.filter((n) => n.data.type === "kind")[i];
-        if (!node) {
-          api.logLine(`memory tree: expand-all index ${i} skipped (root not rendered yet)`);
-          continue;
-        }
-        try {
-          await treeView.reveal(node, { expand: 1 });
-        } catch (err) {
-          api.logLine(
-            `memory tree: expand-all reveal failed for ${node.data.kind}: ${err && err.message ? err.message : err}`,
-          );
-        }
-      }
-      api.logLine("memory tree: expand-all done");
     }),
     vscode.commands.registerCommand("ibis.memory.search", async () => {
       const query = await vscode.window.showInputBox({

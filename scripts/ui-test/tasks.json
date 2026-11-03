@@ -5,7 +5,7 @@
   "notes": [
     "Tasks are computer-use instructions for UI-TARS Desktop (or any GUI agent).",
     "Evidence convention: <taskId>-<NN>-<slug>.png inside the run folder.",
-    "VSIX under test: vscode-extension/ibis-assistant-1.0.8.vsix (fatterdev.ibis-assistant)."
+    "VSIX under test: vscode-extension/ibis-assistant-1.0.9.vsix (fatterdev.ibis-assistant)."
   ],
   "tasks": [
     {
