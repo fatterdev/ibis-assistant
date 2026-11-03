@@ -113,7 +113,7 @@ config/              Reference configurations
 
 ## Status
 
-- `v0.1.0` - initial release; pre-1.0, so breaking changes to config and MCP surface are possible.
+- `v0.2.0` - current release; pre-1.0, so breaking changes to config and MCP surface are possible.
 - Windows-first test estate (786+ tests) with CI on `windows-latest` and `ubuntu-24.04`.
 - Release binaries ship with build provenance attestations.
 

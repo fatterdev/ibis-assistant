@@ -104,7 +104,9 @@ code --install-extension C:\devsrc\ibis-assistant\vscode-extension\ibis-assistan
 
 ### R3.6 — Chat instruction (contratto di sessione)
 
-1. In chat (modalità agent) `/` → cerca `ibis-session-contract` → **Attach**.
+1. In chat (modalità agent) → **Add Context / Add Instructions** → cerca
+   `ibis-session-contract` → **Attach** (aggiornato 03/11: le `chatInstructions`
+   non vivono nel menu `/`, che lista prompt/skill).
 2. **PASS**: l'istruzione è iniettata; su un nuovo task l'agente chiama
    `load_session_context` una sola volta e non martella `memory_*`
    (stesso contratto della skill `usage` del plugin — superficie VSIX).
@@ -182,8 +184,8 @@ Pre-flight: cartella `plugin/` del repo.
 
 | Item | Parte A (automatizzata) | Parte B (VS Code 1.144, owner) |
 |---|---|---|
-| Plugin scaffold + hook contract | **26/26 PASS** (30/10/2026) | P4.1–P4.6: ☐ |
-| VSIX packaging + contributions | 4/4 PASS | R3.1 ✅ R3.2 ✅ R3.3 ✅ — R3.4–R3.8 ☐ |
+| Plugin scaffold + hook contract | **26/26 PASS** (30/10/2026) | P4.1–P4.6 ✅ (03/11/2026, con note — vedi sotto) |
+| VSIX packaging + contributions | 4/4 PASS | R3.1–R3.8 ✅ (03/11/2026) |
 | Publish pipeline | manifest + badge verificati | ☐ (post ②③⑤) |
 
 **Avanzamento Parte B (30/10/2026, run `artifacts/ui-tests/202610301404-r3r4`):**
@@ -223,9 +225,78 @@ Pre-flight: cartella `plugin/` del repo.
   servizio `StrixUITars` :8082 con UI-TARS-7B-DPO per il computer-use) e runner
   `scripts/ui-test/run-ui-tests.mjs` (`screenshot`, `mark`, `collect`).
 
-**Stato: PARTE A COMPLETA (26/26), PARTE B: R3.1–R3.3 PASS — R3.4–R3.8 e
-P4.1–P4.6 aperti** (azioni ② ③ ⑤ ancora da fare). Registrare qui le evidenze
-(screenshot/log) come fatto per R2.
+**Stato: PARTE A COMPLETA (26/26), PARTE B COMPLETA (03/11/2026) — R3.1–R3.8 e
+P4.1–P4.6 PASS; resta il publish gate (azioni ②③⑤, owner).** Registrare qui le
+evidenze (screenshot/log) come fatto per R2.
+
+**Aggiornamento run 03/11/2026 (pomeriggio) — Parte B completa, run interattivo
+agente+owner con evidenza da log** (`%LOCALAPPDATA%\ibis\ui-tests\output-channel.log`
++ `plugin.log`; VSIX 1.0.11, runtime 0.2.0 ricompilato con log esiti):
+- **R3.4 PASS** — `memory_add (selection crates/ibis-core/src/claims.rs:55-68,
+  decision, team, source_hash=sha256:9e561ea0…): created`; albero aggiornata
+  con refresh manuale, poi auto-refresh atterrato in 1.0.7.
+- **R3.5 PASS** — `memory_add (file crates/ibis-core/src/config.rs, decision,
+  team, source_hash=sha256:70f4901b…): created`; auto-refresh scattato da solo
+  1ms dopo il capture (fix 1.0.7 verificato).
+- **R3.6 PASS** (dopo due tentativi) — surface corretta: **Add Instructions**
+  in chat, NON il menu `/` (testo R3.6 sopra corretto). Turno agente:
+  `MCP Tool Call: load_session_context` **1 sola** nel plugin.log, contesto
+  reale restituito (3 memorie seed), zero martellamenti `memory_*`.
+  Il primo tentativo era servito da una definition MCP **stale**: un
+  `.mcp.json` di radice (artefatto smoke R2, gitignored, `dist\ibis.exe` +
+  `IBIS_DATA_DIR=.r2-smoke-data`) rispondeva al posto del provider VSIX →
+  contesto "vuoto". Rimosso; unica surface restante = provider "Ibis" VSIX.
+- **R3.7 PASS** — walkthrough invisibile in 1.0.9 per step senza `media` (i
+  testi erano in una chiave `markdown` inline, schema VS Code richiede
+  `media.markdown` = path a file): fix in 1.0.10 con `walkthrough/*.md`;
+  step + completion events verificati (screenshot). Nota: lo smoke Parte A
+  verifica la struttura del manifest, non l'accettazione di VS Code (gap
+  registrato).
+- **R3.8 PASS** — server provider in chat: `get_working_state` eseguito con
+  **zero conferme** (ok in 116µs), `memory_add` con **conferma** (accettata
+  durante il test: memoria "fact di prova" ora nello store, kind fact —
+  candidata alla pulizia con `memory_delete`); settings `ibis.runtime.*`
+  ricomputano senza prompt di reload.
+- **P4.1 PASS** (nota UX) — `/ibis` mostra le 5 skill; `/ibis status`
+  risponde ma finisce nel canale Output: la skill è progettata per riassumere
+  in chat → follow-up UX (chat-first o toast-first).
+- **P4.2 PASS** — `ibis (Agent Plugin)` running (già avviato, restart
+  silenzioso — atteso).
+- **P4.3 PASS** — hook `sessionStart`: contratto iniettato; l'agente cita le
+  note di team e **applica l'igiene** (rifiuta di trattare la memoria di
+  prova come fatto di progetto). Il log hooks alla path documentata
+  (`exthost\GitHub.copilot-chat\`) non esiste in 1.144 → evidenza chat.
+- **P4.4 PASS** — turno senza catture: nessuna chiamata Ibis, hook gestito;
+  turno con cattura: `memory_search` (dedup-before-add, igiene) →
+  `memory_add` ok → stop normale, zero loop. Bonus: **Memory Curator MCP App
+  renderizzato inline in chat** (F0.7 in uso reale).
+- **P4.5 PASS** (dopo fix) — superficie corretta: **mode picker**, non menu
+  `@`. Prima compilazione: i frontmatter usavano il formato Claude
+  (`mcp__ibis__*`), VS Code vuole i riferimenti qualificati `<server>/<tool>`
+  → zero tool disponibili (finding: "Unavailable tools are ignored"). Fix
+  `fix(plugin): copilot-qualified tool refs in agent frontmatter` (7c9909a);
+  retry: Finding/Evidence/Confidence con evidenza reale (`load_session_context`,
+  `memory_search`, `why_changed`, `ask_project` — tutti read-only nel log) e
+  ricostruzione autonoma della storia del pre-warm (1.0.2 → fix 1.0.3).
+  Follow-up: nota brevità narrativa (431253f).
+- **P4.6 PASS** — dettaglio plugin: Agents 2, Skills 5, MCP 1, Hooks 2,
+  **Automations 2** con nome+descrizione ("Nightly Ibis ingest",
+  "Weekly Ibis memory consolidation"). Esecuzione schedulata fuori scope.
+- **Finding ambientali (non nostri, registrati)**: il rumore "Warning from
+  Post-Tool Use hook" viene dall'estensione **Azure Tools**
+  (`ms-azuretools.vscode-azure-github-copilot`): `resources/hooks/local.json`
+  registra SessionStart+PostToolUse con path **workspace-relativi**
+  (`./.github/hooks/azureSkills/scripts/track-telemetry.ps1`) che non esiste
+  nel repo → PowerShell fallisce a ogni tool call (global.json usa path
+  assoluti e funziona). Opzioni owner: ignorare / disabilitare
+  l'estensione nel workspace / issue upstream.
+- **Anomalie performance da registrare**: `ask_project` end-to-end 34.4s e
+  18.0s (gamba reasoning + embed); pre-warm boot 12.2–17.8s con Ollama giù
+  (auto-start nel job del child, muore con l'idle-close) e **3.3–4.7s con
+  Ollama su**; boot più pesante della misura S1.3 (schema init ~2.8s +
+  migrations ~2s ricorrenti per boot, contro schema 0.30s misurato in S1.3) —
+  decomposizione nel plugin.log del run. Il target cold resta chiuso dal
+  pre-warm (prima fetch 12–30ms).
 
 **Aggiornamento S1 (01/11/2026) — chiusura debug "blocchi e lentezze":**
 - **S1.1 done** — client stdio persistente in ide-host (sessione per backend

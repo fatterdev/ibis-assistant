@@ -126,10 +126,14 @@ check 1.2s + probe), non dalla latenza delle chiamate. Tre opzioni:
 
 - [x] Decisione owner sul cold target (opzione 1/2/3 del §5) — **opzione 1,
       pre-warm all'attivazione (03/11)**: atterrata in VSIX 1.0.2 (`bf824b1`).
-- [ ] Se opzione 1: pre-warm + nuovo run owner → la prima espansione misurata
-      da canale Output (questa volta salvato). Pre-warm atterrato; **run
-      owner da fare**: attesa riga `pre-warm: runtime session ready in Nms`
-      sul canale e prima espansione warm-like (cronometro + screenshot).
+- [x] Se opzione 1: pre-warm + nuovo run owner → la prima espansione misurata
+      da canale Output (questa volta salvato). **Chiuso 03/11 pomeriggio**:
+      boot pagato all'attivazione (3.3–4.7s con Ollama su; con Ollama giù
+      l'auto-start del daemon dentro il job del child arriva a 12.2–17.8s e
+      muore con l'idle-close — l'Ollama deve girare indipendente),
+      **prima fetch 12–30ms** end-to-end, per-call runtime 1.4–2.8ms
+      (`memory_list: done in …` a info, strumento S1.4). Evidenza persistita
+      nel sink `ui-tests\output-channel.log` (gap §6.4 chiuso).
 - [x] Evidenze del run 1.1.2 (numerino + refresh con feedback) registrate
       nella checklist §Esito (03/11: R3.3 → PASS, con nota sul gap §6.4).
 - [x] S1.4 (demote info→debug) dopo il verdetto — fatto 03/11 (`e9b85b8`):

@@ -4,6 +4,16 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **fix(plugin): agent tool refs in the Copilot-qualified format** - the
+  forensics/curator agent frontmatter used the Claude-Code style
+  (`mcp__ibis__*`): VS Code converts plugin agents and silently ignores
+  unknown tool names, so both agents started with zero tools (the forensics
+  finding honestly reported "tool_search found no Ibis tools"). Tools now
+  use the qualified `<server>/<tool>` references and the forensics body
+  keeps narration minimal before the Finding/Evidence/Confidence block.
+  Verified live: read-only forensics run returning real evidence from the
+  graph (`load_session_context` → `memory_search` → `why_changed` →
+  `ask_project`, no mutating tools).
 - **feat(vscode): 1.0.11 — Quick Actions view in the Ibis container** - the
   activity-bar container gains a second view, **Quick Actions**, next to
   Memory: one-click access to Extension Settings, the runtime's own

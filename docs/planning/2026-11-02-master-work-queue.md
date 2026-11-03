@@ -14,7 +14,7 @@
 
 | ID | Stream | Doc di riferimento | Stato (02/11) | Prossimo passo (uno solo) | Sbloccato da | Sblocca |
 |---|---|---|---|---|---|---|
-| WQ-1 | **R3/R4 gate** — VSIX 1.0.3 + plugin agent (Parte B) | [review-r3r4-checklist.md](./review-r3r4-checklist.md), [runbook R3.3](./2026-11-03-r33-closure-runbook.md), [analisi tempi S1.3](./2026-11-03-s13-timing-analysis.md) | Parte A 26/26 PASS; Parte B: R3.1 ✅ R3.2 ✅ R3.3 ✅ — warm PASS ampio, cold FALLITO per boot tax → **verdetto owner 03/11: opzione 1 pre-warm**; atterrati: pre-warm in 1.0.3 (`bf824b1` + fix null call) e S1.4 (`e9b85b8` — timing `memory_search` demotati a debug, righe nuove `memory_list`/`memory_expand` a info) | **run owner**: verifica pre-warm (Reload Window → prima espansione warm-like, riga `pre-warm: …` su canale Output salvata) + R3.4–R3.8 → P4.1–P4.6 | run owner (azioni ②③ restano per il publish) | publish gate (WQ-2) |
+| WQ-1 | **R3/R4 gate** — VSIX 1.0.11 + plugin agent (Parte B) | [review-r3r4-checklist.md](./review-r3r4-checklist.md), [runbook R3.3](./2026-11-03-r33-closure-runbook.md), [analisi tempi S1.3](./2026-11-03-s13-timing-analysis.md) | Parte A 26/26 PASS; **Parte B COMPLETA (03/11): R3.1–R3.8 + P4.1–P4.6 PASS** — run interattivo con evidenza da log; cold target chiuso dal pre-warm (prima fetch 12–30ms dopo boot pagato all'attivazione, 3.3–4.7s con Ollama su); note: P4.1 UX (status in chat), P4.5 tool-ref fix + superficie = mode picker, noise hook da estensione Azure Tools (checklist §Esito) | **azioni ②③** — Trusted Publishing OIDC + token Open VSX (owner) → publish gate | azioni ②③ (owner) | publish gate (WQ-2) |
 | WQ-2 | **Publish gate** (azioni ② ③ ⑤ + `publish-vscode.yml`) | [review-r3r4-checklist.md §Publish gate](./review-r3r4-checklist.md) | ☐ non iniziato | azioni manuali ②③ (Trusted Publishing OIDC, Open VSX token) | WQ-1 (R3/R4 PASS) | WQ-3, WQ-4 |
 | WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | Approved; 9 sub-fasi (F4-B1..B4 ∥ F4-A1..A5) + gate R7 da fare | **F4-B1** — reconciliation Layer 3 (ledger + liveness + start-time) | WQ-2 | gate R7 → F3 docs → Track D |
 | WQ-4 | **Track D** — benchmark DevAX/Scope (D1–D5) | [PLAN.md §9](./PLAN.md), [evaluations/scope/README.md](../evaluations/scope/README.md) | Pianificato (scaffold presente; profili con placeholder `TODO-verify-*` by design, pre-D2) | D1 — pin immagine compose + seed su istanza Scope live | WQ-3 (gate R7), azione D1 | D2–D5, R6 close |
@@ -77,9 +77,21 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   righe nuove a info `memory_list: done in … entries=N` /
   `memory_expand: done in … chain=N` (parità di evidenza frasi B/C, analisi
   §6.3). cargo test + clippy verdi.
-- Aperto: run owner verifica pre-warm (Reload Window → prima espansione
-  warm-like; riga `pre-warm: …` sul canale Output, salvata questa volta) →
-  R3.4–R3.8 → P4.1–P4.6 → publish gate.
+- **Parte B COMPLETA (03/11 pomeriggio, run interattivo)** — R3.4–R3.8 e
+  P4.1–P4.6 PASS con evidenza da log (sink `%LOCALAPPDATA%\ibis\ui-tests\`
+  + plugin.log); **verifica pre-warm chiusa**: boot pagato all'attivazione
+  (3.3–4.7s con Ollama su), prima fetch dell'albero 12–30ms end-to-end
+  (target warm rispettato, il "cold" non esiste più sul path tree).
+  Interventi atterrati durante il run: VSIX 1.0.4 (sink log) → 1.0.5
+  (refresh conteggi collassati) → 1.0.6 (fix multiplexing parallelo
+  ide-host) → 1.0.7 (auto-refresh post-capture + expand-all) → 1.0.9
+  (expand-all rimosso, decisione owner) → 1.0.10 (fix media walkthrough) →
+  1.0.11 (Quick Actions view); runtime: log esiti/rejection per tool call;
+  plugin: tool-ref agenti in formato Copilot + nota brevità. Finding e gap
+  nel checklist §Esito (incluso il `.mcp.json` smoke R2 rimosso e il rumore
+  hook Azure Tools). Restano le azioni owner ②③ per il publish gate.
+- Aperto: azioni ②③ (Trusted Publishing OIDC, token Open VSX) → publish
+  gate (azioni ⑤ già fatte per i review).
 
 ### WQ-3 — F4
 - Nessun sub-fase iniziata. Primo commit previsto: `feat(runtime): sidecar reconciliation at startup (layer 3)` (F4-B1).
