@@ -274,6 +274,34 @@ check(
   "dual-child warning targets spawn + daemon combination",
 );
 
+// F4-A2: memory tree status filter (current default).
+const memoryTreeSource = readFileSync(join(root, "vscode-extension", "memory-tree.js"), "utf8");
+const statusFilterSetting = (((vsixPkg.contributes || {}).configuration || {}).properties || {})[
+  "ibis.memory.statusFilter"
+];
+check(
+  "vscode-extension: memory.statusFilter defaults to current with all in the enum",
+  Boolean(statusFilterSetting) && statusFilterSetting.default === "current" &&
+    Array.isArray(statusFilterSetting.enum) && statusFilterSetting.enum.includes("all") &&
+    statusFilterSetting.enum.includes("current"),
+  statusFilterSetting ? `enum=${statusFilterSetting.enum.join(",")}` : "missing setting",
+);
+check(
+  "vscode-extension: Toggle Memory Status Filter contributed, in the view title, registered",
+  commandIds.includes("ibis.memory.toggleStatusFilter") &&
+    menuCommands.includes("ibis.memory.toggleStatusFilter") &&
+    memoryTreeSource.includes('"ibis.memory.toggleStatusFilter"') &&
+    memoryTreeSource.includes("memory.statusFilter"),
+  "feat(vscode): memory tree status filter (current default)",
+);
+check(
+  "vscode-extension: kind browse and search pass the status filter to the memory tools",
+  memoryTreeSource.includes('"memory_list", { kind, limit: KIND_LIMIT, status }') &&
+    memoryTreeSource.includes('"memory_search", { query, limit: SEARCH_LIMIT, status }') &&
+    memoryTreeSource.includes('treeView.description'),
+  "current -> status arg, all -> explicit all marker, view title badge",
+);
+
 const instructions = (vsixPkg.contributes && vsixPkg.contributes.chatInstructions) || [];
 const instructionFile = instructions.length === 1
   ? join(root, "vscode-extension", instructions[0].path.replace("./", ""))

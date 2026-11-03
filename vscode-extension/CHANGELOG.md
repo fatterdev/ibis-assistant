@@ -5,6 +5,15 @@ The runtime changelog lives in the [repository root](https://github.com/fatterde
 
 ## [Unreleased]
 
+- **Memory status filter (F4-A2, 1.0.13)** — the Memory tree browses only
+  still-valid memories by default: new setting `ibis.memory.statusFilter`
+  (`current`, the default, or `all`) is passed as `status` to MCP
+  `memory_list` (kind browse) and `memory_search`. **Ibis Assistant: Toggle
+  Memory Status Filter** (view-title filter button) flips the setting; while
+  the unfiltered browse is active the view title shows `all`. Entry rows
+  keep the status badge (`superseded` / `archived` / `stale`) in `all`
+  mode. Requires the F4-A2 runtime (the `all` status marker on
+  `memory_list`/`memory_search`).
 - **Daemon attach by default (F4-A1)** — `ibis.runtime.mode` gains `auto`
   (new default): the extension attaches to the always-on personal daemon
   (`http://127.0.0.1:3030/mcp`, overridable via `#ibis.runtime.mcpUrl#` /

@@ -2,7 +2,7 @@
   "name": "ibis-assistant",
   "displayName": "Ibis Assistant",
   "description": "Living project memory over MCP for VS Code. Spawns an isolated Ibis Assistant (Rust) stdio child or attaches to a shared personal runtime for graph, logs, tickets, and typed memory.",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "publisher": "fatterdev",
   "license": "Apache-2.0",
   "icon": "assets/icon.png",
@@ -79,6 +79,11 @@
         "icon": "$(sync)"
       },
       {
+        "command": "ibis.memory.toggleStatusFilter",
+        "title": "Ibis Assistant: Toggle Memory Status Filter",
+        "icon": "$(filter)"
+      },
+      {
         "command": "ibis.memory.openDetail",
         "title": "Ibis Assistant: Open Memory Detail"
       },
@@ -126,6 +131,11 @@
         {
           "command": "ibis.memory.refresh",
           "group": "navigation@2",
+          "when": "view == ibis.memoryExplorer"
+        },
+        {
+          "command": "ibis.memory.toggleStatusFilter",
+          "group": "navigation@3",
           "when": "view == ibis.memoryExplorer"
         }
       ],
@@ -420,6 +430,21 @@
           "scope": "resource",
           "order": 41,
           "markdownDescription": "`visibility` passed to MCP `memory_add` by **Ibis Assistant: Remember**."
+        },
+        "ibis.memory.statusFilter": {
+          "type": "string",
+          "enum": [
+            "current",
+            "all"
+          ],
+          "enumDescriptions": [
+            "Only memories whose status is `current` (and not expired) — the clean-browse default.",
+            "Every status (`current`, `superseded`, `archived`, `stale`) — the curation browse where nothing is hidden."
+          ],
+          "default": "current",
+          "scope": "window",
+          "order": 43,
+          "markdownDescription": "Status filter for the Memory tree kind browse and search (`memory_list` / `memory_search`). Toggle it from the view title with **Ibis Assistant: Toggle Memory Status Filter**; the view title shows `all` when the unfiltered browse is active."
         },
         "ibis.workingState.useWorkspaceProject": {
           "type": "boolean",

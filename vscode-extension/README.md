@@ -17,7 +17,7 @@ This extension is the VS Code packaging: it attaches to the always-on Ibis Assis
 - **MCP server provider** — VS Code's MCP integration (`registerMcpServerDefinitionProvider`) attaches to the personal daemon over Streamable HTTP by default, or spawns `ibis -mode stdio -runtime-mode plugin` when `ibis.runtime.mode=spawn` is selected.
 - **Status bar item** — shows the effective backend (attach/offline/spawn) plus LM-bridge and MCP-provider indicators; click it to run **Ibis Assistant: Status**, which offers **Start Daemon** when the personal daemon is unreachable.
 - **Start Daemon** — **Ibis Assistant: Start Daemon** launches `ibis start` detached (the daemon outlives VS Code) and re-probes the endpoint until the MCP server answers.
-- **Memory tree view** — activity-bar view browses typed memory by kind via MCP `memory_search`, with semantic search, refresh, and a read-only detail editor (MCP `memory_expand`).
+- **Memory tree view** — activity-bar view browses typed memory by kind via MCP `memory_list` (current-status rows by default; `ibis.memory.statusFilter` / the title-bar filter button widens to every status), with semantic search honoring the same filter, refresh, and a read-only detail editor (MCP `memory_expand`).
 - **Remember with provenance** — **Ibis Assistant: Remember Selection** (editor context menu) captures the selection plus `file:start-end` range, and **Ibis Assistant: Remember File** (editor/Explorer context menu) captures a fact about a whole file; both bind `memory_add` to the source file via `source_path` + sha256 `source_hash`, so they go stale when the file changes.
 - **Session contract for agents** — the `ibis-session-contract` chat instruction (attach it in chat via *Add Instructions*) teaches agent sessions the tool selection map and memory hygiene; the **Get Started** walkthrough covers onboarding.
 - **IDE LM bridge** — when `vscode.lm` is available, the runtime can use IDE-provided models (`use_ide_provided_models`); embeddings stay on Ollama.
@@ -68,6 +68,7 @@ For iterative development open this folder in an **Extension Development Host** 
 | **Ibis Assistant: Start Daemon** | Launches `ibis start` detached and re-probes the MCP endpoint until it answers (manual-start hint on failure). |
 | **Ibis Assistant: Remember** | Typed durable memory (`memory_add`) with kind quick pick and configurable default kind/visibility. |
 | **Ibis Assistant: Set working state** | Branch/session scratchpad (`set_working_state`), optionally with the workspace folder as project name. |
+| **Ibis Assistant: Toggle Memory Status Filter** | Flips `ibis.memory.statusFilter` between `current` (default) and `all`; the Memory view title shows `all` while the unfiltered browse is active. |
 
 ## Settings
 
@@ -111,6 +112,7 @@ All settings live under `ibis.*` in VS Code Settings. Precedence is **explicit V
 |---------|---------|-------------|
 | `ibis.memory.defaultKind` | `ask` | Kind used by **Ibis Assistant: Remember**: `ask` keeps the quick pick, otherwise `decision` / `fix` / `rule` / `constraint` / `gotcha` / `design` / `fact` writes directly. |
 | `ibis.memory.defaultVisibility` | `team` | `visibility` for `memory_add`: sharing-first `team`, or `personal` (owner-only). |
+| `ibis.memory.statusFilter` | `current` | Status filter for the Memory tree kind browse and search: `current` shows only still-valid memories, `all` includes superseded/archived/stale rows. Toggle from the view title. |
 | `ibis.workingState.useWorkspaceProject` | `true` | Sends the first workspace folder name as `project_name` to `set_working_state`. |
 | `ibis.status.outputMode` | `toast` | **Ibis Assistant: Status** destination: `toast`, `output`, or `both`. |
 | `ibis.debug.verboseLogging` | `false` | Logs verbose activation and backend-resolution details to the output channel. |

@@ -5,6 +5,12 @@
  * `memory_list` (metadata browse, no embedding), free-text semantic search
  * via `memory_search`, and a read-only detail editor filled from MCP
  * `memory_expand` (fallback: the search summary).
+ *
+ * Kind browse and search honor `ibis.memory.statusFilter` (F4 §A.2):
+ * `current` (default) passes `status: current` to the tools, `all` passes
+ * the explicit `all` marker so superseded/archived/stale rows surface — the
+ * view title carries an `all` description while the unfiltered browse is
+ * active, and the title-bar filter button toggles the setting.
  */
 
 const vscode = require("vscode");
@@ -22,6 +28,34 @@ const MEMORY_KINDS = [
 
 const SEARCH_LIMIT = 50;
 const KIND_LIMIT = 100;
+
+/**
+ * The memory-tree status filter (F4 §A.2): `current` (default) or `all`.
+ * Anything unexpected degrades to `current`.
+ * @param {vscode.WorkspaceConfiguration} cfg
+ * @returns {"current" | "all"}
+ */
+function statusFilterOf(cfg) {
+  return cfg.get("memory.statusFilter", "current") === "all" ? "all" : "current";
+}
+
+/**
+ * Writes the status filter to the most specific scope that already set it
+ * (user settings otherwise), so a workspace override can never shadow the
+ * view-title toggle.
+ * @param {vscode.WorkspaceConfiguration} cfg
+ * @param {"current" | "all"} value
+ */
+async function updateStatusFilter(cfg, value) {
+  const inspected = cfg.inspect("memory.statusFilter");
+  let target = vscode.ConfigurationTarget.Global;
+  if (inspected && inspected.workspaceFolderValue !== undefined) {
+    target = vscode.ConfigurationTarget.WorkspaceFolder;
+  } else if (inspected && inspected.workspaceValue !== undefined) {
+    target = vscode.ConfigurationTarget.Workspace;
+  }
+  await cfg.update("memory.statusFilter", value, target);
+}
 
 /**
  * @param {string} query
@@ -268,24 +302,34 @@ class MemoryTreeDataProvider {
   }
 
   /**
+   * @returns {"current" | "all"}
+   */
+  statusFilter() {
+    return statusFilterOf(this.api.getConfig());
+  }
+
+  /**
    * Kind browse uses `memory_list` (metadata, no embedding — instant);
-   * free-text search keeps `memory_search` (semantic, one call).
+   * free-text search keeps `memory_search` (semantic, one call). Both honor
+   * the status filter: `current` passes the explicit status, `all` passes
+   * the server-side `all` marker (F4 §A.2).
    * @param {string} query
    * @param {string} kind
    * @returns {Promise<Array<Record<string, any>>>}
    */
   async fetchEntries(query, kind) {
     const cfg = this.api.getConfig();
+    const status = statusFilterOf(cfg);
     const t0 = Date.now();
     const backend = await this.api.resolveBackend(this.host, cfg);
     const text = kind
-      ? await this.host.callMcpTool(backend, "memory_list", { kind, limit: KIND_LIMIT })
-      : await this.host.callMcpTool(backend, "memory_search", { query, limit: SEARCH_LIMIT });
+      ? await this.host.callMcpTool(backend, "memory_list", { kind, limit: KIND_LIMIT, status })
+      : await this.host.callMcpTool(backend, "memory_search", { query, limit: SEARCH_LIMIT, status });
     const entries = parseMemoryArray(text);
     this.api.logLine(
       kind
-        ? `memory tree: kind=${kind} via memory_list in ${Date.now() - t0}ms, ${entries.length} entries`
-        : `memory tree: search "${query}" via memory_search in ${Date.now() - t0}ms, ${entries.length} entries`,
+        ? `memory tree: kind=${kind} status=${status} via memory_list in ${Date.now() - t0}ms, ${entries.length} entries`
+        : `memory tree: search "${query}" status=${status} via memory_search in ${Date.now() - t0}ms, ${entries.length} entries`,
     );
     return entries;
   }
@@ -443,8 +487,34 @@ function registerMemoryTree(context, api, host) {
     treeDataProvider: provider,
     showCollapseAll: true,
   });
+  /**
+   * Re-derives the whole tree from `ibis.memory.statusFilter` (F4 §A.2): the
+   * view title carries an `all` description while the unfiltered browse is
+   * active, and counts are refetched under the new filter (stale counts
+   * from the other filter would mislabel the root badges).
+   * @returns {Promise<"current" | "all">}
+   */
+  async function applyStatusFilter() {
+    const filter = provider.statusFilter();
+    provider.counts.clear();
+    provider.renderedCounts.clear();
+    treeView.description = filter === "all" ? "all" : undefined;
+    await provider.refreshCounts().catch(() => {});
+    provider.refresh();
+    api.logLine(`memory tree: status filter ${filter}`);
+    return filter;
+  }
   context.subscriptions.push(
     treeView,
+    vscode.commands.registerCommand("ibis.memory.toggleStatusFilter", async () => {
+      const next = provider.statusFilter() === "all" ? "current" : "all";
+      await updateStatusFilter(api.getConfig(), next);
+    }),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("ibis.memory.statusFilter")) {
+        applyStatusFilter().catch(() => {});
+      }
+    }),
     vscode.commands.registerCommand("ibis.memory.refresh", async () => {
       // Visible feedback (owner request 03/11): a spinner in the view title
       // while the re-fetch cycle runs — the fire() → getChildren work happens
@@ -480,11 +550,9 @@ function registerMemoryTree(context, api, host) {
   registerMemoryDetailProvider(context);
   // Preload the kind counts at activation (owner decision 03/11): the
   // badges are visible on a virgin tree before any expansion, so collapsed
-  // and virgin kinds behave the same way.
-  provider
-    .refreshCounts()
-    .catch(() => {})
-    .then(() => provider.refresh());
+  // and virgin kinds behave the same way. applyStatusFilter also restores
+  // the persisted `all` badge (F4 §A.2).
+  applyStatusFilter().catch(() => {});
 }
 
 module.exports = { registerMemoryTree, MEMORY_KINDS };
