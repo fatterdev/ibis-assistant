@@ -47,7 +47,7 @@ view), account VS Code con Copilot agent mode.
 ### R3.1 — Installazione e attivazione
 
 ```powershell
-code --install-extension C:\devsrc\ibis-assistant\vscode-extension\ibis-assistant-1.0.0.vsix
+code --install-extension C:\devsrc\ibis-assistant\vscode-extension\ibis-assistant-1.0.1.vsix
 ```
 
 - **PASS**: attivazione senza errori; Output **Ibis Assistant** mostra
@@ -69,8 +69,10 @@ code --install-extension C:\devsrc\ibis-assistant\vscode-extension\ibis-assistan
 - **PASS**: container activity bar **Ibis Assistant** (icona ibis) → view
   **Memory** con 8 kind (`decision, fix, rule, constraint, gotcha, design,
   fact, ask`).
-- Espandi `decision` → voci da MCP `memory_search` (query semantica con il
-  kind come seed + filtro kind, limit 50); descrizione con status/visibilità/tag.
+- Espandi `decision` → voci da MCP `memory_list` (metadata browse per kind,
+  no embedding; aggiornato 03/11: l'implementazione F1 usa `memory_list`
+  limit 100 — la descrizione originale "memory_search con query semantica" era
+  datata); descrizione con status/visibilità/tag.
 - Click su una voce → documento read-only `ibis-memory:` con metadati
   (kind/status/visibility/tags/confidence/updated) e contenuto completo
   (`memory_expand`; fallback: summary di ricerca se l'expand fallisce).
@@ -227,3 +229,23 @@ come fatto per R2.
   strumentazione timing ancora a `info` nel log runtime; target: espansione
   freddo < 2s, caldo < 500ms. **S1.4 pending**: solo dopo la misura, demote
   `info`→`debug` delle timing (memory_search/embed/boost).
+  Runbook passo-passo owner (failure-first, pre-flight, matrice guasti,
+  evidenze): [2026-11-03-r33-closure-runbook.md](./2026-11-03-r33-closure-runbook.md).
+  Seed albero (3 memorie, 02/11) via `scripts/seed-memory-r33.mjs` — fatto:
+  `memory_search` runtime 22ms cold / 1–3ms warm su Ollama reale; la misura
+  mancante è l'espansione via VSIX (S1.1).
+**Build debug 1.0.1 (03/11)** — riscontri owner della sessione debug:
+  **numerino sul tree parent** (conteggio voci caricate per kind/search,
+  `N+` oltre il cap; re-render solo su cambio label — guard convergente
+  contro il fire-loop) e **bottone refresh con spinner** (il refetch
+  avveniva già, il difetto era solo di feedback). Le build provvisorie
+  1.1.0–1.1.2 (strumentazione S1.3 lato VSIX/ide-host: spawn/cold-init/
+  reuse/timing per tool call nel canale Output) sono state **mai committate
+  e ritirate a fine sessione debug** su decisione owner: la strumentazione
+  non è in 1.0.1; i numeri raccolti vivono nell'[analisi tempi
+  S1.3](./2026-11-03-s13-timing-analysis.md). Numerazione build debug: patch
+  (`1.0.x`), `1.1.0` riservato a F4. `ibis-assistant-1.0.1.vsix` (59.33 KB,
+  17 file), smoke 26/26, session_test 3/3. Nota corretta su R3.3:
+  l'espansione kind usa **memory_list** (metadata, no embedding), NON
+  memory_search — la riga runtime `memory_search:` nel plugin.log compare
+  solo con il comando Search Memory.

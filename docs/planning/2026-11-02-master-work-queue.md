@@ -14,7 +14,7 @@
 
 | ID | Stream | Doc di riferimento | Stato (02/11) | Prossimo passo (uno solo) | Sbloccato da | Sblocca |
 |---|---|---|---|---|---|---|
-| WQ-1 | **R3/R4 gate** — VSIX 1.0.0 + plugin agent (Parte B) | [review-r3r4-checklist.md](./review-r3r4-checklist.md) | Parte A 26/26 PASS; Parte B: R3.1 ✅ R3.2 ✅ **R3.3 in debug** (S1.1–S1.2 done, S1.3 pending) | **S1.3**: riverificare R3.3 frasi B/C con build S1.1 (target: espansione freddo <2s, caldo <500ms) | rebuild binario stale (sidecar-lifecycle-plan §esecuzione, punti 1–3) | R3.4–R3.8, P4.1–P4.6, publish gate |
+| WQ-1 | **R3/R4 gate** — VSIX 1.0.1 + plugin agent (Parte B) | [review-r3r4-checklist.md](./review-r3r4-checklist.md), [runbook R3.3](./2026-11-03-r33-closure-runbook.md), [analisi tempi S1.3](./2026-11-03-s13-timing-analysis.md) | Parte A 26/26 PASS; Parte B: R3.1 ✅ R3.2 ✅ **R3.3 in chiusura** (owner run 03/11 concluso, zero orfani alla chiusura; numerino parent + refresh feedback in **1.0.1**; strumentazione debug rimossa; analisi tempi: warm PASS ampio 1.5–10ms, cold FALLITO per boot tax 1.4–17s) | **decisione owner sul cold target** (analisi §5: 1 pre-warm all'attivazione / 2 ridefinire target / 3 ridurre boot SurrealDB) + evidenze R3.3 in checklist | decisione owner | R3.4–R3.8, P4.1–P4.6, publish gate |
 | WQ-2 | **Publish gate** (azioni ② ③ ⑤ + `publish-vscode.yml`) | [review-r3r4-checklist.md §Publish gate](./review-r3r4-checklist.md) | ☐ non iniziato | azioni manuali ②③ (Trusted Publishing OIDC, Open VSX token) | WQ-1 (R3/R4 PASS) | WQ-3, WQ-4 |
 | WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | Approved; 9 sub-fasi (F4-B1..B4 ∥ F4-A1..A5) + gate R7 da fare | **F4-B1** — reconciliation Layer 3 (ledger + liveness + start-time) | WQ-2 | gate R7 → F3 docs → Track D |
 | WQ-4 | **Track D** — benchmark DevAX/Scope (D1–D5) | [PLAN.md §9](./PLAN.md), [evaluations/scope/README.md](../evaluations/scope/README.md) | Pianificato (scaffold presente; profili con placeholder `TODO-verify-*` by design, pre-D2) | D1 — pin immagine compose + seed su istanza Scope live | WQ-3 (gate R7), azione D1 | D2–D5, R6 close |
@@ -42,13 +42,24 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
 2. **Consolidamento: F4-B3 (daemon-only, opt-in) vs C9/D11 (ddofds).** C9 (soglia+entity resolution) e D11 shadow-mode cambiano gli *interni* di `consolidate_loop`, non il trigger: compatibili con F4-B3 e landabili in qualsiasi ordine. D12 (response cache) non tocca il consolidation. Se F4-B3 atterra prima, C9/D11 lavorano sulla versione daemon-owned; se dopo, nessun conflitto previsto.
 3. **A1 eval → Track D D3.** La baseline di retrieval quality (A1) è complementare al D3 "memoria → outcome": A1 misura l'ibis interno, D3 misura l'agente end-to-end. Fare A1 prima che D1..D3 parta in earnest rende le fasi 2–3 ddofds misurabili con Track D in parallelo.
 4. **Timeout/sidecar.** WQ-1 S1.1 (client stdio persistente) e il rebuild del binario stale sono prerequisiti di misura per S1.3; l'F4-B1 (reconciliation ledger) complica il sidecar lifecycle — fare S1.3/S1.4 PRIMA di F4-B1 evita due volte le stesse misure.
-5. **Versioni.** VSIX resta 1.0.0 per il publish gate; runtime resta 0.2.0 finché il root `[Unreleased]` non viene taggato (decisione in checklist §Publish gate). F4 porta VSIX 1.1.0 / runtime 0.3.0. Gli interventi ddofds vanno nel root `[Unreleased]` runtime, nessuna bump propria.
+5. **Versioni.** VSIX: le build debug iteracono il numero di **patch** (`1.0.1`, `1.0.2`, … — decisione owner 03/11, a ritroso dalle 1.1.0–1.1.2 provvisorie mai committate) e restano distinguishibili dalla versione a ogni reinstall; `1.1.0` resta riservato a F4. Runtime resta 0.2.0 finché il root `[Unreleased]` non viene taggato (decisione in checklist §Publish gate). F4 porterà runtime 0.3.0. Gli interventi ddofds vanno nel root `[Unreleased]` runtime, nessuna bump propria.
 
 ## 4. Stato per stream (dettaglio minimo)
 
 ### WQ-1 — R3/R4
-- Fatto: Parte A 26/26 (30/10); R3.1/R3.2 PASS; S1.1 stdio persistente (VSIX ripacchettata 58.46 KB, smoke 26/26); S1.2 igiene ambiente owner (pluginLocations corretto, binario Go stale rimosso).
-- Aperto: S1.3 misura timing R3.3 → S1.4 demote log info→debug → R3.3 chiusura → R3.4–R3.8 → P4.1–P4.6 → publish gate.
+- Fatto: Parte A 26/26 (30/10); R3.1/R3.2 PASS; S1.1 stdio persistente (smoke 26/26); S1.2 igiene ambiente owner (pluginLocations corretto, binario Go stale rimosso). Blocker rebuild binario risolto (02/11: PATH `ibis 0.2.0`, Go stale gone).
+- **Sessione debug owner conclusa (03/11)** — run S1.3 eseguito su build
+  provvisorie 1.1.0–1.1.2 (strumentazione S1.3 lato VSIX/ide-host: spawn /
+  cold-init / reuse / timing per tool call; mai committate). Riscontri owner
+  implementati in **1.0.1** (numerino sul tree parent con guard convergente,
+  refresh con spinner — il refetch esisteva già su 1.1.0, il difetto era solo
+  di feedback) e **strumentazione rimossa** (fine sessione debug). Seed
+  albero + runbook + [analisi tempi](./2026-11-03-s13-timing-analysis.md)
+  (warm PASS ampio, cold fallito per boot tax — SurrealDB 1–4s, Ollama giù
+  +8.7s). Chiusura VS Code verificata: zero processi orfani (job object ok).
+- Aperto: decisione owner sul cold target (analisi §5) → eventuale pre-warm
+  ide-host → S1.4 demote log info→debug (azione agente) → R3.4–R3.8 →
+  P4.1–P4.6 → publish gate.
 
 ### WQ-3 — F4
 - Nessun sub-fase iniziata. Primo commit previsto: `feat(runtime): sidecar reconciliation at startup (layer 3)` (F4-B1).
