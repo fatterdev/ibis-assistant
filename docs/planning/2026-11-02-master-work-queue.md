@@ -16,7 +16,7 @@
 |---|---|---|---|---|---|---|
 | WQ-1 | **R3/R4 gate** — VSIX 1.0.11 + plugin agent (Parte B) | [review-r3r4-checklist.md](./review-r3r4-checklist.md), [runbook R3.3](./2026-11-03-r33-closure-runbook.md), [analisi tempi S1.3](./2026-11-03-s13-timing-analysis.md) | **CHIUSO (03/11)**: Parte A 26/26 PASS; Parte B completa (R3.1–R3.8 + P4.1–P4.6 PASS) — run interattivo con evidenza da log; cold target chiuso dal pre-warm (prima fetch 12–30ms dopo boot pagato all'attivazione, 3.3–4.7s con Ollama su); note: P4.1 UX (status in chat), P4.5 tool-ref fix + superficie = mode picker, noise hook da estensione Azure Tools (checklist §Esito) | **push differito (decisione owner 03/11)** — a fine sviluppo: riscrittura dell'intera storia in pochi commit precisi (include rimozione claim/fact di test) → push | — | F4 (WQ-3) sbloccata |
 | WQ-2 | **Publish gate** (azioni ② ③ ⑤ + `publish-vscode.yml`) | [review-r3r4-checklist.md §Publish gate](./review-r3r4-checklist.md) | **Differito (decisione owner 03/11)**: publish a sviluppo concluso, non a R3/R4 — vedi §3.6 | azioni manuali ②③ (Trusted Publishing OIDC, Open VSX token) al momento del publish | fine sviluppo (decisione owner su timing) | WQ-4 (D-CLAIMS gate pre-publishing) |
-| WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | **F4-B1 done (03/11, `e28d936`)** — reconciliation Layer 3 atterrata (ledger + liveness start-time + terminate; e2e live SurrealDB verde); 8 sub-fasi residue + gate R7 | **F4-B2** — `ibis serve --team` profile + bind + projection default | — (publish differito, §3.6) | gate R7 → F3 docs → Track D |
+| WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | **F4-B2 done (03/11, `68c4c9d`)** — `ibis serve --team` profile atterrata (alias di `run`, `--bind`/`--data-dir`, default loopback + proiezione on salvo config esplicita, banner `[TEAM]`); 7 sub-fasi residue + gate R7 | **F4-B3** — daemon-only consolidation opt-in (`--consolidate` / `ai.consolidation.enabled`) | — (publish differito, §3.6) | gate R7 → F3 docs → Track D |
 | WQ-4 | **Track D** — benchmark DevAX/Scope (D1–D5) | [PLAN.md §9](./PLAN.md), [evaluations/scope/README.md](../evaluations/scope/README.md) | Pianificato (scaffold presente; profili con placeholder `TODO-verify-*` by design, pre-D2) | D1 — pin immagine compose + seed su istanza Scope live | WQ-3 (gate R7), azione D1 | D2–D5, R6 close |
 | WQ-5 | **Miglioramenti ddofds** — fasi 0–5 (eval, retrieval, costi, memoria) | [analisi L1](./2026-11-01-dailydoseofds-improvement-analysis.md) → [L2](./2026-11-01-dailydoseofds-improvement-analysis-l2-flussi-funzionali.md) → [L3](./2026-11-01-dailydoseofds-improvement-analysis-l3-punti-di-aggancio.md); [piano A1](./2026-11-02-a1-retrieval-eval-plan.md); [validazione A2](./2026-11-03-a2-rrf-validation.md) | **Fase 0 (A1) done** (commit `9fb53da` 03/11): dataset 12 case + runner + CLI `ibis eval retrieval` + job CI `retrieval-eval`; baseline offline MRR 0.917 / r@5 0.958 / r@15 1.0, baseline ollama (additive) MRR 0.917 / r@5 1.0 / r@15 1.0. **Fase 1 (A2) implementata 03/11**: `rrf_fuse` + `FusionMode` + config `search.fusion` (default **additive**) + eval `--fusion` + campo `fusion` nel report; validazione: offline parità, ollama **regressione** (MRR 0.875, r@5 0.958 — perdita margine r05/r11). **Decisione owner A2 (03/11): opzione 2 — tuning RRF prima di decidere** (default resta additive) | **tuning RRF** (k più piccolo / ibride rank+cosine normalizzate, fuori scope A2) + re-run eval offline+ollama, poi decisione default | — | tuning A2; fasi 1–3 (C9/D13/B6); baseline per Track D D3 |
 | WQ-6 | **Track B** — ingest tracce Beacon (B0–B4, B3 se promossa) | [PLAN.md §9-bis](./PLAN.md) | Pianificato (approvato 03/11; solo piano, nessun codice) | B0 — installazione endpoint Beacon (azione manuale ⑥) + campionamento `runtime.jsonl` → nota `evaluations/beacon/campionamento.md` | azione manuale ⑥ (owner) | B1–B4, R8, B3 (se promossa) |
@@ -127,8 +127,31 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   Verificato: ibis-server daemon tests 18/18.
 - F4-B1 conclusa anche la parte sidecar-lifecycle-plan §Layer 3 (piano
   aggiornato, [sidecar-lifecycle-plan.md](./sidecar-lifecycle-plan.md)).
-- Nessun'altra sub-fase iniziata. Prossimo commit previsto: `feat(cli): serve
-  --team profile with lan binding` (F4-B2).
+- **F4-B2 atterrata (03/11, `68c4c9d`)** — `ibis serve` alias di `run` (anche
+  `-serve`/`--serve`) + profilo `--team` (F4 §B.1): nuovi flag server
+  `--bind <addr>` e `--data-dir <path>` (normalizzazione single-dash estesa);
+  il profilo applica i default SOLO sui knob non impostati — runtime_mode →
+  `server` (personal claims `db_only` via resolver esistente), bind →
+  `127.0.0.1` (esposizione LAN solo con `--bind` esplicito; config
+  `bind_address` rispettato), proiezione `.ibis/memory` on salvo
+  `memory.projection_enabled: false` esplicito nel config.json (nuovo
+  `ibis_core::config::projection_explicitly_set`); no-op in plugin isolation.
+  Banner startup `[TEAM]` a 4 righe: bind address + reminder header
+  `X-Ibis-Actor` (CLI: `IBIS_ACTOR`) + boundary no-auth = reachability di
+  rete + proiezione attiva. `--data-dir` override raw su `db_data_path`
+  (stessa semantica CWD-relative degli altri flag; runbook B4 documenterà
+  path assoluti). Test: 5 test profilo + single-dash flags (ibis-server),
+  unit helper config (ibis-core); smoke live: banner `[TEAM]` + sidecar
+  SurrealDB con data-dir isolata. Workspace verde (cargo test --workspace,
+  clippy `-D warnings`).
+- **Finding (da B2, non bloccante)** — `ibis_ai::runner::tests::default_api_url_substituted`
+  fallisce quando Ollama è attivo sull'host (test `unwrap_err` sull'esito
+  ensure-ollama, riceve `Ok(EnsureOllamaOutcome { process: None })`):
+  coupling test↔ambiente, pre-esistente (verificato con stash del diff B2).
+  Follow-up candidato: rendere il test indipendente da Ollama raggiungibile.
+- Prossimo commit previsto: `feat(daemon): consolidation loop owned by the
+  daemon` (F4-B3 — flag `--consolidate` / config `ai.consolidation.enabled`,
+  off di default; il consolidamento gira solo nel daemon, i client mai).
 - Dipendenza interna da rispettare: B.6 (reconciliation) è precondizione strutturale del Milestone B — **soddisfatta**.
 
 ### WQ-4 — Track D
