@@ -183,6 +183,8 @@ pub struct EvalReport {
     /// Embedding provider name (seed and query embedder are the same
     /// instance — baselines are comparable only at equal embedder).
     pub embedder: String,
+    /// Channel fusion under test (`additive` | `rrf` — A2 validation).
+    pub fusion: String,
     /// Whether the golden estate was seeded in this run.
     pub seeded: bool,
     pub aggregate: EvalAggregate,
@@ -201,6 +203,7 @@ pub fn build_report(
     dataset: &str,
     version: &str,
     embedder: &str,
+    fusion: &str,
     seeded: bool,
     cases: Vec<CaseResult>,
 ) -> EvalReport {
@@ -223,6 +226,7 @@ pub fn build_report(
         dataset: dataset.to_string(),
         version: version.to_string(),
         embedder: embedder.to_string(),
+        fusion: fusion.to_string(),
         seeded,
         aggregate: EvalAggregate {
             cases: cases.len(),
@@ -955,7 +959,7 @@ mod tests {
                 error: Some("degraded".to_string()),
             },
         ];
-        let report = build_report("ds.yaml", "1", "offline-hash-768", true, cases);
+        let report = build_report("ds.yaml", "1", "offline-hash-768", "additive", true, cases);
         let agg = &report.aggregate;
         assert_eq!(agg.cases, 4);
         assert_eq!(agg.cases_ok, 3);
@@ -980,7 +984,7 @@ mod tests {
             hits: vec![],
             error: Some("x".to_string()),
         }];
-        let report = build_report("ds.yaml", "1", "offline-hash-768", false, all_error);
+        let report = build_report("ds.yaml", "1", "offline-hash-768", "additive", false, all_error);
         assert!(!report.below_threshold(0.5));
         assert_eq!(report.aggregate.cases_ok, 0);
     }

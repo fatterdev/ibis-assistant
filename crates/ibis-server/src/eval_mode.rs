@@ -31,6 +31,8 @@ pub struct EvalParams {
     pass: String,
     embedder: String,
     ollama_url: String,
+    /// Channel fusion under test (additive|rrf — A2 validation).
+    fusion: String,
     seed: bool,
     out: Option<String>,
 }
@@ -53,6 +55,7 @@ fn parse_args(args: &[String]) -> Result<EvalParams, String> {
         pass: "root".to_string(),
         embedder: "auto".to_string(),
         ollama_url: DEFAULT_OLLAMA_URL.to_string(),
+        fusion: "additive".to_string(),
         seed: true,
         out: None,
     };
@@ -86,6 +89,13 @@ fn parse_args(args: &[String]) -> Result<EvalParams, String> {
                 params.embedder = v;
             }
             "--ollama-url" => params.ollama_url = value(&mut i, "--ollama-url")?,
+            "--fusion" => {
+                let v = value(&mut i, "--fusion")?;
+                if !matches!(v.as_str(), "additive" | "rrf") {
+                    return Err("--fusion must be additive|rrf".to_string());
+                }
+                params.fusion = v;
+            }
             "--no-seed" => params.seed = false,
             "--out" => params.out = Some(value(&mut i, "--out")?),
             other => return Err(format!("unknown eval flag: {other}")),
@@ -150,10 +160,19 @@ async fn run_async(p: EvalParams) -> Result<i32, String> {
     };
 
     let dataset = load_dataset(&p.dataset)?;
-    let service = Arc::new(SearchService::new(Some(db), Some(ai.clone())));
+    let mut service = SearchService::new(Some(db), Some(ai.clone()));
+    service.fusion_mode = ibis_search::retrieval_boost::FusionMode::resolve(&p.fusion);
+    let service = Arc::new(service);
     let runner = RetrievalEvalRunner::new(service);
     let cases = runner.run(&dataset).await;
-    let report = build_report(&p.dataset, &dataset.version, ai.name(), seeded, cases);
+    let report = build_report(
+        &p.dataset,
+        &dataset.version,
+        ai.name(),
+        &p.fusion,
+        seeded,
+        cases,
+    );
 
     let json = serde_json::to_string_pretty(&report).map_err(|e| format!("report: {e}"))?;
     println!("{json}");
@@ -214,6 +233,8 @@ mod tests {
             "r.json",
             "--db",
             "custom",
+            "--fusion",
+            "rrf",
         ]))
         .expect("parse");
         assert_eq!(p.min_recall_5, 0.4);
@@ -222,10 +243,12 @@ mod tests {
         assert_eq!(p.out.as_deref(), Some("r.json"));
         assert_eq!(p.db, "custom");
         assert_eq!(p.ns, "ibis_eval");
+        assert_eq!(p.fusion, "rrf");
 
         assert!(parse_args(&args(&["retrieval", "--embedder", "bogus"])).is_err());
         assert!(parse_args(&args(&["retrieval", "--min-recall-5", "abc"])).is_err());
         assert!(parse_args(&args(&["retrieval", "--url"])).is_err());
+        assert!(parse_args(&args(&["retrieval", "--fusion", "bogus"])).is_err());
         assert!(parse_args(&args(&["retrieval", "--wat"])).is_err());
     }
 }

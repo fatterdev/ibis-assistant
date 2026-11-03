@@ -45,6 +45,25 @@ pub struct WorldStateConfig {
     pub code_cache_disabled: bool,
 }
 
+/// Retrieval knobs (`search.*`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct SearchConfig {
+    /// Channel fusion for `ask_project`: `additive` (legacy default) |
+    /// `rrf` (Reciprocal Rank Fusion, A2). Unknown values resolve to
+    /// additive with a warning.
+    #[serde(rename = "fusion")]
+    pub fusion: String,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        SearchConfig {
+            fusion: "additive".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ProjectConfig {
@@ -353,6 +372,8 @@ pub struct Config {
     pub memory: MemoryConfig,
     #[serde(rename = "world_state")]
     pub world_state: WorldStateConfig,
+    #[serde(rename = "search")]
+    pub search: SearchConfig,
     /// True if a config file was successfully loaded (not serialized).
     #[serde(skip)]
     pub config_loaded: bool,
@@ -580,6 +601,7 @@ impl Default for Config {
             log_ingestion: LogIngestionConfig::default(),
             memory: MemoryConfig::default(),
             world_state: WorldStateConfig::default(),
+            search: SearchConfig::default(),
             bind_address: String::new(),
             runtime_mode: String::new(),
             gemini_keys: Vec::new(),
@@ -1165,6 +1187,15 @@ mod tests {
             serde_json::from_str(r#"{"world_state": {"code_cache_disabled": true}}"#).unwrap();
         assert!(cfg.world_state.code_cache_disabled);
         assert!(!default_config().world_state.code_cache_disabled);
+    }
+
+    #[test]
+    fn search_fusion_config() {
+        let cfg: Config = serde_json::from_str(r#"{"search": {"fusion": "rrf"}}"#).unwrap();
+        assert_eq!(cfg.search.fusion, "rrf");
+        assert_eq!(default_config().search.fusion, "additive");
+        let empty: Config = serde_json::from_str(r#"{"search": {}}"#).unwrap();
+        assert_eq!(empty.search.fusion, "additive");
     }
 
     #[test]

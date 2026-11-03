@@ -4,6 +4,24 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(search): RRF channel fusion behind `search.fusion` (A2 ddofds)** -
+  `ask_project` merges the four channels by per-channel rank with Reciprocal
+  Rank Fusion (`rrf_fuse`, k=60, cross-channel contributions sum) instead of
+  the fixed-weight additive blend when `search.fusion = "rrf"`; the legacy
+  additive path stays the default (safe rollout) and is byte-for-byte pinned
+  by the existing unit tests. In RRF mode the "is current" bonus becomes a
+  constant epsilon applied after fusion (no longer a fraction of the cosine
+  score) and ties break deterministically by record id. Unknown config values
+  log a warning and resolve to additive. Validation harness:
+  `ibis eval retrieval --fusion additive|rrf` (flag + `fusion` field in the
+  JSON report). Evidence
+  (`docs/planning/2026-11-03-a2-rrf-validation.md`): parity with the additive
+  baseline on the offline embedder (MRR 0.917 / recall@5 0.958 / recall@15
+  1.0) and a real-embedder (Ollama) regression (MRR 0.875 / recall@5 0.958 —
+  rank-only fusion loses the cosine margin, the documented RRF tradeoff), so
+  the default is NOT flipped; an owner decision is logged in the master work
+  queue (WQ-5). A1 baseline now also measured with the real embedder
+  (additive: MRR 0.917 / recall@5 1.0 / recall@15 1.0).
 - **feat(vsix): 1.0.1 — memory tree parent count + refresh feedback** - the
   memory tree parent (a kind or the search root) now shows a **count of the
   loaded entries** as its description (`N+` when the fetch hits the list

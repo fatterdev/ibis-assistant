@@ -94,7 +94,7 @@ CLI: `ibis eval retrieval --dataset <path> [--min-recall-5 X] [--url U]
 | Embedder | MRR | recall@5 | recall@15 | case ok |
 |---|---|---|---|---|
 | `offline-hash-768` | **0.917** | **0.958** | **1.000** | 12/12 |
-| `ollama` (`nomic-embed-text`) | — da misurare (11434 giù in sessione; il fallback auto è verificato) | | | |
+| `ollama` (`nomic-embed-text`) | **0.917** (misurata 03/11, additive) | **1.000** | **1.000** | 12/12 |
 
 Per-channel (offline): file_chunk 5, memory 5, commit_chunk 1, reasoning 1.
 Punti deboli baseline: `r08_rrf_decision` e `r09_rrf_commit` al rank 2 (il

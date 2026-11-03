@@ -694,6 +694,7 @@ impl crate::search::SearchService {
                 path: String::new(),
                 tags: mem.tags.clone(),
                 score: mem.score,
+                id: mem.id.clone(),
                 payload: i,
             })
             .collect();

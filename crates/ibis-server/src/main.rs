@@ -653,6 +653,7 @@ fn build_search_service(
             &cfg.runtime_mode,
         );
     service.hot_ref_cache_disabled = cfg.world_state.code_cache_disabled;
+    service.fusion_mode = ibis_search::retrieval_boost::FusionMode::resolve(&cfg.search.fusion);
     Arc::new(service)
 }
 

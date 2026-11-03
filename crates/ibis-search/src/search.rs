@@ -23,7 +23,8 @@ use crate::error::{Result, SearchError};
 use crate::graph::{self, CommitSummary, GraphContext, IssueSummary};
 use crate::memory::temporal::{ask_memory_visibility_sql, memory_currentness_sql};
 use crate::retrieval_boost::{
-    apply_multi_signal_boost, resolve_linked_symbols, tokenize_query, ScoredHit,
+    apply_multi_signal_boost, apply_rrf_boost, resolve_linked_symbols, rrf_fuse, rrf_max_score,
+    tokenize_query, FusionMode, ScoredHit, CURRENT_EPSILON, RRF_K,
 };
 use crate::rows;
 use crate::ActorContext;
@@ -113,6 +114,9 @@ pub struct SearchService {
     /// Hot-ref code byte cache kill-switch
     /// (`world_state.code_cache_disabled`, default false = cache on).
     pub hot_ref_cache_disabled: bool,
+    /// Channel fusion mode (`search.fusion`: additive|rrf — A2; default
+    /// additive for safe rollout until the A1 eval validates RRF).
+    pub fusion_mode: FusionMode,
     /// Process-local TTL cache of ancestor sets (lazily created).
     pub(crate) ancestor_cache: std::sync::OnceLock<ibis_git::AncestorCache>,
 }
@@ -127,6 +131,7 @@ impl Default for SearchService {
             notes: None,
             personal_claims_policy: String::new(),
             hot_ref_cache_disabled: false,
+            fusion_mode: FusionMode::default(),
             ancestor_cache: std::sync::OnceLock::new(),
         }
     }
@@ -211,6 +216,9 @@ struct ChunkResult {
     commit_hash: String,
     status: String,
     kind: String,
+    /// Set when the canonical HEAD hash lookup matched this chunk's hash
+    /// (drives the "is current" bump/epsilon and the result flag).
+    at_head: bool,
 }
 
 impl ChunkResult {
@@ -226,6 +234,7 @@ impl ChunkResult {
             status: rows::scalar_string(rows::field(row, "status")),
             kind: rows::scalar_string(rows::field(row, "kind")),
             score: rows::numeric_float(rows::field(row, "score")),
+            at_head: false,
         }
     }
 }
@@ -307,7 +316,9 @@ impl SearchService {
         ];
 
         let mut chunks: Vec<ChunkResult> = Vec::new();
+        let mut channel_chunks: Vec<Vec<usize>> = Vec::new();
         for tq in &queries {
+            let start = chunks.len();
             let mut vars: Vars = memory_vars.iter().cloned().collect();
             vars.insert("vec".into(), vec_json.clone());
             let outcome = db.smart_query(&tq.sql, vars).await.map_err(|e| {
@@ -326,6 +337,7 @@ impl SearchService {
                 }
                 chunks.push(c);
             }
+            channel_chunks.push((start..chunks.len()).collect());
         }
 
         // Resolve canonical HEAD hashes by path (hash-suffixed source_file
@@ -350,7 +362,12 @@ impl SearchService {
                 if !head.is_empty() {
                     chunk.current_hash = head.clone();
                     if !chunk.hash.is_empty() && chunk.hash == *head {
-                        chunk.score += 0.05;
+                        chunk.at_head = true;
+                        // Additive mode keeps the legacy fraction-of-score
+                        // bump; RRF applies a constant epsilon after fusion.
+                        if self.fusion_mode == FusionMode::Additive {
+                            chunk.score += 0.05;
+                        }
                     }
                 }
             }
@@ -358,18 +375,58 @@ impl SearchService {
 
         let (keywords, entities) = tokenize_query(query);
         let linked_symbols = resolve_linked_symbols(self.db.as_ref(), &entities).await;
-        let mut hits: Vec<ScoredHit> = chunks
-            .iter()
-            .enumerate()
-            .map(|(i, c)| ScoredHit {
-                text: c.content.clone(),
-                path: c.path.clone(),
-                tags: Vec::new(),
-                score: c.score,
-                payload: i,
-            })
-            .collect();
-        apply_multi_signal_boost(&mut hits, &keywords, &entities, &linked_symbols);
+        let mut hits: Vec<ScoredHit> = match self.fusion_mode {
+            FusionMode::Additive => chunks
+                .iter()
+                .enumerate()
+                .map(|(i, c)| ScoredHit {
+                    text: c.content.clone(),
+                    path: c.path.clone(),
+                    tags: Vec::new(),
+                    score: c.score,
+                    id: c.id.clone(),
+                    payload: i,
+                })
+                .collect(),
+            FusionMode::Rrf => {
+                let rank_lists: Vec<Vec<(usize, usize)>> = channel_chunks
+                    .iter()
+                    .map(|idxs| {
+                        idxs.iter()
+                            .enumerate()
+                            .map(|(rank, idx)| (*idx, rank + 1))
+                            .collect()
+                    })
+                    .collect();
+                let fused = rrf_fuse(&rank_lists, RRF_K);
+                let channels_with_hits = rank_lists.iter().filter(|c| !c.is_empty()).count();
+                let rrf_max = rrf_max_score(channels_with_hits, RRF_K);
+                chunks
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| {
+                        let base = (fused.get(&i).copied().unwrap_or(0.0) / rrf_max).min(1.0);
+                        let epsilon = if c.at_head { CURRENT_EPSILON } else { 0.0 };
+                        ScoredHit {
+                            text: c.content.clone(),
+                            path: c.path.clone(),
+                            tags: Vec::new(),
+                            score: base + epsilon,
+                            id: c.id.clone(),
+                            payload: i,
+                        }
+                    })
+                    .collect()
+            }
+        };
+        match self.fusion_mode {
+            FusionMode::Additive => {
+                apply_multi_signal_boost(&mut hits, &keywords, &entities, &linked_symbols)
+            }
+            FusionMode::Rrf => {
+                apply_rrf_boost(&mut hits, &keywords, &entities, &linked_symbols)
+            }
+        }
         let boosted: Vec<ChunkResult> = hits
             .iter()
             .filter_map(|hit| {
@@ -685,6 +742,54 @@ mod tests {
             extra.context.expert_authors.is_empty(),
             "4th file gets no context"
         );
+    }
+
+    /// RRF fusion (A2): ranking follows per-channel ranks, not the channel
+/// score scale — a rank-1 memory hit ties a rank-1 file hit (id tie-break)
+/// and outranks a rank-2 file hit that has a much higher cosine score.
+#[tokio::test]
+    async fn ask_project_rrf_fusion_ranks_by_channel_rank() {
+        let file_rows = vec![
+            obj(vec![
+                ("id", Value::from_t("file_chunk:a")),
+                ("path", Value::from_t("/src/a.go")),
+                ("content", Value::from_t("func main()")),
+                ("score", Value::from_t(0.9f64)),
+            ]),
+            obj(vec![
+                ("id", Value::from_t("file_chunk:b")),
+                ("path", Value::from_t("/src/b.go")),
+                ("content", Value::from_t("func help()")),
+                ("score", Value::from_t(0.8f64)),
+            ]),
+        ];
+        let memory_rows = vec![obj(vec![
+            ("id", Value::from_t("memory:m1")),
+            ("content", Value::from_t("team rule")),
+            ("status", Value::from_t("current")),
+            ("kind", Value::from_t("rule")),
+            ("score", Value::from_t(0.4f64)),
+        ])];
+        let fake = Arc::new(FakeDb::new(vec![
+            ("FROM file_chunk", rows_of(file_rows)),
+            ("FROM memory", rows_of(memory_rows)),
+        ]));
+        let mut svc = service(fake, Some(fake_ai()));
+        svc.fusion_mode = FusionMode::Rrf;
+        let results = svc
+            .ask_project(&ActorContext::LOCAL, "test query")
+            .await
+            .expect("ask_project");
+
+        assert_eq!(results.len(), 3);
+        let ids: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
+        assert_eq!(ids, vec!["file_chunk:a", "memory:m1", "file_chunk:b"]);
+
+        // Rank-1 ties normalize to the same fused base (0.5*0.75, no boosts);
+        // rank-2 lands below despite its much higher cosine score.
+        let score = |id: &str| results.iter().find(|r| r.id == id).unwrap().score;
+        assert!((score("file_chunk:a") - score("memory:m1")).abs() < 1e-9);
+        assert!(score("file_chunk:b") < score("file_chunk:a") - 1e-6);
     }
 
     /// Degraded mode (D8): no DB → ask fails with the original sentinel message.

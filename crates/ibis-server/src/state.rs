@@ -172,6 +172,8 @@ impl AppState {
                 &cfg.runtime_mode,
             );
         service.hot_ref_cache_disabled = cfg.world_state.code_cache_disabled;
+        service.fusion_mode =
+            ibis_search::retrieval_boost::FusionMode::resolve(&cfg.search.fusion);
         *self.search.write().unwrap() = Arc::new(service);
     }
 
