@@ -10,7 +10,7 @@
 
 ## Summary
 
-Ibis does **not** load Go in-process into Cursor or VS Code (no `c-shared` / FFI). A thin Node **ide-host** optionally sits between the IDE and the Go binary:
+Ibis does **not** load the runtime in-process into Cursor or VS Code (no FFI / shared-library host). A thin Node **ide-host** optionally sits between the IDE and the `ibis` binary:
 
 - **Default:** each IDE spawns its own `ibis -mode stdio -runtime-mode plugin` child.
 - **Shared runtime (optional):** both IDEs attach to one **personal** HTTP daemon via `IBIS_MCP_URL=http://127.0.0.1:3030/mcp`.
@@ -51,8 +51,8 @@ Env:
 |----------|---------|
 | `IBIS_MCP_URL` | When set, ide-host attaches to Streamable HTTP MCP instead of spawning |
 | `IBIS_DATA_DIR` | Plugin data dir (isolated spawn only) |
-| `IBIS_LM_BRIDGE_URL` | Go → host LM RPC (default `http://127.0.0.1:39201`) |
-| `IBIS_BIN` | Override Go executable for spawn |
+| `IBIS_LM_BRIDGE_URL` | `ibis` host LM RPC (default `http://127.0.0.1:39201`) |
+| `IBIS_BIN` | Override `ibis` executable for spawn |
 
 ## Settings UI
 
@@ -76,16 +76,16 @@ Typed memory (`memory_*`, `load_session_context`, `capture_observation`, …) is
 | [`cursor-plugin/`](../cursor-plugin/) | Cursor: MCP, commands, rules, skill, hook, STATUS |
 | [`ide-host/`](../ide-host/) | Shared spawn / attach / LM RPC |
 | [`vscode-extension/`](../vscode-extension/) | VS Code packaging |
-| [`internal/ai/cursor_lm.go`](../internal/ai/cursor_lm.go) | Go bridge client |
+| [`crates/ibis-ai/src/cursor_lm.rs`](../crates/ibis-ai/src/cursor_lm.rs) | LM bridge client (Rust) |
 
 ## Explicitly rejected / later
 
 | Item | Status |
 |------|--------|
-| Go in-process via FFI | Rejected |
+| Native in-process bridge (FFI) | Rejected |
 | Marketplace / Open VSX publish CI | Later (local VSIX first) |
 | Native IDE Settings webview | Later (browser ephemeral enough) |
-| OAuth MCP, mcp-bridge off SSE | Unchanged out of scope |
+| OAuth MCP | Unchanged out of scope |
 
 ## Related
 

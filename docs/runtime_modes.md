@@ -3,7 +3,7 @@
 **Date:** 2026-09-18 (AI/Settings 2026-09-19; typed memory 2026-10-09; sidecar lifecycle 2026-10-30)  
 **Status:** Implemented. Design: [superpowers/specs/2026-09-18-runtime-modes-design.md](superpowers/specs/2026-09-18-runtime-modes-design.md). Hybrid AI: [ai_and_settings.md](ai_and_settings.md). Memory: [memory_layer.md](memory_layer.md), [superpowers/specs/2026-10-09-memory-absorption-design.md](superpowers/specs/2026-10-09-memory-absorption-design.md). Sidecar lifecycle: [planning/sidecar-lifecycle-plan.md](planning/sidecar-lifecycle-plan.md).
 
-Ibis Assistant is **one Go binary** (`ibis`) with three **runtimes** (`runtime_mode` in `config.json` / `RUNTIME_MODE` / `-runtime-mode`). Listener kind (`mode`: `sse` | `stdio`) is separate.
+Ibis Assistant is **one Rust binary** (`ibis`) with three **runtimes** (`runtime_mode` in `config.json` / `RUNTIME_MODE` / `-runtime-mode`). Listener kind (`mode`: `sse` | `stdio`) is separate.
 
 | Runtime | Process | Workspace | Knowledge store |
 |---------|---------|-----------|-----------------|
@@ -22,16 +22,16 @@ Plugin start:
 - Default Surreal URL becomes `ws://127.0.0.1:18000/rpc` so it does not attach to a personal DB on 8000.
 - Warns on stderr/log if `ibis.pid` is running or the configured HTTP port is in use; continues on stdio and does **not** auto-attach.
 - Does **not** put `${workspaceFolder}` in plugin `mcp.json` (Cursor empty windows fail variable resolve and mark the shared MCP id as error). Binds the opened folder from `IBIS_WORKSPACE`, Cursor/VS Code workspace env, MCP `roots/list`, or a git cwd that is not the user home directory. Does **not** AutoScan the process cwd (often the user home directory).
-- An empty-window child **completes the MCP handshake** without SurrealDB or ingest so the identifier stays connected; it does not `os.Exit(0)`.
-- Stdio: application logs go only to `plugin.log`. The Surreal Go driver is redirected off `stdout` so JSON slog cannot break the MCP JSON-RPC stream.
+- An empty-window child **completes the MCP handshake** without SurrealDB or ingest so the identifier stays connected; it does not exit the process.
+- Stdio: application logs go only to `plugin.log`. Library logging (SurrealDB client, tracing) stays off `stdout` so log lines cannot break the MCP JSON-RPC stream.
 - AI: same hybrid stack as personal; keys live in the plugin data-dir `config.json`. Context-only fallback when local and cloud fail. MCP `settings_*` tools; `settings_open_ui` opens personal `/settings/` when reachable, else an ephemeral loopback Settings UI with a one-shot token. See [ai_and_settings.md](ai_and_settings.md).
 
 ## HTTP MCP (personal / server)
 
 When `mode` is `sse` (HTTP listener):
 
-- **Primary:** Streamable HTTP `POST /mcp` (mcp-go v1.1.0; protocol 2026-07-28 `server/discover` plus legacy `initialize`).
-- **Legacy:** `/sse` + `/message` (deprecated; kept for `mcp-bridge`).
+- **Primary:** Streamable HTTP `POST /mcp` (rmcp 3.7.0; protocol 2026-07-28 `server/discover` plus legacy `initialize`).
+- **Removed:** legacy `/sse` + `/message` routes are gone (D11); `mcp-bridge` speaks Streamable HTTP at `/mcp`.
 - **Discovery:** `GET /` with `Accept: application/json` | `text/html` | `text/markdown`; MCP resource `ibis://guide`.
 - **Settings UI:** `GET /settings/`, `GET|POST /api/v1/settings` (localhost). Same app as Cursor `settings_open_ui`.
 - CLI is a Streamable HTTP client of `/mcp` (`ibis ask|ingest|logs|…`). `POST /api/v1/cli/call` is gone.
@@ -43,7 +43,7 @@ Bind: personal/plugin → `127.0.0.1` unless `bind_address` is set; server → `
 
 Canonical source: [`cursor-plugin/`](../cursor-plugin/). Local copy: `~/.cursor/plugins/local/ibis/`.
 
-Default: spawns `ibis -mode stdio -runtime-mode plugin` with `RUNTIME_MODE=plugin`. Put the Go binary on `PATH`. Do not zip the binary into the plugin. Do not interpolate `${workspaceFolder}` in the plugin spawn env.
+Default: spawns `ibis -mode stdio -runtime-mode plugin` with `RUNTIME_MODE=plugin`. Put the `ibis` binary on `PATH`. Do not zip the binary into the plugin. Do not interpolate `${workspaceFolder}` in the plugin spawn env.
 
 Commands: **Ibis: Open Settings**, **Ibis: Status**. Also: `STATUS.md`, readiness rule/skill, minimal session hook.
 
@@ -88,7 +88,7 @@ Server `projects[]` entries may use `url` / `branch` instead of `working_repo_pa
 
 ## Verification
 
-`go test ./internal/e2erun ./internal/workspace ./internal/config ./internal/runtime ./internal/httpserver ./internal/cli ./internal/cursorplugin ./internal/ingest/dynamic ./internal/settings ./internal/ai`
+`cargo test --workspace`
 
 Covered (18 Sep): live-tree ingest; server clone under `dynamic/`; plugin isolation; HTTP `/mcp`; plugin `mcp.json` spawn env.  
 Covered (19 Sep): hybrid router + cloud pool unit tests; SettingsEngine tier/recommend; wizard package build.
@@ -113,7 +113,7 @@ When enabled, durable kinds can be reviewed under `<repo>/.ibis/memory/<kind>/�
 
 ## Still out of scope
 
-OAuth, moving `mcp-bridge` off SSE, OS symlink/junction aliases, true Go-in-process FFI, Marketplace/Open VSX publish CI.
+OAuth, OS symlink/junction aliases, true native in-process FFI, Marketplace/Open VSX publish CI. (`mcp-bridge` off SSE shipped with D11.)
 
 Shipped: thin IDE host, `vscode.lm` bridge, optional shared personal runtime (`IBIS_MCP_URL`) — [ide_host_and_lm_bridge.md](ide_host_and_lm_bridge.md). Typed memory + local-first consolidation (`memory_consolidate`) close the agent-outcome learning loop.
 

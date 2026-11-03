@@ -147,16 +147,16 @@ degrades to the context-only pack instead of erroring.
 
 ## Code map
 
-| Package / area | Role |
+| Crate / module | Role |
 |----------------|------|
-| `internal/settings` | Probe, Recommend, Apply, `/settings` API + embedded UI |
-| `internal/wizard` | CLI `config fast` / `full` |
-| `internal/ai/ollama_chat.go` | Local `/api/chat` |
-| `internal/ai/openai_compat.go` | OpenAI-compatible chat |
-| `internal/ai/claude.go` | Anthropic Messages API |
-| `internal/ai/cloud_pool.go` | Multi-cloud failover |
-| `internal/ai/router.go` | Hybrid ReasoningRouter |
-| `internal/config/reasoning.go` | Normalize + cloud helpers |
+| `crates/ibis-settings` | Probe, Recommend, Apply, `/settings` API + embedded UI |
+| `crates/ibis-wizard` | CLI `config fast` / `full` |
+| `crates/ibis-ai/src/ollama_chat.rs` | Local `/api/chat` |
+| `crates/ibis-ai/src/openai_compat.rs` | OpenAI-compatible chat |
+| `crates/ibis-ai/src/claude.rs` | Anthropic Messages API |
+| `crates/ibis-ai/src/cloud_pool.rs` | Multi-cloud failover |
+| `crates/ibis-ai/src/router.rs` | Hybrid ReasoningRouter |
+| `crates/ibis-core/src/reasoning.rs` | Normalize + cloud helpers |
 
 ## Related history
 

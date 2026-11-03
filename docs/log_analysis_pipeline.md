@@ -34,15 +34,15 @@ flowchart TD
 
 ### Stages (code map)
 
-| Stage | Package / file | Role |
+| Stage | Crate / file | Role |
 |-------|----------------|------|
-| Watch | `internal/ingest/logs/watcher.go` | Recursive fsnotify under `logs_root` |
-| Tail | `tailer.go` | Offset-aware reads into analyzable batches |
-| Analyze | `analyzer.go` | Static first, then AI; filters noise; respects chunk budgets |
-| Enrich | `enrich.go` | Resolve file / symbol / baseline from knowledge graph |
-| LogAlign | `logalign.go` | Templates linked to emitting source; promotion from AI |
-| AST rules | `ast_rule_gen.go` | Persist `rules/ai-generated-*-logs.yml` when useful |
-| Report | `reporter.go` | Markdown report next to the log (`report_<logfile>_<ts>.md`) |
+| Watch | `crates/ibis-ingest-logs/src/watcher.rs` | Recursive `notify` watcher under `logs_root` |
+| Tail | `crates/ibis-ingest-logs/src/tailer.rs` | Offset-aware reads into analyzable batches |
+| Analyze | `crates/ibis-ingest-logs/src/analyzer.rs` | Static first, then AI; filters noise; respects chunk budgets |
+| Enrich | `crates/ibis-ingest-logs/src/enrich.rs` | Resolve file / symbol / baseline from knowledge graph |
+| LogAlign | `crates/ibis-ingest-logs/src/logalign.rs` | Templates linked to emitting source; promotion from AI |
+| AST rules | `crates/ibis-ingest-logs/src/ast_rule_gen.rs` | Persist `rules/ai-generated-*-logs.yml` when useful |
+| Report | `crates/ibis-ingest-logs/src/reporter.rs` | Markdown report next to the log (`report_<logfile>_<ts>.md`) |
 
 ## Operator entry points
 
@@ -78,5 +78,5 @@ ibis logs analyze --project MyApp --text "ERROR something failed"
 
 ## Verification
 
-- Unit tests: `internal/ingest/logs/*_test.go` (`analyzer`, `enrich`, `logalign`, `ast_rule_gen`)
+- Unit tests: `cargo test -p ibis-ingest-logs` (`analyzer`, `enrich`, `logalign`, `ast_rule_gen`)
 - Manual: point `logs_root` at real logs (or this repository’s own run logs), run watch or `logs analyze`, confirm the report names the file and a plausible cause when the graph has code context

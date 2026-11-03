@@ -12,13 +12,13 @@
 
 | Piece | Location | Role |
 |-------|----------|------|
-| Ingest orchestration | `internal/ingest/code/ingest.go` | Git tree as source of truth; prune obsolete chunks |
-| AST chunker | `ast_chunker.go` | Invokes `sg` with project `sgconfig.yml` + `rules/` |
-| Sidecar install | `install.go` | Ensures `sg` is available |
-| Language globs | `lang_globs.go`, root `sgconfig.yml` | Map extensions → host language for injection |
-| Polyglot regions | `polyglot.go` | Bootstrap embedded script/style regions (e.g. server-page templates) |
-| Sparse detection | `sparse_ast.go` | Decide when rule synthesis is needed |
-| AI rule synth | `rule_synth.go` | Propose → validate → `PersistValidatedRule` |
+| Ingest orchestration | `crates/ibis-ingest-code/src/ingest.rs` | Git tree as source of truth; prune obsolete chunks |
+| AST chunker | `crates/ibis-ingest-code/src/ast_chunker.rs` | Invokes `sg` with project `sgconfig.yml` + `rules/` |
+| Sidecar install | `crates/ibis-ingest-code/src/install.rs` | Ensures `sg` is available |
+| Language globs | `crates/ibis-ingest-code/src/lang_globs.rs`, root `sgconfig.yml` | Map extensions → host language for injection |
+| Polyglot regions | `crates/ibis-ingest-code/src/sparse_ast.rs` + `ast_chunker.rs` | Bootstrap hint list for embedded script/style regions (e.g. server-page templates); `sg` extracts them with host-line bias |
+| Sparse detection | `crates/ibis-ingest-code/src/sparse_ast.rs` | Decide when rule synthesis is needed |
+| AI rule synth | `crates/ibis-ingest-code/src/rule_synth.rs` | Propose → validate → `persist_validated_rule` |
 
 ## `sgconfig.yml` (repo root)
 
@@ -33,7 +33,7 @@ languageGlobs:
     # … see file for full list
 ```
 
-AI synthesis may call `EnsureLanguageGlob` at runtime for unfamiliar extensions.
+AI synthesis may call `ensure_language_glob` at runtime for unfamiliar extensions.
 
 ## Generated rules
 
@@ -47,10 +47,10 @@ Keep hand-written rules in `rules/` for core languages; treat AI files as additi
 
 ## MCP / CLI
 
-- MCP: `ingest_code` (path / project context as registered in `cmd/server/main.go`)
+- MCP: `ingest_code` (path / project context as registered in the declarative tool registry `crates/ibis-server/src/registry.rs`)
 - CLI: `ibis ingest code --path ./path/to/project`
 
 ## Verification
 
-- Unit tests: `rule_synth_test.go`, `ast_chunker_test.go`
+- Unit tests: `cargo test -p ibis-ingest-code` (`rule_synth`, `ast_chunker`)
 - Smoke: `ingest code` on a polyglot tree (e.g. `.jsp` + script blocks) and confirm chunks without falling back to whole-file grep-only paths when rules exist

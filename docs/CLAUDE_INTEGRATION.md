@@ -4,26 +4,26 @@ This guide describes how to connect **Claude Desktop** to the **Ibis Assistant**
 
 ## 🌉 Why a Bridge?
 
-Claude Desktop currently supports "Stdio" (standard input/output) connections for local MCP servers. Ibis Assistant's **product default** for HTTP clients is Streamable HTTP at `/mcp`. Legacy HTTP+SSE (`/sse`) remains so `mcp-bridge` and older clients can share the same knowledge graph.
+Claude Desktop currently supports "Stdio" (standard input/output) connections for local MCP servers. Ibis Assistant exposes **Streamable HTTP** at `/mcp`. The legacy HTTP+SSE endpoints (`/sse`, `/message`) have been removed, and the `mcp-bridge` now speaks Streamable HTTP as well.
 
-To connect Claude Desktop, we use a lightweight **MCP Bridge** that runs locally, talks "Stdio" to Claude, and forwards messages to the Ibis Assistant **SSE** endpoint (`http://localhost:3030/sse`) until the bridge is moved onto `/mcp`.
+To connect Claude Desktop, we use a lightweight **MCP Bridge** that runs locally, talks "Stdio" to Claude, and forwards messages to the Ibis Assistant Streamable HTTP endpoint (`http://localhost:3030/mcp`).
 
 ---
 
 ## 🛠️ Installation & Setup
 
 ### 1. Prerequisite: The Ibis Assistant
-Ensure the Ibis Assistant is running (e.g. `http://localhost:3030/mcp` for new HTTP clients; the bridge below still uses `/sse`).
+Ensure the Ibis Assistant is running (e.g. `http://localhost:3030/mcp`).
 
 ### 2. Build the Bridge Tool
 If you haven't already, compile the bridge tool included in this repository.
 
 ```powershell
 # In the repository root
-go build -o mcp-bridge.exe ./tools/mcp-bridge
+cargo build --release -p mcp-bridge
 ```
 
-You should now have `mcp-bridge.exe` in your folder. Move it to a permanent location if desired (e.g., `C:\Tools\mcp-bridge.exe`).
+The binary lands in `target\release\mcp-bridge.exe`. Move it to a permanent location if desired (e.g., `C:\Tools\mcp-bridge.exe`).
 
 ### 3. Configure Claude Desktop
 Open your Claude Desktop configuration file:
@@ -38,7 +38,7 @@ Add the following entry to the `mcpServers` section:
     "knowledge-graph": {
       "command": "C:\\Tools\\mcp-bridge.exe",
       "args": [
-        "-url", "http://localhost:3030/sse",
+        "-url", "http://localhost:3030/mcp",
         "-key", "YOUR_REDMINE_API_KEY"
       ]
     }
@@ -54,7 +54,7 @@ Restart Claude Desktop. You should see a green connection icon for "knowledge-gr
 
 ## Available tools reference
 
-Source of truth: `cmd/server/main.go`. Obsolete names (`ingest_git`, `reinforce_path`) are **not** registered.
+Source of truth: the declarative tool registry `crates/ibis-server/src/registry.rs` (handlers in `crates/ibis-server/src/tools.rs`). Obsolete names (`ingest_git`, `reinforce_path`) are **not** registered.
 
 ### Knowledge and search
 

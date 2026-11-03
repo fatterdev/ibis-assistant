@@ -59,7 +59,7 @@ Legacy tools stay registered and feed the same model:
 
 ## MCP tools
 
-Source of truth: `cmd/server/main.go`.
+Source of truth: the declarative tool registry `crates/ibis-server/src/registry.rs`.
 
 | Group | Tools |
 |-------|-------|
