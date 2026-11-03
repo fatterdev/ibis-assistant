@@ -15,6 +15,9 @@ tools:
 
 Use this agent for read-only investigation over the Ibis knowledge graph.
 
+Keep the narration minimal: at most one short sentence of preamble per step, then
+deliver the Finding / Evidence / Confidence block.
+
 ## Rules
 
 - Use only the Ibis tools listed in frontmatter (all read-only) plus your built-in
