@@ -94,6 +94,12 @@ struct DuplicateRow {
     score: Option<F64>,
 }
 
+/// `SELECT project FROM memory … GROUP BY project` row projection.
+#[derive(Debug, Clone, SurrealValue)]
+struct ProjectRow {
+    project: Option<RecordId>,
+}
+
 impl Optimizer {
     /// Drains raw observations oldest-first. Uses
     /// `bulk_local` so hybrid routing tries local Ollama before cloud,
@@ -198,6 +204,38 @@ impl Optimizer {
         max_items: usize,
     ) -> Result<(), String> {
         self.consolidate_loop(project_name, max_items).await
+    }
+
+    /// Projects that still hold `current` observations (F4 §B.5: the
+    /// daemon-owned loop discovers its work in the store, so team clients
+    /// can capture for repos unknown to the server config). One pass per
+    /// project keeps `consolidate_loop`'s per-project filter intact.
+    pub async fn pending_observation_projects(&self) -> Result<Vec<String>, String> {
+        let db = self.db.as_ref().ok_or("database not connected")?;
+        let query = "SELECT project FROM memory WHERE kind = 'observation' AND status = 'current' GROUP BY project;";
+        let outcome = db
+            .execute(query)
+            .await
+            .map_err(|e| format!("select observation projects: {e}"))?;
+        let rows = ibis_db::value::decode_row_list::<ProjectRow>(
+            outcome.first().unwrap_or(&Value::None),
+            query,
+        )
+        .map_err(|e| format!("decode observation projects: {e}"))?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| {
+                let rid = row.project?;
+                let plain = ibis_db::ids::record_id_to_plain(&rid);
+                // `repo:<key>` — the key is the sanitized project name
+                // (`sanitize_id` output is idempotent, so passing it back
+                // into `consolidate_loop` re-derives the same record).
+                plain
+                    .strip_prefix("repo:")
+                    .map(|name| name.trim().to_string())
+            })
+            .filter(|name| !name.is_empty())
+            .collect())
     }
 
     async fn select_observations(
@@ -1005,6 +1043,62 @@ mod tests {
                 "failed classification must leave the observation untouched: {query}"
             );
         }
+    }
+
+    /// F4 §B.5 — project discovery for the daemon-owned loop: distinct
+    /// `repo` records still holding current observations; junk/none rows and
+    /// non-repo shapes are skipped.
+    #[tokio::test]
+    async fn pending_observation_projects_lists_distinct_repos() {
+        struct ProjectsDb(Vec<Value>);
+        #[async_trait]
+        impl Executor for ProjectsDb {
+            async fn execute(&self, _sql: &str) -> Result<QueryOutcome, ibis_db::DbError> {
+                Ok(QueryOutcome::Single(arr(self.0.clone())))
+            }
+            async fn smart_query(
+                &self,
+                _sql: &str,
+                _vars: Vars,
+            ) -> Result<QueryOutcome, ibis_db::DbError> {
+                Ok(QueryOutcome::Single(Value::None))
+            }
+        }
+        let db = Arc::new(ProjectsDb(vec![
+            obj(vec![("project", Value::RecordId(RecordId::new("repo", "alpha")))]),
+            obj(vec![("project", Value::RecordId(RecordId::new("repo", "beta")))]),
+            obj(vec![("project", Value::None)]),
+            obj(vec![("project", Value::RecordId(RecordId::new("issue", "42")))]),
+        ]));
+        let opt = Optimizer::new(Some(db as Arc<dyn Executor>), None, None);
+
+        let projects = opt
+            .pending_observation_projects()
+            .await
+            .expect("project discovery");
+        assert_eq!(projects, vec!["alpha".to_string(), "beta".to_string()]);
+    }
+
+    /// The discovery surfaces store failures instead of silently returning
+    /// an empty list (the daemon loop logs and retries on the next tick).
+    #[tokio::test]
+    async fn pending_observation_projects_propagates_db_errors() {
+        struct FailingDb;
+        #[async_trait]
+        impl Executor for FailingDb {
+            async fn execute(&self, _sql: &str) -> Result<QueryOutcome, ibis_db::DbError> {
+                Err(ibis_db::DbError::query("connection lost", "SELECT", std::time::Duration::from_millis(1)))
+            }
+            async fn smart_query(
+                &self,
+                _sql: &str,
+                _vars: Vars,
+            ) -> Result<QueryOutcome, ibis_db::DbError> {
+                Err(ibis_db::DbError::NotInitialized)
+            }
+        }
+        let opt = Optimizer::new(Some(Arc::new(FailingDb) as Arc<dyn Executor>), None, None);
+        assert!(opt.pending_observation_projects().await.is_err());
     }
 
     /// `parseConsolidationDecision behavior: fence trimming, action/kind

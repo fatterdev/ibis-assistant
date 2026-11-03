@@ -147,11 +147,35 @@ pub struct GeminiKeyConfig {
     pub allow_overage: bool,
 }
 
+/// Daemon-side consolidation loop knobs (`ai.consolidation`, F4 §B.5):
+/// opt-in, off by default — the loop runs only in the daemon
+/// (`ibis run` / `ibis serve --team`), never on client surfaces.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ConsolidationConfig {
+    /// Turns the daemon-owned consolidation loop on (CLI `--consolidate`
+    /// forces it on regardless of this value).
+    pub enabled: bool,
+    /// Seconds between consolidation passes (clamped to a 60s minimum).
+    #[serde(rename = "interval_secs")]
+    pub interval_secs: u64,
+}
+
+impl Default for ConsolidationConfig {
+    fn default() -> Self {
+        ConsolidationConfig {
+            enabled: false,
+            interval_secs: 3600,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct AIConfig {
     pub embedding: EmbeddingConfig,
     pub reasoning: ReasoningConfig,
+    pub consolidation: ConsolidationConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -574,6 +598,7 @@ impl Default for Config {
                     },
                     ..Default::default()
                 },
+                consolidation: ConsolidationConfig::default(),
             },
             gemini_default_rpm: 100,
             redmine_concurrency: 10,
@@ -1220,6 +1245,28 @@ mod tests {
         assert_eq!(default_config().search.fusion, "additive");
         let empty: Config = serde_json::from_str(r#"{"search": {}}"#).unwrap();
         assert_eq!(empty.search.fusion, "additive");
+    }
+
+    /// `ai.consolidation` (F4 §B.5): off by default, the file overlays the
+    /// knob, and a partial `ai` object keeps the default interval.
+    #[test]
+    fn ai_consolidation_config() {
+        let dflt = default_config();
+        assert!(!dflt.ai.consolidation.enabled);
+        assert_eq!(dflt.ai.consolidation.interval_secs, 3600);
+
+        let cfg: Config = serde_json::from_str(
+            r#"{"ai": {"consolidation": {"enabled": true, "interval_secs": 600}}}"#,
+        )
+        .unwrap();
+        assert!(cfg.ai.consolidation.enabled);
+        assert_eq!(cfg.ai.consolidation.interval_secs, 600);
+
+        // Missing consolidation key under a present `ai` → defaults apply.
+        let cfg: Config =
+            serde_json::from_str(r#"{"ai": {"reasoning": {"provider": "ollama"}}}"#).unwrap();
+        assert!(!cfg.ai.consolidation.enabled);
+        assert_eq!(cfg.ai.consolidation.interval_secs, 3600);
     }
 
     #[test]

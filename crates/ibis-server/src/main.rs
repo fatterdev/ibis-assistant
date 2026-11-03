@@ -22,7 +22,7 @@ use clap::Parser;
 use ibis_core::config::Config;
 use ibis_db::executor::Executor;
 use ibis_search::search::SearchService;
-use ibis_server::{assembly, collision, mcp_server, registry, state};
+use ibis_server::{assembly, collision, consolidation, mcp_server, registry, state};
 use rmcp::service::ServiceExt as _;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::tower::StreamableHttpService;
@@ -253,6 +253,7 @@ const SERVER_LONG_FLAGS: &[&str] = &[
     "workspace",
     "config",
     "team",
+    "consolidate",
     "bind",
     "data-dir",
 ];
@@ -303,6 +304,15 @@ fn apply_team_profile(cfg: &mut Config, team_profile: bool) {
     }
     if ibis_core::config::projection_explicitly_set(&cfg.config_path) != Some(false) {
         cfg.memory.projection_enabled = true;
+    }
+}
+
+/// The `--consolidate` opt-in (F4 §B.5): the flag forces the daemon-owned
+/// consolidation loop on, overriding a config `ai.consolidation.enabled`
+/// false (CLI flags win over the config file, as everywhere else).
+fn apply_consolidation_flag(cfg: &mut Config, consolidate: bool) {
+    if consolidate {
+        cfg.ai.consolidation.enabled = true;
     }
 }
 
@@ -368,6 +378,10 @@ struct ServerFlags {
     /// projection on (F4 §B.1)
     #[arg(long = "team")]
     team: bool,
+    /// Run the daemon-owned consolidation loop (F4 §B.5; off by default,
+    /// overrides ai.consolidation.enabled=false in the config)
+    #[arg(long = "consolidate")]
+    consolidate: bool,
     /// Address to bind the HTTP listener to (default: runtime-mode driven;
     /// the team profile defaults to 127.0.0.1)
     #[arg(long = "bind")]
@@ -486,6 +500,7 @@ async fn run_server_async(args: Vec<String>) -> i32 {
     if let Some(v) = flags.data_dir {
         cfg.db_data_path = v;
     }
+    apply_consolidation_flag(&mut cfg, flags.consolidate);
 
     // The `--team` profile (F4 §B.1): server runtime semantics, loopback-safe
     // bind default, projection on — explicit choices (flags/config) win.
@@ -665,6 +680,9 @@ async fn run_server_async(args: Vec<String>) -> i32 {
     assembly::start_polling_manager(&state, shutdown.child_token());
     assembly::trigger_background_indexing(state.clone(), shutdown.child_token());
     let batch_manager = assembly::start_batch_manager(&state);
+    // F4 §B.5: the consolidation loop belongs to the daemon alone (opt-in,
+    // off by default; stdio/plugin client surfaces never start it).
+    consolidation::start(&state, shutdown.child_token());
 
     // 7./8. MCP server + run loop.
     let with_logging = state.config().mode != "stdio";
@@ -965,6 +983,36 @@ mod flag_parity_tests {
         assert!(flags.team);
         assert_eq!(flags.bind.as_deref(), Some("0.0.0.0"));
         assert_eq!(flags.data_dir.as_deref(), Some("C:/team-data"));
+    }
+
+    /// The `--consolidate` opt-in (F4 §B.5) parses in both spellings.
+    #[test]
+    fn consolidate_flag_accepts_both_spellings() {
+        let flags = parse(&["-consolidate"]);
+        assert!(flags.consolidate);
+        let flags = parse(&["--consolidate"]);
+        assert!(flags.consolidate);
+        let flags = parse(&["--team"]);
+        assert!(!flags.consolidate);
+    }
+
+    /// `--consolidate` forces the loop on over a config `false`; without the
+    /// flag the config choice stands (either way).
+    #[test]
+    fn consolidate_flag_overrides_the_config() {
+        let mut cfg = Config::default();
+        assert!(!cfg.ai.consolidation.enabled);
+        apply_consolidation_flag(&mut cfg, true);
+        assert!(cfg.ai.consolidation.enabled);
+
+        let mut cfg = Config::default();
+        apply_consolidation_flag(&mut cfg, false);
+        assert!(!cfg.ai.consolidation.enabled);
+
+        let mut cfg = Config::default();
+        cfg.ai.consolidation.enabled = true;
+        apply_consolidation_flag(&mut cfg, false);
+        assert!(cfg.ai.consolidation.enabled);
     }
 }
 

@@ -4,6 +4,19 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(daemon): consolidation loop owned by the daemon** - F4-B3: the
+  consolidation backlog is drained by the long-lived runtime, never by client
+  surfaces (T3: one runtime owns consolidation, so duplicate-supersede
+  disappears with the single-runtime topology). Opt-in only: `--consolidate`
+  on the server or `ai.consolidation.enabled` in config.json (off by default
+  locally; the team runbook will recommend ON — `interval_secs` tunes the
+  cadence, 60s floor, default 1h). The loop discovers in the store the
+  projects that still hold `current` observations (team clients can capture
+  for repos unknown to the server config) and runs one `consolidate_loop`
+  pass per project — first tick at startup, then on the cadence; passes are
+  strictly sequential and stop with the daemon shutdown; stdio plugin/IDE-host
+  children never start it. The weekly `memory_consolidate` automation stays
+  the explicit human trigger.
 - **fix(server): daemon stop handle carries a query right** - `stop_process_raw`
   opened its handle with `TERMINATE | SYNCHRONIZE` only: `GetExitCodeProcess`
   fails without a query right, the zero-initialized exit code reads as
