@@ -4,6 +4,13 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(vscode): 1.0.5 — refresh updates collapsed-kind counts** - the
+  memory-tree refresh cycle now pre-fetches the entry count of **all eight
+  kinds** (collapsed parents included — owner decision 03/11: ~8 parallel
+  `memory_list`, a few ms) before the re-render, so the badges stay
+  truthful at a glance even for kinds nobody expanded; expanded kinds
+  re-fetch through the render fire as before, and a failed kind fetch
+  keeps its last known count.
 - **feat(vscode): 1.0.4 — ui-test instrumentation** - every Output-channel
   line is mirrored to `%LOCALAPPDATA%\ibis\ui-tests\output-channel.log`
   (boot-delimited), closing the evidence gap that lost the S1.3 run's

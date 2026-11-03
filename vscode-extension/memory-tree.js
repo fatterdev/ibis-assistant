@@ -241,6 +241,33 @@ class MemoryTreeDataProvider {
   }
 
   /**
+   * Counts for every kind (collapsed parents included — owner decision
+   * 03/11): the root badges stay truthful after a refresh even when the
+   * kind is not expanded (expanded kinds re-fetch through the fire anyway).
+   * A failed kind fetch keeps its last known count.
+   */
+  async refreshCounts() {
+    const results = await Promise.all(
+      MEMORY_KINDS.map(async ({ kind }) => {
+        try {
+          return { kind, entries: await this.fetchEntries("", kind) };
+        } catch {
+          return null;
+        }
+      }),
+    );
+    for (const result of results) {
+      if (!result) {
+        continue;
+      }
+      this.counts.set(result.kind, {
+        n: result.entries.length,
+        capped: result.entries.length >= KIND_LIMIT,
+      });
+    }
+  }
+
+  /**
    * Kind browse uses `memory_list` (metadata, no embedding — instant);
    * free-text search keeps `memory_search` (semantic, one call).
    * @param {string} query
@@ -427,6 +454,7 @@ function registerMemoryTree(context, api, host) {
         async () => {
           const t0 = Date.now();
           api.logLine("memory tree: refresh requested");
+          await provider.refreshCounts();
           provider.refresh();
           await new Promise((resolve) => setTimeout(resolve, 400));
           api.logLine(`memory tree: refresh cycle complete in ${Date.now() - t0}ms`);
