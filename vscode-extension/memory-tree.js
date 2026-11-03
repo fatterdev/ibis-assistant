@@ -133,6 +133,8 @@ class MemoryTreeDataProvider {
     this.counts = new Map();
     /** Last count label rendered per parent — the convergent fire guard. */
     this.renderedCounts = new Map();
+    /** Root nodes from the last render — identity targets for expandAll. */
+    this.lastRoots = [];
     this._onDidChangeTreeData = new vscode.EventEmitter();
     this.onDidChangeTreeData = this._onDidChangeTreeData.event;
   }
@@ -204,6 +206,7 @@ class MemoryTreeDataProvider {
           ),
         );
       }
+      this.lastRoots = roots;
       return roots;
     }
 
@@ -460,6 +463,17 @@ function registerMemoryTree(context, api, host) {
           api.logLine(`memory tree: refresh cycle complete in ${Date.now() - t0}ms`);
         },
       );
+    }),
+    vscode.commands.registerCommand("ibis.memory.expandAll", async () => {
+      // VS Code custom views ship collapse-all only: expand every kind root
+      // explicitly (reveal with expand:1 fetches the level).
+      for (const node of provider.lastRoots.filter((n) => n.data.type === "kind")) {
+        try {
+          await treeView.reveal(node, { expand: 1, select: false, focus: false });
+        } catch {
+          /* a stale render may invalidate a node — the next reveal re-finds it */
+        }
+      }
     }),
     vscode.commands.registerCommand("ibis.memory.search", async () => {
       const query = await vscode.window.showInputBox({

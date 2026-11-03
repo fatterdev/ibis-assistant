@@ -514,6 +514,7 @@ async function rememberMemory(host, cfg) {
     visibility,
   });
   logLine(`memory_add (${kind}, ${visibility}): ${text}`);
+  await vscode.commands.executeCommand("ibis.memory.refresh");
   vscode.window.showInformationMessage(`Ibis Remembered (${kind}, ${visibility}): ${text}`);
 }
 

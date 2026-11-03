@@ -4,6 +4,14 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(vscode): 1.0.7 — tree updates after capture, expand-all button** -
+  Remember Selection/File (and the Remember command) now refresh the memory
+  tree automatically after a successful `memory_add` (counts + entries,
+  ~400ms cycle — no manual refresh needed), and the view title gains an
+  **Expand All** button (`$(expand-all)`, `ibis.memory.expandAll`) next to
+  collapse-all: VS Code custom views ship collapse-only, the new command
+  reveals and expands every kind root. Both from owner feedback during the
+  R3.4 verification run.
 - **fix(ide-host): parallel tool calls on one session lost their replies
   (VSIX 1.0.6)** - `StdioSession.wake()` consumed the whole waiter list on
   every reply: checks whose id wasn't in that reply were dropped and never

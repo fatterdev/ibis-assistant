@@ -124,6 +124,7 @@ async function rememberSelection(api, host) {
   api.logLine(
     `memory_add (selection ${rel}:${startLine}-${endLine}, ${kind}, ${visibility}, source_hash=${hash}): ${text}`,
   );
+  await vscode.commands.executeCommand("ibis.memory.refresh");
   vscode.window.showInformationMessage(
     `Ibis Remembered (${kind}, ${visibility}) from ${rel}:${startLine}-${endLine}: ${text}`,
   );
@@ -193,6 +194,7 @@ async function rememberFile(api, host, uriArg) {
   api.logLine(
     `memory_add (file ${rel}, ${kind}, ${visibility}, source_hash=${hash}): ${text}`,
   );
+  await vscode.commands.executeCommand("ibis.memory.refresh");
   vscode.window.showInformationMessage(
     `Ibis Remembered (${kind}, ${visibility}) for ${rel}: ${text}`,
   );

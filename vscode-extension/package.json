@@ -2,7 +2,7 @@
   "name": "ibis-assistant",
   "displayName": "Ibis Assistant",
   "description": "Living project memory over MCP for VS Code. Spawns an isolated Ibis Assistant (Rust) stdio child or attaches to a shared personal runtime for graph, logs, tickets, and typed memory.",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "publisher": "fatterdev",
   "license": "Apache-2.0",
   "icon": "assets/icon.png",
@@ -75,6 +75,11 @@
         "icon": "$(sync)"
       },
       {
+        "command": "ibis.memory.expandAll",
+        "title": "Ibis Assistant: Expand Memory Tree",
+        "icon": "$(expand-all)"
+      },
+      {
         "command": "ibis.memory.openDetail",
         "title": "Ibis Assistant: Open Memory Detail"
       },
@@ -114,6 +119,11 @@
         {
           "command": "ibis.memory.refresh",
           "group": "navigation@2",
+          "when": "view == ibis.memoryExplorer"
+        },
+        {
+          "command": "ibis.memory.expandAll",
+          "group": "navigation@3",
           "when": "view == ibis.memoryExplorer"
         }
       ],
