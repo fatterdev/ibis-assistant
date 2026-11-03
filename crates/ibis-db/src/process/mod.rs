@@ -12,6 +12,12 @@
 //!   first (console ctrl event / SIGINT to the group) and kills after the
 //!   2s grace. On pipe-spawned children without a shared console the ctrl
 //!   event cannot be delivered and the kill-after-grace path applies.
+//! - Layer 3 reconciliation (`ibis_core::sidecar_ledger`): before spawning,
+//!   the ledger beside the data file is reconciled — sidecars whose owner
+//!   ibis is gone (orphans from hard kills on the residual edges of layers
+//!   1–2) are terminated, so a fresh instance starts on a clean data file
+//!   and port; the entry of this instance is registered once the child is
+//!   confirmed alive and removed after a successful graceful stop.
 
 pub mod install;
 
@@ -27,11 +33,16 @@ use crate::process::install::ensure_surreal_db;
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
 const DIAL_TIMEOUT: Duration = Duration::from_millis(500);
 const STOP_GRACE: Duration = Duration::from_secs(2);
+/// Grace for terminating foreign stale sidecars found by the reconciliation.
+const RECONCILE_GRACE: Duration = Duration::from_secs(2);
 
 /// Handles the lifecycle of the embedded SurrealDB process.
 pub struct ProcessManager {
     child: Child,
     port: u16,
+    /// Ledger bookkeeping: the directory beside the data file and the entry
+    /// registered for this instance (removed on graceful stop).
+    ledger: Option<(PathBuf, ibis_core::sidecar_ledger::SidecarEntry)>,
 }
 
 impl ProcessManager {
@@ -69,6 +80,23 @@ impl ProcessManager {
         })?;
         let bind_addr = format!("127.0.0.1:{port}");
         let file_arg = format!("surrealkv:{}", abs_data_path.display());
+
+        // Layer 3 reconciliation BEFORE spawning: the ledger beside the data
+        // file is the binding for this sidecar — orphaned sidecars from hard
+        // kills are terminated here, so the fresh instance never fights a
+        // corpse for the data file lock and the port.
+        let ledger_dir = abs_data_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let survivors =
+            ibis_core::sidecar_ledger::reconcile(&ledger_dir, RECONCILE_GRACE).await;
+        tracing::info!(
+            "sidecar reconciliation: {} live ledger entr{} kept for data dir {}",
+            survivors.len(),
+            if survivors.len() == 1 { "y" } else { "ies" },
+            ledger_dir.display()
+        );
 
         let mut cmd = tokio::process::Command::new(&abs_bin_path);
         cmd.args([
@@ -116,7 +144,35 @@ impl ProcessManager {
             });
         }
 
-        Ok(ProcessManager { child, port })
+        // Register the ledger entry only for a child that is confirmed
+        // alive: a bind failure against a foreign-live sidecar (attach
+        // tolerance) leaves a corpse whose pid must not be recorded.
+        let ledger = if let Some(pid) = child.id() {
+            #[cfg(windows)]
+            let raw_handle = child.raw_handle().map(|h| h as isize);
+            #[cfg(not(windows))]
+            let raw_handle: Option<isize> = None;
+            let entry = ibis_core::sidecar_ledger::SidecarEntry::for_child(
+                "surreal",
+                pid,
+                port,
+                &abs_data_path,
+                raw_handle,
+            );
+            if ibis_core::sidecar_ledger::entry_alive(&entry) {
+                ibis_core::sidecar_ledger::register(&ledger_dir, &entry);
+                Some((ledger_dir, entry))
+            } else {
+                tracing::warn!(
+                    "sidecar ledger: child pid {pid} not alive after readiness — not registered"
+                );
+                None
+            }
+        } else {
+            None
+        };
+
+        Ok(ProcessManager { child, port, ledger })
     }
 
     /// The port the embedded instance was started on.
@@ -126,12 +182,21 @@ impl ProcessManager {
 
     /// Graceful shutdown via the shared process-tree policy: console ctrl
     /// event / SIGINT to the child's process group first (flush of the
-    /// surrealkv journal), then kill after the 2s grace.
+    /// surrealkv journal), then kill after the 2s grace. The ledger entry is
+    /// removed only after a successful stop — if the stop fails the entry
+    /// stays behind so the next start's reconciliation still sees this
+    /// sidecar.
     pub async fn stop(&mut self) -> Result<(), ProcessError> {
         tracing::info!("Stopping embedded database...");
-        ibis_core::process_tree::graceful_stop(&mut self.child, STOP_GRACE)
+        let outcome = ibis_core::process_tree::graceful_stop(&mut self.child, STOP_GRACE)
             .await
-            .map_err(ProcessError::Io)
+            .map_err(ProcessError::Io);
+        if outcome.is_ok() {
+            if let Some((dir, entry)) = self.ledger.take() {
+                ibis_core::sidecar_ledger::unregister(&dir, &entry.name, entry.pid);
+            }
+        }
+        outcome
     }
 }
 

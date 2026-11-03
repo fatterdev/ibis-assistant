@@ -4,6 +4,26 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(runtime): sidecar reconciliation at startup (layer 3)** - F4-B1: a
+  per-sidecar ledger (`sidecar_ledger.json` beside the SurrealDB data file)
+  records pid + process start-time + port + owner identity at spawn time;
+  before a new embedded instance starts, the ledger is reconciled — dead
+  entries are pruned, entries with a live owner are kept (attach tolerance
+  for sibling runtimes), and entries whose owner ibis is gone are
+  **terminated** (CTRL_BREAK→TerminateProcess on Windows with the query
+  right that keeps `GetExitCodeProcess` honest; SIGTERM→SIGKILL on the
+  process group on unix, grandchildren included). PID reuse is excluded by
+  the start-time comparison (Windows FILETIME, Linux `/proc` starttime;
+  macOS degrades to `kill(pid,0)`, residual documented). The entry is
+  registered only for a child confirmed alive and removed after a
+  successful graceful stop. e2e: real stale-instance test (`IBIS_SURREAL_BIN`)
+  — owner crash simulated on the ledger, restart terminates the stale
+  instance and comes up clean on the same data file and port; portable
+  sleeper-based tests cover the stale/foreign-live/prune paths.
+  Finding (follow-up, not fixed here): `daemon.rs` `stop_process_raw` opens
+  its handle without a query right — same `GetExitCodeProcess` failure
+  shape, so the D10 grace loop can read a live process as exited; masked
+  when a console is shared (the CTRL_BREAK path), latent for pipe children.
 - **fix(plugin): agent tool refs in the Copilot-qualified format** - the
   forensics/curator agent frontmatter used the Claude-Code style
   (`mcp__ibis__*`): VS Code converts plugin agents and silently ignores

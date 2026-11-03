@@ -360,6 +360,9 @@ async fn embedded_process_lifecycle() {
     }
 
     let data_dir = tempfile::tempdir().expect("tempdir");
+    // The data path is the SurrealDB *file*: keeping it inside the tempdir
+    // also isolates the sidecar ledger (recorded beside the data file).
+    let db_file = data_dir.path().join("db");
     // Grab a free port, then release it for the server.
     let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("bind probe");
     let port = probe.local_addr().expect("port").port();
@@ -369,7 +372,7 @@ async fn embedded_process_lifecycle() {
         std::path::Path::new(&bin),
         "root",
         "root",
-        data_dir.path().to_str().expect("utf8 path"),
+        db_file.to_str().expect("utf8 path"),
         port,
     )
     .await
@@ -391,6 +394,122 @@ async fn embedded_process_lifecycle() {
         .expect("ddl on embedded instance");
 
     manager.stop().await.expect("stop embedded");
+}
+
+/// Layer 3 reconciliation e2e: the ledger records the embedded instance;
+/// an owner crash is simulated by rewriting the recorded owner identity to
+/// a dead pid; the restart's reconciliation must terminate the stale
+/// instance and come up clean on the same data file and port.
+#[tokio::test]
+async fn reconciliation_terminates_stale_embedded_instance() {
+    let Some(bin) = std::env::var("IBIS_SURREAL_BIN").ok() else {
+        eprintln!("live: IBIS_SURREAL_BIN not set, skipping reconciliation test");
+        return;
+    };
+    if !std::path::Path::new(&bin).is_file() {
+        eprintln!("live: IBIS_SURREAL_BIN={bin} not a file, skipping");
+        return;
+    }
+
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let db_file = data_dir.path().join("db");
+    // Grab a free port, then release it for the server.
+    let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("bind probe");
+    let port = probe.local_addr().expect("port").port();
+    drop(probe);
+
+    let ledger_dir = data_dir.path().to_path_buf();
+    assert!(
+        !ibis_core::sidecar_ledger::ledger_path(&ledger_dir).exists(),
+        "no ledger before the first start"
+    );
+
+    // 1. First instance: registers itself in the ledger.
+    let manager1 = ibis_db::process::ProcessManager::start_with_bin(
+        std::path::Path::new(&bin),
+        "root",
+        "root",
+        db_file.to_str().expect("utf8 db path"),
+        port,
+    )
+    .await
+    .expect("first embedded start");
+
+    let entries = ibis_core::sidecar_ledger::load(&ledger_dir);
+    assert_eq!(entries.len(), 1, "the first instance registered itself");
+    let entry1 = entries[0].clone();
+    assert_eq!(entry1.name, "surreal");
+    assert_eq!(entry1.port, port);
+    assert_eq!(entry1.data_file, db_file.display().to_string());
+    assert!(
+        ibis_core::sidecar_ledger::entry_alive(&entry1),
+        "the recorded instance is alive"
+    );
+    let pid1 = entry1.pid;
+
+    // Crash simulation without stopping: dropping the manager does not kill
+    // the child (tokio kill_on_drop is off) — the SurrealDB instance stays
+    // bound to the data file and port, owned by nobody.
+    drop(manager1);
+
+    // The recorded owner becomes a process that no longer exists — exactly
+    // what reconciliation observes after a hard kill of the owner ibis.
+    let dead_owner = {
+        let mut cmd = if cfg!(windows) {
+            let mut c = std::process::Command::new("cmd");
+            c.args(["/C", "exit", "0"]);
+            c
+        } else {
+            std::process::Command::new("true")
+        };
+        cmd.stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        let mut child = cmd.spawn().expect("spawn dead owner");
+        let pid = child.id();
+        let _ = child.wait();
+        pid
+    };
+    let mut orphaned = vec![entry1.clone()];
+    orphaned[0].owner_pid = dead_owner;
+    orphaned[0].owner_start_time = 1;
+    ibis_core::sidecar_ledger::save(&ledger_dir, &orphaned);
+
+    // 2. Restart: reconciliation terminates the stale instance before the
+    // fresh one spawns.
+    let mut manager2 = ibis_db::process::ProcessManager::start_with_bin(
+        std::path::Path::new(&bin),
+        "root",
+        "root",
+        db_file.to_str().expect("utf8 db path"),
+        port,
+    )
+    .await
+    .expect("second embedded start after reconciliation");
+
+    assert!(
+        !ibis_core::sidecar_ledger::process_alive(pid1, entry1.start_time),
+        "the stale instance must have been terminated"
+    );
+
+    let entries = ibis_core::sidecar_ledger::load(&ledger_dir);
+    assert_eq!(entries.len(), 1, "only the fresh instance is registered");
+    assert_ne!(entries[0].pid, pid1, "the ledger tracks the fresh pid");
+
+    // The fresh instance serves real traffic.
+    let exec = SurrealDbExecutor::connect(
+        &format!("ws://127.0.0.1:{port}"),
+        "reconciliation",
+        "probe",
+        "root",
+        "root",
+    )
+    .await
+    .expect("connect after reconciliation");
+    exec.execute("DEFINE TABLE _recon SCHEMALESS; CREATE _recon:1 SET ok = true;")
+        .await
+        .expect("ddl on the fresh instance");
+
+    manager2.stop().await.expect("stop the fresh instance");
 }
 
 #[tokio::test]

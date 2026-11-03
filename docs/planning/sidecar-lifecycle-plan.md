@@ -1,7 +1,8 @@
 # Piano — ciclo di vita sidecar portabile (Windows / Linux / macOS)
 
 > Stato: **implementato** (30/10/2026 — punti 1–4 + studio ottimali;
-> reconciliation resta candidato Track D).
+> **reconciliation atterrato 03/11/2026 come F4-B1** — `ibis_core::sidecar_ledger`,
+> vedere §Stato di esecuzione in fondo).
 > Primo increment Windows già committato: `39ec177`
 > (`fix(runtime): kill sidecar tree on exit (windows job object, lazy)` — ibis-core
 > `process_tree` lazy + ProcessManager/runner wiring + CTRL_BREAK graceful + test).
@@ -118,7 +119,7 @@ Varianti accettabili, in ordine di preferenza:
 3. **`/bin/sh -c` watchdog** — zero build extra ma fragile (quoting, processi
    shell extra, comportamento read(1) variabile). Da evitare.
 
-### Layer 3 — reconciliation all'avvio (tutte le piattaforme)
+### Layer 3 — reconciliation all'avvio (tutte le piattaforme) — **implementato (F4-B1, 03/11/2026)**
 
 All'avvio, `ibis` rileva e termina i sidecar stale legati allo *stesso data
 dir / porta*: PID-file nel data dir + verifica liveness (`kill(pid, 0)` su
@@ -127,6 +128,17 @@ escludere PID-reuse). È già candidato Track D (punto 6 del piano) — questo
 studio lo promuove a **componente strutturale**: è l'unico layer che copre gli
 edge di tutti gli altri (shim SIGKILLed, cgroup assenti, macchine senza
 kernel-kill) e trasforma "best-effort" in pulizia *eventualmente completa*.
+
+Atterraggio (decisione T4 della spec F4): `ibis_core::sidecar_ledger` —
+ledger JSON (`sidecar_ledger.json`) accanto al file dati SurrealDB con
+`pid` + start-time + `port` + `pgid` + identità **owner** (`owner_pid` +
+`owner_start_time`); la reconciliation girata da `ProcessManager::start_with_bin`
+**prima** dello spawn: entry morte → pruned, entry vive con owner vivo → kept
+(attach tolerance per runtime fratelli), entry vive con owner morto →
+**terminate** (Windows: CTRL_BREAK → poll con query right → TerminateProcess;
+unix: SIGTERM al gruppo → grace → SIGKILL, nipoti inclusi). Registrazione solo
+per child confermato vivo; rimozione dopo lo stop graceful riuscito. macOS:
+niente /proc → `kill(pid, 0)` senza start-time (residuo dichiarato nel modulo).
 
 ### Sintesi garanzie
 
@@ -187,6 +199,8 @@ Vincoli implementativi che lo studio aggiunge al punto 1:
 6. **Follow-up (fuori scope, candidato Track D)**: *post-crash reconciliation* —
    all'avvio, rilevare e terminare sidecar stale legati allo stesso data dir/porta
    (utile specie su macOS e per dati condivisi tra plugin child).
+   **→ Fatto 03/11/2026 come F4-B1** (promosso a layer strutturale dalla
+   spec F4, decisione T4 — vedere §Stato di esecuzione).
 
 ## Rischi
 
@@ -264,8 +278,44 @@ portabile committata, e2e verde.
   esecuzione della matrice ubuntu (non eseguibile su macchina Windows).
 - macOS: nessun runner CI — verifica manuale owner (watchdog armato + graceful)
   quando serve; codice cross-checkato per compilazione su apple target.
-- Punto 6 (reconciliation) resta candidato Track D — promosso a layer
-  strutturale dallo studio, non ancora implementato.
+- ~~Punto 6 (reconciliation) resta candidato Track D — promosso a layer
+  strutturale dallo studio, non ancora implementato.~~ **Fatto (F4-B1,
+  03/11/2026)** — vedere sotto.
 - **Percorsi macchina rilevanti:** engine locale `C:\devbin\paoai-strix-engine`
   (modelli in `models\`, servizi nssm `StrixServer` :8080, `StrixEmbed` :8081,
   `StrixUITars` :8082 per i test UI); runner UI test `scripts/ui-test/`.
+
+**F4-B1 — sidecar reconciliation at startup (03/11/2026):**
+- `ibis_core::sidecar_ledger` (nuovo modulo): ledger JSON per sidecar
+  (`name`, `pid`, `pgid`, `start_time`, `port`, `data_file`, `owner_pid`,
+  `owner_start_time`) accanto al file dati SurrealDB;
+  `reconcile(dir, grace)` — pruna le entry morte, mantiene le entry vive con
+  owner vivo (attach tolerance), termina le entry vive con owner morto
+  (orfanedini dei residui dei layer 1–2); liveness con esclusioni PID-reuse
+  via start-time (Windows `GetProcessTimes` FILETIME + `GetExitCodeProcess`
+  ≠ STILL_ACTIVE — un processo terminato con handle aperti non è vivo;
+  Linux `/proc/<pid>/stat` field 22; macOS `kill(pid, 0)`, residuo
+  documentato); terminazione foreign (CTRL_BREAK→grace→TerminateProcess su
+  Windows, SIGTERM/SIGKILL sul gruppo su unix) — handle tenuto come `isize`
+  (Send) per gli await del grace-loop.
+- Wiring `ProcessManager` (ibis-db): reconcile **prima** dello spawn con il
+  ledger dir = parent del file dati (binding reale del sidecar); `register`
+  post-readiness solo per child confermato vivo (un bind-failure su sidecar
+  estraneo vivo non registra un cadavere); `unregister` dopo stop graceful
+  riuscito (se lo stop fallisce l'entry resta per la prossima reconciliation).
+- **Finding pre-esistente (registrato, follow-up)**: `ibis-server/src/daemon.rs`
+  `stop_process_raw` apre con `PROCESS_TERMINATE | PROCESS_SYNCHRONIZE` —
+  senza query right `GetExitCodeProcess` fallisce e il grace-loop legge
+  "exit code 0" come processo già morto → la semantica D10 può non
+  terminare un figlio pipe-spawned; mascherato quando c'è console condivisa
+  (CTRL_BREAK consegnato). Stesso difetto che il probe della reconciliation
+  ha colto sul suo termine speculare.
+- Test: ibis-core 7 unit (round-trip ledger, register/unregister,
+  liveness PID-reuse, reconcile stale-kill e2e con sleeper reali,
+  foreign-live idempotente, prune) + ibis-db live gated `IBIS_SURREAL_BIN`
+  (`reconciliation_terminates_stale_embedded_instance`: crash owner
+  simulato sul ledger → restart termina lo stale e riparte pulito, 3.9s
+  con SurrealDB reale) + `embedded_process_lifecycle` riallineato al
+  layout file-in-tempdir (ledger isolato). cargo test workspace verde
+  (escluso il fail pre-esistente machine-dependent `default_api_url_substituted`
+  di ibis-ai, che richiede Ollama locale spento), clippy `-D warnings` verde.
