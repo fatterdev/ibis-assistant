@@ -589,13 +589,11 @@ impl ibis_ai::ChunkStore for DbChunkStore {
             let date_set = match &write.date {
                 Some(rfc3339) => {
                     let var = format!("date{idx}");
-                    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(rfc3339) {
-                        vars.insert(
-                            var.clone(),
-                            Value::Datetime(surrealdb::types::Datetime::from(
-                                dt.with_timezone(&chrono::Utc),
-                            )),
-                        );
+                    // `commit_date` is the adapter-supplied verbatim RFC3339
+                    // string (schema: option<string>, display field); the
+                    // read path converts it with `type::datetime`.
+                    if chrono::DateTime::parse_from_rfc3339(rfc3339).is_ok() {
+                        vars.insert(var.clone(), Value::from_t(rfc3339.as_str()));
                         format!("commit_date = ${var}, ")
                     } else {
                         String::new()
@@ -630,8 +628,13 @@ impl ibis_ai::ChunkStore for DbChunkStore {
             ));
         }
         sql.push_str("COMMIT TRANSACTION;");
+        // F07/C1: the transaction carries `$content{n}`/`$hash{n}`/`$date{n}`
+        // /`$err{n}` placeholders — it MUST go through `smart_query` so the
+        // bound variables reach the server. The old `execute` discarded every
+        // variable and SurrealDB 4 evaluates unbound params as NONE, silently
+        // writing empty content/hash/date/error values.
         self.0
-            .execute(&sql)
+            .smart_query(&sql, vars)
             .await
             .map_err(|e| ibis_ai::AiError::other(e.to_string()))?;
         Ok(())
@@ -823,5 +826,201 @@ mod tests {
             "file_chunk:`aB3_x-9`"
         );
         assert_eq!(ibis_db::ids::format_record(&record), "file_chunk:⟨aB3_x-9⟩");
+    }
+
+    /// F07/C1: `apply_commit_txn` must dispatch through `smart_query` with
+    /// EVERY placeholder bound. SurrealDB 4.0 evaluates an unbound param as
+    /// `NONE` instead of erroring, so the test checks the values carried in
+    /// `vars` — not just that the query "succeeded".
+    #[tokio::test]
+    async fn apply_commit_txn_binds_every_variable() {
+        use ibis_ai::{ChunkStore as _, CommitChunkWrite, CommitTxn};
+
+        struct CapturingDb {
+            sqls: std::sync::Mutex<Vec<String>>,
+            varss: std::sync::Mutex<Vec<Vars>>,
+        }
+        impl CapturingDb {
+            fn new() -> Self {
+                CapturingDb {
+                    sqls: std::sync::Mutex::new(Vec::new()),
+                    varss: std::sync::Mutex::new(Vec::new()),
+                }
+            }
+        }
+        #[async_trait::async_trait]
+        impl Executor for CapturingDb {
+            async fn execute(
+                &self,
+                sql: &str,
+            ) -> std::result::Result<ibis_db::executor::QueryOutcome, ibis_db::DbError>
+            {
+                self.sqls.lock().unwrap().push(sql.to_string());
+                Ok(ibis_db::executor::QueryOutcome::Single(Value::None))
+            }
+            async fn smart_query(
+                &self,
+                sql: &str,
+                v: Vars,
+            ) -> std::result::Result<ibis_db::executor::QueryOutcome, ibis_db::DbError>
+            {
+                self.sqls.lock().unwrap().push(sql.to_string());
+                self.varss.lock().unwrap().push(v);
+                Ok(ibis_db::executor::QueryOutcome::Single(Value::None))
+            }
+        }
+
+        let var_as_text = |v: &Vars, key: &str| -> Option<String> {
+            v.get(key).and_then(|val| match val {
+                Value::String(s) => Some(s.clone()),
+                _ => None,
+            })
+        };
+
+        // Single chunk with date.
+        {
+            let db = Arc::new(CapturingDb::new());
+            let store = DbChunkStore(db.clone() as Arc<dyn Executor>);
+            let txn = CommitTxn {
+                chunk_writes: vec![CommitChunkWrite {
+                    commit_record: "commit:⟨abc123⟩".into(),
+                    chunk_key: "abc123_chunk0".into(),
+                    content: "meaning body".into(),
+                    hash: "abc123".into(),
+                    date: Some("2026-11-05T10:00:00Z".into()),
+                }],
+                completed_commits: vec!["commit:⟨abc123⟩".into()],
+                failed_commits: vec![],
+            };
+            store.apply_commit_txn(&txn).await.expect("apply");
+            let sqls = db.sqls.lock().unwrap();
+            assert!(sqls.len() == 1, "one smart_query, got {sqls:?}");
+            assert!(sqls[0].starts_with("BEGIN TRANSACTION;"));
+            assert!(sqls[0].contains("UPSERT commit_chunk:⟨abc123_chunk0⟩"));
+            assert!(sqls[0].contains("updated_at = time::now()"));
+            assert!(sqls[0].contains("->has_commit_chunk->commit_chunk:⟨abc123_chunk0⟩"));
+            assert!(sqls[0].contains("batch_status = 'completed'"));
+            assert!(sqls[0].contains("COMMIT TRANSACTION;"));
+            let varss = db.varss.lock().unwrap();
+            let v = &varss[0];
+            assert_eq!(var_as_text(v, "content0").as_deref(), Some("meaning body"));
+            assert_eq!(var_as_text(v, "hash0").as_deref(), Some("abc123"));
+            assert_eq!(
+                var_as_text(v, "date0").as_deref(),
+                Some("2026-11-05T10:00:00Z"),
+                "date0 must be bound as the verbatim RFC3339 string"
+            );
+        }
+
+        // Multiple chunks, one without date, plus a failed commit — every
+        // placeholder has its variable, including the error code.
+        {
+            let db = Arc::new(CapturingDb::new());
+            let store = DbChunkStore(db.clone() as Arc<dyn Executor>);
+            let txn = CommitTxn {
+                chunk_writes: vec![
+                    CommitChunkWrite {
+                        commit_record: "commit:⟨aaa⟩".into(),
+                        chunk_key: "aaa_chunk0".into(),
+                        content: "first".into(),
+                        hash: "aaa".into(),
+                        date: None,
+                    },
+                    CommitChunkWrite {
+                        commit_record: "commit:⟨bbb⟩".into(),
+                        chunk_key: "bbb_chunk1".into(),
+                        content: "second".into(),
+                        hash: "bbb".into(),
+                        date: Some("2026-01-01T00:00:00Z".into()),
+                    },
+                ],
+                completed_commits: vec!["commit:⟨aaa⟩".into()],
+                failed_commits: vec![("commit:⟨bbb⟩".into(), "embed_failed".into())],
+            };
+            store.apply_commit_txn(&txn).await.expect("apply");
+            let sqls = db.sqls.lock().unwrap();
+            let sql = &sqls[0];
+            // Every placeholder in the SQL has a matching bound variable.
+            for name in ["content0", "hash0", "content1", "hash1", "date1"] {
+                assert!(
+                    sql.contains(&format!("${name}")),
+                    "SQL references {name}: {sql}"
+                );
+            }
+            let varss = db.varss.lock().unwrap();
+            let v = &varss[0];
+            assert_eq!(var_as_text(v, "content0").as_deref(), Some("first"));
+            assert_eq!(var_as_text(v, "hash0").as_deref(), Some("aaa"));
+            assert_eq!(var_as_text(v, "content1").as_deref(), Some("second"));
+            assert_eq!(var_as_text(v, "hash1").as_deref(), Some("bbb"));
+            assert_eq!(
+                var_as_text(v, "date1").as_deref(),
+                Some("2026-01-01T00:00:00Z")
+            );
+            // The failed-commit error code is bound under its dynamic name
+            // (every placeholder must have a variable).
+            let err_name = sql
+                .split("batch_error = $")
+                .nth(1)
+                .and_then(|rest| {
+                    let name: String = rest
+                        .chars()
+                        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                        .collect();
+                    if name.is_empty() {
+                        None
+                    } else {
+                        Some(name)
+                    }
+                })
+                .expect("failed commit binds batch_error");
+            assert_eq!(var_as_text(v, &err_name).as_deref(), Some("embed_failed"));
+            // The no-date chunk carries no commit_date placeholder.
+            assert!(
+                !sql.contains("commit_date = $date0"),
+                "dateless chunk must omit commit_date: {sql}"
+            );
+        }
+
+        // Invalid chunk/commit ids are skipped from the SQL without
+        // misaligning the variables of the valid ones.
+        {
+            let db = Arc::new(CapturingDb::new());
+            let store = DbChunkStore(db.clone() as Arc<dyn Executor>);
+            let txn = CommitTxn {
+                chunk_writes: vec![
+                    CommitChunkWrite {
+                        commit_record: "commit:x; DROP".into(),
+                        chunk_key: "evil_chunk0".into(),
+                        content: "evil".into(),
+                        hash: "evil".into(),
+                        date: None,
+                    },
+                    CommitChunkWrite {
+                        commit_record: "commit:⟨ccc⟩".into(),
+                        chunk_key: "ccc_chunk1".into(),
+                        content: "good".into(),
+                        hash: "ccc".into(),
+                        date: None,
+                    },
+                ],
+                completed_commits: vec![],
+                failed_commits: vec![],
+            };
+            store.apply_commit_txn(&txn).await.expect("apply");
+            let sqls = db.sqls.lock().unwrap();
+            let sql = &sqls[0];
+            assert!(
+                !sql.contains("evil_chunk0"),
+                "unsafe id never interpolated: {sql}"
+            );
+            assert!(
+                sql.contains("commit_chunk:⟨ccc_chunk1⟩"),
+                "valid id written: {sql}"
+            );
+            let varss = db.varss.lock().unwrap();
+            assert_eq!(var_as_text(&varss[0], "content1").as_deref(), Some("good"));
+            assert_eq!(var_as_text(&varss[0], "hash1").as_deref(), Some("ccc"));
+        }
     }
 }
