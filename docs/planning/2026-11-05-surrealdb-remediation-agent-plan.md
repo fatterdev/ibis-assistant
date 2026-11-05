@@ -6,6 +6,45 @@
 **Commit esaminati:** `ec3cf748` (spec WQ-7), `153f4815` (allineamento gate), `ad00490b` (implementazione), `9451eea7` (chiusura documentale).  
 **Destinatario:** agente esecutore con accesso al workspace e possibilità di modificare codice, test, CI e documentazione.
 
+**Esito esecuzione (05/11):** implementato — F01–F13 chiusi con test di
+regressione unitari e live (`fix(db)` `79bde42`, `fix(ingest-code)` `5c0e146`,
+`fix(server)` `fde13c1`, `fix(logs)` `49038ff`, `fix(search)` `9f6c66d`,
+`test(eval)` `622644c`, `ci` `90a3391`), eval rieseguito offline (additive +
+rrf k ∈ {1,10,60}, [verdetto](./2026-11-05-wq7-fusion-verdict.md), [baseline
+A1](./2026-11-02-a1-retrieval-eval-plan.md)). Live test richiesti in CI con
+`IBIS_LIVE_REQUIRED=1` (job `live-tests`). Deviazioni documentate nella
+sezione "Note di esecuzione" in fondo.
+
+## Note di esecuzione — scostamenti dal piano
+
+1. **F02 rendering:** le id canoniche usano il codec SDK (`to_sql`) invece
+   della concatenazione manuale — probe live: rendering `'src/a-b.rs'` /
+   `"with space's file.rs"` / `'a\nb.rs'`, round-trip lossless su tutti i
+   path collidenti e ostili (incluso tentativo di injection inertizzato).
+   La chiave repo resta nel formato derivato da `sanitize_id` (convenzione
+   record repo, fuori dal perimetro F02).
+2. **F10 trattamento dei chunk storici:** definito esplicitamente — dopo un
+   pass riuscito i chunk della versione precedente vengono **eliminati**
+   (`DELETE … WHERE file = $file AND hash != $hash`): con chiavi
+   `[file, start_line]` non esiste dimensione di storia; i residui di
+   versione sarebbero duplicati obsoleti raggiungibili dal canale vettore.
+   Il test live `version_round_trip_leaves_a_coherent_manifest` lo pinna.
+3. **F07 famiglia:** oltre a `commit_chunk.updated_at` (dichiarato) e al
+   binding delle variabili (`smart_query`), il writer legava `commit_date`
+   come `datetime` su un campo schema `option<string>` — il writer ora passa
+   la stringa RFC3339 verbatim come da commento schema (il read path
+   converte con `type::datetime`).
+4. **F11 + beneficio:** la separazione offset-lette/offset-confermato corregge
+   anche il salto di linee non ancora processate al flush parziale del
+   ticker (l'offset salvato copre solo il batch davvero chiuso).
+5. **D2 calibrazione:** `calibrate_lexical_score(s) = s/(s+3)` scelta dopo
+   sweep (monotona, limitata, ordine intra-canale invariante alla scala —
+   test proprietà); il verdetto `additive` è riconfermato dalle misure
+   post-fix, non precostituito.
+6. **F09 propagate:** `ingest_error` ora propaga l'errore DB e il batch lo
+   riporta (`process_batch_sync` → `err`) — il tailer non avanza più l'offset
+   dopo un persist fallito (aggancio naturale a F11).
+
 ## 1. Mandato
 
 Correggere tutti i finding confermati elencati sotto e integrare test unitari, integration e live che li riproducano. Non limitarsi al diff WQ-7: alcuni difetti sono preesistenti ma devono essere risolti nello stesso intervento.

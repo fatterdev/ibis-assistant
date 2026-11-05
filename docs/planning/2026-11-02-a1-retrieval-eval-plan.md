@@ -121,16 +121,35 @@ e ripubblicato la baseline. Report committato:
 | `ollama` (`nomic-embed-text`) | additive | **0.917** | **1.000** | **1.000** | 12/12 |
 | `ollama` | rrf (k=60) | 0.875 | 0.958 | 1.000 | 12/12 |
 
-Il retune RRF su 4.0 (k ∈ {60, 10, 1}) non supera additive: parità offline e
-regressione ollama stabile. **Verdetto fusione (A2 chiuso in WQ-7): il default
-`search.fusion` resta `additive`, ora per misura e non per inerzia** — see
-[nota accanto alla validazione A2](./2026-11-05-wq7-fusion-verdict.md).
-Per-channel (offline additive): file_chunk 5, memory 5, commit_chunk 1,
-reasoning 1. Punti deboli: `r05_spawn_threads`/`r08_rrf_decision` al rank 2 con
-rrf; `r11` recall@5 0.5 (secondo expected al rank 9, come su 3.3.5).
+### Baseline post-remediation (misurata 05/11/2026 — dataset esteso a 20 case, fusione corretta F03/F04/F06)
+
+La review WQ-7 ([piano remediation](./2026-11-05-surrealdb-remediation-agent-plan.md))
+ha corretto la fusione (somma cross-channel F03, calibrazione BM25 F04,
+canale `file_chunk_text` F06, subject su titolo F05) e il dataset golden è
+stato esteso da 12 a 20 case con i 8 casi full-text/esclusione della sezione 9
+(titolo-only, contenuto-only, chunk lessicale, doppia presenza, conflitto
+vettore/BM25, esclusione personale, esclusione superseded, path con caratteri
+speciali). Il report ora conserva il **`channel_id` interno** per caso
+(`channels`) e le violazioni di esclusione (`absent_leaks`). Report committato
+come baseline nuova:
+[baseline-4.0.0-offline-additive.json](../../evaluations/retrieval/baseline-4.0.0-offline-additive.json).
+
+| Embedder | Fusione | MRR | recall@5 | recall@15 | case ok |
+|---|---|---|---|---|---|
+| `offline-hash-768` | additive (calibrata) | **0.950** | **0.975** | **1.000** | 20/20 |
+| `offline-hash-768` | rrf k=1 | 0.842 | 0.950 | 1.000 | 20/20 |
+| `offline-hash-768` | rrf k=10 | 0.918 | 0.925 | 1.000 | 20/20 |
+| `offline-hash-768` | rrf k=60 | 0.908 | 0.925 | 1.000 | 20/20 |
+
+Tutti gli 8 casi nuovi chiudono a MRR 1.0 con attribuzione di canale puntuale:
+r13 via `memory_text_title`, r14/r16/r18/r19 via `memory_text_content`,
+r15/r20 via `file_chunk_text`, r17 (conflitto) con contributi sia del canale
+vettore sia del lessicale. Zero violazioni `absent_leaks` su tutte le run.
+**Verdetto fusione riconfermato su stack corretto: `additive` resta default**
+— vedi [nota verdict aggiornata](./2026-11-05-wq7-fusion-verdict.md).
 **Soglia CI `--min-recall-5 0.75` resta il pavimento onesto** (marginata sulla
-baseline nuova identica alla vecchia; da rialzare quando A3/C9 spostano il
-pavimento). Ambientali: binario GitHub `surreal-v4.0.0.windows-amd64.exe`
+baseline nuova; da rialzare quando A3/C9 spostano il pavimento). Ambientali:
+binario GitHub `surreal-v4.0.0.windows-amd64.exe`
 (spawn `surreal start` + `surrealkv://`, probe `version --json`), immagine CI
 pinnata `surrealdb/surrealdb:v4.0.0`, live test workspace verdi su 4.0.0.
 

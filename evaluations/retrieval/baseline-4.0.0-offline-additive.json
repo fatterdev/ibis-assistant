@@ -5,21 +5,21 @@
   "fusion": "additive",
   "seeded": true,
   "aggregate": {
-    "cases": 12,
-    "cases_ok": 12,
+    "cases": 20,
+    "cases_ok": 20,
     "cases_error": 0,
-    "mrr": 0.9166666666666666,
-    "recall_at_5": 0.9583333333333334,
+    "mrr": 0.95,
+    "recall_at_5": 0.975,
     "recall_at_15": 1.0,
     "by_channel": {
       "commit_chunk": {
         "cases": 1
       },
       "file_chunk": {
-        "cases": 5
+        "cases": 7
       },
       "memory": {
-        "cases": 5
+        "cases": 11
       },
       "reasoning": {
         "cases": 1
@@ -35,6 +35,10 @@
       "recall_at_15": 1.0,
       "first_rank": 1,
       "top_channel": "file_chunk",
+      "channels": [
+        "file_chunk"
+      ],
+      "absent_leaks": [],
       "hits": [
         1
       ]
@@ -47,6 +51,10 @@
       "recall_at_15": 1.0,
       "first_rank": 1,
       "top_channel": "file_chunk",
+      "channels": [
+        "file_chunk"
+      ],
+      "absent_leaks": [],
       "hits": [
         1
       ]
@@ -59,6 +67,10 @@
       "recall_at_15": 1.0,
       "first_rank": 1,
       "top_channel": "file_chunk",
+      "channels": [
+        "file_chunk"
+      ],
+      "absent_leaks": [],
       "hits": [
         1
       ]
@@ -71,6 +83,10 @@
       "recall_at_15": 1.0,
       "first_rank": 1,
       "top_channel": "memory",
+      "channels": [
+        "memory"
+      ],
+      "absent_leaks": [],
       "hits": [
         1
       ]
@@ -83,6 +99,10 @@
       "recall_at_15": 1.0,
       "first_rank": 1,
       "top_channel": "memory",
+      "channels": [
+        "memory"
+      ],
+      "absent_leaks": [],
       "hits": [
         1
       ]
@@ -95,6 +115,10 @@
       "recall_at_15": 1.0,
       "first_rank": 1,
       "top_channel": "memory",
+      "channels": [
+        "memory"
+      ],
+      "absent_leaks": [],
       "hits": [
         1
       ]
@@ -107,6 +131,10 @@
       "recall_at_15": 1.0,
       "first_rank": 1,
       "top_channel": "memory",
+      "channels": [
+        "memory"
+      ],
+      "absent_leaks": [],
       "hits": [
         1
       ]
@@ -119,6 +147,10 @@
       "recall_at_15": 1.0,
       "first_rank": 2,
       "top_channel": "memory",
+      "channels": [
+        "memory"
+      ],
+      "absent_leaks": [],
       "hits": [
         2
       ]
@@ -131,6 +163,10 @@
       "recall_at_15": 1.0,
       "first_rank": 2,
       "top_channel": "commit_chunk",
+      "channels": [
+        "commit_chunk"
+      ],
+      "absent_leaks": [],
       "hits": [
         2
       ]
@@ -143,6 +179,10 @@
       "recall_at_15": 1.0,
       "first_rank": 1,
       "top_channel": "reasoning",
+      "channels": [
+        "reasoning"
+      ],
+      "absent_leaks": [],
       "hits": [
         1
       ]
@@ -155,9 +195,14 @@
       "recall_at_15": 1.0,
       "first_rank": 1,
       "top_channel": "file_chunk",
+      "channels": [
+        "file_chunk",
+        "commit_chunk"
+      ],
+      "absent_leaks": [],
       "hits": [
         1,
-        9
+        12
       ]
     },
     {
@@ -168,9 +213,144 @@
       "recall_at_15": 1.0,
       "first_rank": 1,
       "top_channel": "file_chunk",
+      "channels": [
+        "file_chunk",
+        "memory"
+      ],
+      "absent_leaks": [],
       "hits": [
         1,
         2
+      ]
+    },
+    {
+      "id": "r13_lex_title_only",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "memory",
+      "channels": [
+        "memory_text_title"
+      ],
+      "absent_leaks": [],
+      "hits": [
+        1
+      ]
+    },
+    {
+      "id": "r14_lex_content_only",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "memory",
+      "channels": [
+        "memory_text_content"
+      ],
+      "absent_leaks": [],
+      "hits": [
+        1
+      ]
+    },
+    {
+      "id": "r15_lex_file_chunk",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "file_chunk",
+      "channels": [
+        "file_chunk_text"
+      ],
+      "absent_leaks": [],
+      "hits": [
+        1
+      ]
+    },
+    {
+      "id": "r16_dual_presence",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "memory",
+      "channels": [
+        "memory_text_content"
+      ],
+      "absent_leaks": [],
+      "hits": [
+        1
+      ]
+    },
+    {
+      "id": "r17_conflict",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "memory",
+      "channels": [
+        "memory",
+        "memory_text_content"
+      ],
+      "absent_leaks": [],
+      "hits": [
+        1,
+        2
+      ]
+    },
+    {
+      "id": "r18_personal_excluded",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "memory",
+      "channels": [
+        "memory_text_content"
+      ],
+      "absent_leaks": [],
+      "hits": [
+        1
+      ]
+    },
+    {
+      "id": "r19_superseded_excluded",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "memory",
+      "channels": [
+        "memory_text_content"
+      ],
+      "absent_leaks": [],
+      "hits": [
+        1
+      ]
+    },
+    {
+      "id": "r20_special_path",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "file_chunk",
+      "channels": [
+        "file_chunk_text"
+      ],
+      "absent_leaks": [],
+      "hits": [
+        1
       ]
     }
   ]
