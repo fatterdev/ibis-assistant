@@ -684,14 +684,23 @@ async function rememberMemory(host, cfg) {
   }
 
   const visibility = cfg.get("memory.defaultVisibility", "team");
+  // The runtime requires project_name on memory_add (add.rs): scope the row
+  // to the first workspace folder, same convention as set_working_state.
+  // The actor rides the tool argument too: on a non-loopback team server the
+  // X-Ibis-Actor header is ignored (team_server §4) and rows would land as
+  // `unknown`.
+  const folder = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+  const actor = String(cfg.get("identity.actor", "")).trim() || String(process.env.IBIS_ACTOR || "").trim();
   const backend = await resolveBackend(host, cfg);
   const text = await host.callMcpTool(backend, "memory_add", {
     kind,
     title: title.trim(),
     content: content.trim(),
     visibility,
+    ...(folder ? { project_name: folder.name } : {}),
+    ...(actor ? { actor } : {}),
   });
-  logLine(`memory_add (${kind}, ${visibility}): ${text}`);
+  logLine(`memory_add (${kind}, ${visibility}${folder ? `, ${folder.name}` : ""}${actor ? `, actor=${actor}` : ""}): ${text}`);
   await vscode.commands.executeCommand("ibis.memory.refresh");
   vscode.window.showInformationMessage(`Ibis Remembered (${kind}, ${visibility}): ${text}`);
 }
@@ -718,6 +727,12 @@ async function setWorkingState(host, cfg) {
     if (folder) {
       args.project_name = folder.name;
     }
+  }
+  // Non-loopback team servers ignore the X-Ibis-Actor header (team_server
+  // §4): the actor argument keeps the personal row attributed to its owner.
+  const actor = String(cfg.get("identity.actor", "")).trim() || String(process.env.IBIS_ACTOR || "").trim();
+  if (actor) {
+    args.actor = actor;
   }
   const backend = await resolveBackend(host, cfg);
   const text = await host.callMcpTool(backend, "set_working_state", args);

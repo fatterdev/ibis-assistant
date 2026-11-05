@@ -76,6 +76,31 @@ async function askTitle(kind, title) {
 }
 
 /**
+ * Actor identity (F4 §B.4/A5): `ibis.identity.actor` or `IBIS_ACTOR`. The
+ * actor rides the tool argument as well as the header: on a non-loopback
+ * team server the header is ignored (team_server §4) and rows would land
+ * as `unknown`.
+ * @param {vscode.WorkspaceConfiguration} cfg
+ * @returns {string}
+ */
+function configuredActor(cfg) {
+  const setting = String(cfg.get("identity.actor", "")).trim();
+  return setting || String(process.env.IBIS_ACTOR || "").trim();
+}
+
+/**
+ * The runtime requires project_name on memory_add (add.rs): the first
+ * workspace folder name is the project scope (same convention as
+ * set_working_state). Empty when no folder is open — the tool then rejects
+ * verbatim and the toast surfaces it.
+ * @returns {string}
+ */
+function workspaceProjectName() {
+  const folder = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+  return folder ? folder.name : "";
+}
+
+/**
  * Editor context: remember the active selection with file+line provenance.
  * @param {{ getConfig: () => vscode.WorkspaceConfiguration,
  *           resolveBackend: (host: any, cfg: vscode.WorkspaceConfiguration) => Promise<any>,
@@ -120,6 +145,8 @@ async function rememberSelection(api, host) {
     visibility,
     source_path: rel,
     source_hash: hash,
+    ...(workspaceProjectName() ? { project_name: workspaceProjectName() } : {}),
+    ...(configuredActor(cfg) ? { actor: configuredActor(cfg) } : {}),
   });
   api.logLine(
     `memory_add (selection ${rel}:${startLine}-${endLine}, ${kind}, ${visibility}, source_hash=${hash}): ${text}`,
@@ -190,6 +217,8 @@ async function rememberFile(api, host, uriArg) {
     visibility,
     source_path: rel,
     source_hash: hash,
+    ...(workspaceProjectName() ? { project_name: workspaceProjectName() } : {}),
+    ...(configuredActor(cfg) ? { actor: configuredActor(cfg) } : {}),
   });
   api.logLine(
     `memory_add (file ${rel}, ${kind}, ${visibility}, source_hash=${hash}): ${text}`,

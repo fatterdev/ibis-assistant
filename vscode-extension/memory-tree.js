@@ -491,6 +491,22 @@ class MemoryTreeDataProvider {
 }
 
 /**
+ * Refresh-on-focus subscription (F4 §A.4/A.5), guarded: portable VS Code
+ * builds may lack `window.onDidChangeTreeViewVisibility` — a hard call aborts
+ * activation mid-`registerMemoryTree`, before the memory detail provider
+ * registers, and every detail open then fails "Unable to resolve resource"
+ * (seen on build a717861c07, 05/11).
+ * @param {vscode.ExtensionContext} context
+ * @param {(event: { viewId: string, visible: boolean }) => void} handler
+ */
+function subscribeTreeViewVisibility(context, handler) {
+  if (typeof vscode.window.onDidChangeTreeViewVisibility !== "function") {
+    return;
+  }
+  context.subscriptions.push(vscode.window.onDidChangeTreeViewVisibility(handler));
+}
+
+/**
  * Read-only virtual document for memory details (scheme `ibis-memory`); the
  * payload rides in the Uri query so reopening the same entry re-renders.
  */
@@ -663,15 +679,17 @@ function registerMemoryTree(context, api, host) {
       "ibis.memory.openDetail",
       (entry) => openMemoryDetail(api, host, entry),
     ),
-    // Refresh on focus (F4 §A.4/A.5): re-deriving kind badges and expanded
-    // parents costs metadata reads only; search roots are never re-run.
-    vscode.window.onDidChangeTreeViewVisibility((event) => {
-      if (event && event.viewId === "ibis.memoryExplorer" && event.visible) {
-        provider.refreshOnFocus().catch(() => {});
-      }
-    }),
   );
+  // The detail provider must register before any optional-API call in this
+  // function: a throw above it would leave every detail open unresolvable.
   registerMemoryDetailProvider(context);
+  // Refresh on focus (F4 §A.4/A.5): re-deriving kind badges and expanded
+  // parents costs metadata reads only; search roots are never re-run.
+  subscribeTreeViewVisibility(context, (event) => {
+    if (event && event.viewId === "ibis.memoryExplorer" && event.visible) {
+      provider.refreshOnFocus().catch(() => {});
+    }
+  });
   // Preload the kind counts at activation (owner decision 03/11): the
   // badges are visible on a virgin tree before any expansion, so collapsed
   // and virgin kinds behave the same way. applyStatusFilter also restores
@@ -889,15 +907,16 @@ function registerWorkstreamTree(context, api, host) {
         applyStatusFilter();
       }
     }),
-    // Refresh on focus (F4 §A.5): the whole browse is `memory_workstreams` +
-    // `memory_list` metadata — no embedding on this path.
-    vscode.window.onDidChangeTreeViewVisibility((event) => {
-      if (event && event.viewId === "ibis.workstreamExplorer" && event.visible) {
-        api.logLine("workstream tree: focus refresh");
-        provider.refresh();
-      }
-    }),
   );
+  // Refresh on focus (F4 §A.5): the whole browse is `memory_workstreams` +
+  // `memory_list` metadata — no embedding on this path. Guarded: see
+  // `subscribeTreeViewVisibility` (portable builds lack the API).
+  subscribeTreeViewVisibility(context, (event) => {
+    if (event && event.viewId === "ibis.workstreamExplorer" && event.visible) {
+      api.logLine("workstream tree: focus refresh");
+      provider.refresh();
+    }
+  });
   treeView.description = provider.statusFilter() === "all" ? "all" : undefined;
 }
 

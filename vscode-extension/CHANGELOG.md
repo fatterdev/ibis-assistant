@@ -5,6 +5,34 @@ The runtime changelog lives in the [repository root](https://github.com/fatterde
 
 ## [Unreleased]
 
+- **Actor attribution on team servers (1.0.19)** — on a non-loopback team
+  server the runtime ignores the `X-Ibis-Actor` header (trusted from
+  loopback peers only), so the VSIX's own writes landed as owner `unknown`.
+  Remember (command/selection/file) and Set working state now also pass the
+  tool `actor` argument from `ibis.identity.actor` / `IBIS_ACTOR`, matching
+  the agent-mode flows on LAN servers (team_server §4).
+
+- **Remember sends project_name (1.0.18)** — the runtime requires
+  `project_name` on `memory_add` (add.rs), so every Remember flow (command,
+  selection, file) silently failed against the team server with
+  "project_name is required". All three now scope the row to the first
+  workspace folder name, the same convention as `set_working_state`.
+
+- **Memory detail opens on portable VS Code builds (1.0.17)** — the refresh-on-focus
+  hook called `window.onDidChangeTreeViewVisibility` unconditionally; builds
+  without that API (e.g. portable `a717861c07`) aborted activation mid-`registerMemoryTree`,
+  leaving the `ibis-memory` detail provider unregistered and every row click
+  failing with "Unable to resolve resource" (the tree itself kept working).
+  The hook is now optional-guarded and the provider registers before any
+  optional call in the activation path.
+
+- **Runtime sync (1.0.16)** — packaging bump riding the WQ-7 SurrealDB 4
+  runtime: project-scoped `memory_search` no longer mixes the graph scope
+  predicate into the DiskANN statement (R7 gate `IR verification failed`
+  fix) — the KNN window runs graph-free, widens once, and the scope filters
+  the window in Rust. No extension surface changes; the spawned/attached
+  runtime must be a 05/11 (or newer) `ibis` binary.
+
 - **Actor identity + personal-claims knob (F4-A5, 1.0.15)** — new setting
   `ibis.identity.actor` (or the `IBIS_ACTOR` environment variable): in
   attach/daemon mode every MCP request the extension issues — initialize
