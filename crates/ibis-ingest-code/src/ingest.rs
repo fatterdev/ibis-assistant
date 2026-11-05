@@ -359,6 +359,43 @@ fn vars_of(pairs: impl IntoIterator<Item = (&'static str, ibis_db::value::Value)
     pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
 }
 
+/// SurrealDB 4 / SurrealKV marks contended transactions as retryable ("The
+/// query was not executed due to a failed transaction" / "Transaction write
+/// conflict. This transaction can be retried"). Concurrent ingest lanes (or
+/// concurrent ingest suites against one sidecar) hit this; every ingest
+/// write is idempotent (deterministic ids, UPSERT/DELETE), so a bounded
+/// retry is safe and keeps the lanes from failing each other.
+fn is_txn_conflict(err: &ibis_db::DbError) -> bool {
+    let msg = err.to_string().to_lowercase();
+    msg.contains("failed transaction")
+        || msg.contains("transaction write conflict")
+        || msg.contains("can be retried")
+}
+
+const TXN_MAX_ATTEMPTS: usize = 6;
+
+/// `smart_query` with the bounded transaction-conflict retry.
+async fn smart_query_retry(
+    db: &dyn Executor,
+    sql: &str,
+    vars: Vars,
+) -> Result<ibis_db::executor::QueryOutcome, CodeIngestError> {
+    let mut attempt = 1usize;
+    loop {
+        match db.smart_query(sql, vars.clone()).await {
+            Ok(outcome) => return Ok(outcome),
+            Err(e) if attempt < TXN_MAX_ATTEMPTS && is_txn_conflict(&e) => {
+                tracing::warn!(
+                    "transaction conflict on attempt {attempt}/{TXN_MAX_ATTEMPTS}; retrying: {e}"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(25 * attempt as u64)).await;
+                attempt += 1;
+            }
+            Err(e) => return Err(CodeIngestError::other(e.to_string())),
+        }
+    }
+}
+
 /// Deletes DB rows for files that are no longer active in git HEAD
 /// Record ids are validated with `is_safe_record_id`
 /// before interpolation (F-A04).
@@ -437,7 +474,7 @@ async fn prune_repo(
             id_list,
             id_list
         );
-        db.smart_query(&txn_sql, Vars::new())
+        smart_query_retry(db, &txn_sql, Vars::new())
             .await
             .map_err(|e| CodeIngestError::other(format!("prune transaction failed: {e}")))?;
     }
@@ -745,7 +782,7 @@ async fn process_file(
         }
         sql.push_str("COMMIT;");
 
-        if let Err(err) = db.smart_query(&sql, batch_vars).await {
+        if let Err(err) = smart_query_retry(db, &sql, batch_vars).await {
             tracing::error!("Failed to persist pending chunks for {rel_path}: {err}");
             queue_failed = true;
             break 'batches;
@@ -773,7 +810,8 @@ async fn process_file(
     let upsert_sql = format!(
         "UPSERT {file_id} SET hash = $hash, path = $path, rel_path = $rel, repo_name = $repo, is_head = true, updated_at = time::now();"
     );
-    db.smart_query(
+    smart_query_retry(
+        db,
         &upsert_sql,
         vars_of([
             ("hash", hash.clone().into_value()),
@@ -794,9 +832,13 @@ async fn process_file(
         "DELETE {} WHERE file = {file_id} AND hash != $hash;",
         t::FILE_CHUNK
     );
-    db.smart_query(&cleanup_sql, vars_of([("hash", hash.clone().into_value())]))
-        .await
-        .map_err(|e| CodeIngestError::other(format!("stale chunk cleanup failed: {e}")))?;
+    smart_query_retry(
+        db,
+        &cleanup_sql,
+        vars_of([("hash", hash.clone().into_value())]),
+    )
+    .await
+    .map_err(|e| CodeIngestError::other(format!("stale chunk cleanup failed: {e}")))?;
 
     Ok(())
 }
