@@ -8,6 +8,12 @@
  * stdio child) — the legacy path, now selected only explicitly by the IDE.
  * Never silently share one SurrealDB across two plugin stdio children.
  *
+ * Actor identity (F4 §B.4): http backends carry an optional `actor`
+ * (VSIX `ibis.identity.actor`, env `IBIS_ACTOR`); the attach path sends it
+ * as the `X-Ibis-Actor` header on every request, initialize included. The
+ * runtime trusts the header from loopback peers only; stdio keeps the
+ * per-tool `actor` argument.
+ *
  * Stdio contract (this repo): newline-delimited JSON-RPC. Content-Length framing
  * is accepted as an optional ingress format; egress to the IDE is always NDJSON.
  */
@@ -21,7 +27,7 @@ const CRLFCRLF = Buffer.from("\r\n\r\n");
 
 /**
  * @typedef {{ mode: "spawn"; command: string; args: string[]; env: NodeJS.ProcessEnv }
- *   | { mode: "http"; url: string }} Backend
+ *   | { mode: "http"; url: string; actor?: string }} Backend
  */
 
 /**
@@ -31,7 +37,8 @@ const CRLFCRLF = Buffer.from("\r\n\r\n");
 export function resolveBackend(env = process.env) {
   const url = (env.IBIS_MCP_URL || "").trim();
   if (url) {
-    return { mode: "http", url };
+    const actor = (env.IBIS_ACTOR || "").trim();
+    return actor ? { mode: "http", url, actor } : { mode: "http", url };
   }
   return {
     mode: "spawn",
@@ -342,7 +349,7 @@ export function disposeMcpSessions() {
  */
 export function runStdioPassthrough(backend = resolveBackend()) {
   if (backend.mode === "http") {
-    return runHttpStdioBridge(backend.url);
+    return runHttpStdioBridge(backend.url, backend.actor || "");
   }
   const child = spawnStdioChild(backend);
   process.stdin.pipe(child.stdin);
@@ -467,9 +474,12 @@ function writeNdjson(message) {
  * Minimal Streamable HTTP MCP bridge: each stdin JSON-RPC message is POSTed
  * to url; decoded response messages are written as NDJSON on stdout.
  * Persists Mcp-Session-Id from initialize for subsequent requests.
+ * The actor (X-Ibis-Actor) rides every request when provided (F4 §B.4 —
+ * loopback-only trust server-side; remote peers ignore it there).
  * @param {string} url
+ * @param {string} [actor]
  */
-export async function runHttpStdioBridge(url) {
+export async function runHttpStdioBridge(url, actor = "") {
   process.stderr.write(
     `[ibis-mcp-host] attaching to shared runtime ${url} (IBIS_MCP_URL); not spawning a plugin child\n`,
   );
@@ -501,6 +511,9 @@ export async function runHttpStdioBridge(url) {
         "Content-Type": "application/json",
         Accept: "application/json, text/event-stream",
       };
+      if (actor) {
+        headers["X-Ibis-Actor"] = actor;
+      }
       if (sessionId) {
         headers["Mcp-Session-Id"] = sessionId;
       }
@@ -538,7 +551,7 @@ export async function runHttpStdioBridge(url) {
  */
 export async function callMcpTool(backend, toolName, args = {}, opts = {}) {
   if (backend.mode === "http") {
-    return callMcpToolHttp(backend.url, toolName, args);
+    return callMcpToolHttp(backend.url, toolName, args, backend.actor || "");
   }
   return callMcpToolStdio(backend, toolName, args, opts);
 }
@@ -547,8 +560,9 @@ export async function callMcpTool(backend, toolName, args = {}, opts = {}) {
  * @param {string} url
  * @param {string} toolName
  * @param {Record<string, unknown>} args
+ * @param {string} [actor]
  */
-async function callMcpToolHttp(url, toolName, args) {
+async function callMcpToolHttp(url, toolName, args, actor = "") {
   /** @type {{ id: string | null }} */
   const session = { id: null };
   const init = await postJsonRpc(url, {
@@ -560,7 +574,7 @@ async function callMcpToolHttp(url, toolName, args) {
       capabilities: {},
       clientInfo: { name: "ibis-ide-host", version: "1.0.0" },
     },
-  }, session);
+  }, session, actor);
   if (init.error) {
     throw new Error(init.error.message || JSON.stringify(init.error));
   }
@@ -568,13 +582,13 @@ async function callMcpToolHttp(url, toolName, args) {
     jsonrpc: "2.0",
     method: "notifications/initialized",
     params: {},
-  }, session);
+  }, session, actor);
   const result = await postJsonRpc(url, {
     jsonrpc: "2.0",
     id: 2,
     method: "tools/call",
     params: { name: toolName, arguments: args },
-  }, session);
+  }, session, actor);
   if (result.error) {
     throw new Error(result.error.message || JSON.stringify(result.error));
   }
@@ -745,13 +759,18 @@ async function callMcpToolOneShot(backend, toolName, args, keepAliveMs, waitMs) 
  * @param {string} url
  * @param {object} payload
  * @param {{ id: string | null }} session
+ * @param {string} [actor] — X-Ibis-Actor identity hint on every request,
+ *   initialize included (F4 §B.4; trusted only from loopback peers).
  */
-async function postJsonRpc(url, payload, session) {
+async function postJsonRpc(url, payload, session, actor = "") {
   /** @type {Record<string, string>} */
   const headers = {
     "Content-Type": "application/json",
     Accept: "application/json, text/event-stream",
   };
+  if (actor) {
+    headers["X-Ibis-Actor"] = actor;
+  }
   if (session.id) {
     headers["Mcp-Session-Id"] = session.id;
   }

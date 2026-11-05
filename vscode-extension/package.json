@@ -2,7 +2,7 @@
   "name": "ibis-assistant",
   "displayName": "Ibis Assistant",
   "description": "Living project memory over MCP for VS Code. Spawns an isolated Ibis Assistant (Rust) stdio child or attaches to a shared personal runtime for graph, logs, tickets, and typed memory.",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "publisher": "fatterdev",
   "license": "Apache-2.0",
   "icon": "assets/icon.png",
@@ -456,6 +456,28 @@
           "scope": "machine-overridable",
           "order": 32,
           "markdownDescription": "Per-endpoint timeout (milliseconds) when probing personal HTTP settings and auto-attach URLs."
+        },
+        "ibis.identity.actor": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "order": 33,
+          "markdownDescription": "Actor identity sent as the `X-Ibis-Actor` header on every MCP request in attach/daemon mode (equivalent of the `IBIS_ACTOR` environment variable). Attributes shared rows on team servers and drives the curation **Update Content** guard; leave empty to stay the anonymous local actor (`unknown`). The runtime trusts the header from loopback peers only — on a LAN team server attribute via the tools' `actor` argument instead."
+        },
+        "ibis.claims.personalMode": {
+          "type": "string",
+          "enum": [
+            "stub",
+            "db_only"
+          ],
+          "enumDescriptions": [
+            "Personal claims render as title-only stub files in `.ibis/claims/` (redacted, body stays in the runtime database) — the personal-mode default.",
+            "Personal claims never touch the repo tree: SurrealDB rows only (the team/server default)."
+          ],
+          "default": "stub",
+          "scope": "machine-overridable",
+          "order": 34,
+          "markdownDescription": "Personal-claims policy passed to the runtime as `IBIS_CLAIMS_PERSONAL_MODE` (F4 §B.7, claim-store addendum §4c). Forwarded for spawned children and daemons started with **Ibis Assistant: Start Daemon** when this setting is explicitly configured — there it overrides the runtime `config.json` choice; a daemon started elsewhere keeps its boot-time policy."
         },
         "ibis.memory.defaultKind": {
           "type": "string",

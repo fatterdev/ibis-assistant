@@ -151,10 +151,13 @@ the tool's `actor` argument, `"unknown"`.
 - Credential headers (`X-Redmine-API-Key`, `X-Jira-*`, `X-Azure-DevOps-*`,
   `X-Git-Token`) are honored from any peer — one more reason to keep the
   port inside a trusted network.
-- Client-side automation of the header (`ibis.identity.actor` setting,
-  CLI `IBIS_ACTOR`) lands with the F4-A sub-phases; until then pass the
-  `actor` argument on memory writes from remote clients (the curation tools
-  already accept it).
+- Client-side automation (F4-A5, live): the VSIX sends the header on every
+  attach/daemon request from `ibis.identity.actor` (setting) or `IBIS_ACTOR`
+  (env) — the ide-host http bridge (`ibis-mcp-host`) forwards `IBIS_ACTOR`
+  the same way, covering the plugin http variant. Remote (non-loopback)
+  peers are still attributed through the tool `actor` argument: the runtime
+  ignores the header from them, so agent-mode flows on a LAN team server
+  keep passing `actor` explicitly.
 
 ## 5. Client onboarding
 
@@ -162,7 +165,11 @@ the tool's `actor` argument, `"unknown"`.
   `ibis.runtime.mcpUrl: http://<server>:3030/mcp` (equivalently the
   `IBIS_MCP_URL` environment variable while the mode setting is untouched).
   F4-A1 flips the default to attach against the personal daemon; the team
-  URL keeps working unchanged.
+  URL keeps working unchanged. Set `ibis.identity.actor` so the VSIX's own
+  calls attribute on shared rows (§4); on a LAN server agent-mode flows also
+  pass the tools' `actor` argument (the header is ignored from remote
+  peers). `ibis.claims.personalMode` stays `stub` for personal daemons — the
+  team profile resolves `db_only` server-side without it.
 - **Cursor** — `mcp.json` http variant (also printed by the discovery
   document on `GET /`):
 

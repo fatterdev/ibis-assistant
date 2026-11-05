@@ -67,7 +67,7 @@ Typed memory (`memory_*`, `load_session_context`, `capture_observation`, …) is
 
 - **Recommended:** personal HTTP daemon + `IBIS_MCP_URL` so Cursor and VS Code share one memory table (and one consolidation backlog).
 - **Isolated plugin children:** each IDE has its own DB; use `memory_export` / `memory_import` to transfer, or promote durable notes via `memory_share` after import.
-- Actor attribution: HTTP header `X-Ibis-Actor` or tool arg `actor` (stdio/plugin).
+- Actor attribution: HTTP header `X-Ibis-Actor` or tool arg `actor` (stdio/plugin). Since F4-A5 the ide-host attach path sends the header on every request from the VSIX `ibis.identity.actor` setting or the `IBIS_ACTOR` environment variable (the http stdio bridge forwards `IBIS_ACTOR` too); the runtime trusts the header from loopback peers only.
 
 ## Packages
 

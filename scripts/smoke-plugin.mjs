@@ -368,6 +368,45 @@ check(
   "feat(vscode): workstreams view refresh",
 );
 
+// F4-A5: actor identity header + claims mode knob.
+const ideHostSource = readFileSync(join(root, "ide-host", "src", "index.js"), "utf8");
+const actorSetting = (((vsixPkg.contributes || {}).configuration || {}).properties || {})[
+  "ibis.identity.actor"
+];
+const claimsSetting = (((vsixPkg.contributes || {}).configuration || {}).properties || {})[
+  "ibis.claims.personalMode"
+];
+check(
+  "vscode-extension: ibis.identity.actor setting contributed and shared by the backend resolver and the curation guard",
+  Boolean(actorSetting) && actorSetting.default === "" &&
+    extensionSource.includes("configuredActor") &&
+    memoryTreeSource.includes("identity.actor") &&
+    memoryTreeSource.includes("IBIS_ACTOR"),
+  "F4 §B.4: actor resolution setting > env",
+);
+check(
+  "vscode-extension: claims.personalMode enum stub|db_only forwarded as IBIS_CLAIMS_PERSONAL_MODE only when explicit",
+  Boolean(claimsSetting) && claimsSetting.default === "stub" &&
+    Array.isArray(claimsSetting.enum) && claimsSetting.enum.includes("stub") &&
+    claimsSetting.enum.includes("db_only") &&
+    extensionSource.includes("IBIS_CLAIMS_PERSONAL_MODE") &&
+    extensionSource.includes('isExplicitlyConfigured(cfg, "claims.personalMode")'),
+  "F4 §B.7: knob -> runtime env override (feat(server) 24e799e)",
+);
+check(
+  "ide-host: attach path injects the X-Ibis-Actor header on every postJsonRpc request",
+  ideHostSource.includes('"X-Ibis-Actor"') &&
+    ideHostSource.includes("backend.actor") &&
+    ideHostSource.includes("callMcpToolHttp(backend.url, toolName, args, backend.actor"),
+  "F4 §B.4: initialize included; no header without an actor",
+);
+check(
+  "ide-host: resolveBackend maps IBIS_ACTOR onto the http backend actor",
+  ideHostSource.includes("IBIS_ACTOR") &&
+    ideHostSource.includes("runHttpStdioBridge(backend.url, backend.actor"),
+  "bridge http variant attributes via IBIS_ACTOR too",
+);
+
 const instructions = (vsixPkg.contributes && vsixPkg.contributes.chatInstructions) || [];
 const instructionFile = instructions.length === 1
   ? join(root, "vscode-extension", instructions[0].path.replace("./", ""))

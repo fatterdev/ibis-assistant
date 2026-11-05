@@ -111,6 +111,13 @@ All settings live under `ibis.*` in VS Code Settings. Precedence is **explicit V
 | `ibis.settings.probeUrls` | `["http://127.0.0.1:3030/settings/", "http://127.0.0.1:3031/settings/"]` | Personal Settings UI endpoints probed in order. | — |
 | `ibis.settings.probeTimeoutMs` | `800` | Probe timeout in milliseconds for settings/auto-attach HTTP checks. | — |
 
+### Identity and claims
+
+| Setting | Default | Description | Env equivalent |
+|---------|---------|-------------|----------------|
+| `ibis.identity.actor` | *(empty)* | Actor identity sent as the `X-Ibis-Actor` header on every attach/daemon MCP request (initialize included). Attributes shared rows on team servers and drives the curation **Update Content** guard; empty stays the anonymous local actor (`unknown`). Trusted from loopback peers only. | `IBIS_ACTOR` |
+| `ibis.claims.personalMode` | `stub` | Personal-claims policy forwarded to the runtime as `IBIS_CLAIMS_PERSONAL_MODE` for spawned children and daemons started via **Ibis Assistant: Start Daemon** (only when explicitly configured). `stub` renders title-only claim files in `.ibis/claims/`, `db_only` keeps personal claims in the database. | `IBIS_CLAIMS_PERSONAL_MODE` |
+
 ### Memory and status
 
 | Setting | Default | Description |
@@ -126,7 +133,7 @@ All settings live under `ibis.*` in VS Code Settings. Precedence is **explicit V
 
 The extension contributes the `ibis` MCP server-definition provider. On VS Code 1.144+ the server appears in the MCP servers list and is started on demand in agent mode. The definition is recomputed from live settings on every request, so changes to runtime settings apply to the next session without a reload (LM bridge port and provider registration need a window reload).
 
-- **Attach (default `auto` + explicit `attach`):** VS Code connects to the personal daemon endpoint (Streamable HTTP, default `http://127.0.0.1:3030/mcp`); the MCP definition advertises the HTTP server to agent mode.
+- **Attach (default `auto` + explicit `attach`):** VS Code connects to the personal daemon endpoint (Streamable HTTP, default `http://127.0.0.1:3030/mcp`); the MCP definition advertises the HTTP server to agent mode. Extension-issued calls ride the endpoint with the `X-Ibis-Actor` header when `ibis.identity.actor` (or `IBIS_ACTOR`) is set — [docs/team_server.md](https://github.com/fatterdev/ibis-assistant/blob/main/docs/team_server.md) §4 documents the loopback trust model and the `actor` tool-argument fallback for agent-mode flows.
 - **Spawn (explicit `spawn`):** VS Code runs `ibis -mode stdio -runtime-mode plugin` with `RUNTIME_MODE=plugin` and the resolved `IBIS_*` environment.
 
 ## IDE LM bridge

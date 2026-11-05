@@ -71,10 +71,11 @@ async function updateStatusFilter(cfg, value) {
 }
 
 /**
- * Actor identity for the Update-content guard (F4 §A.4, identity lands with
- * B.4/F4-A5): the explicit `ibis.identity.actor` setting or the `IBIS_ACTOR`
- * environment variable. Rows owned by the anonymous local actor
- * (`"unknown"`) stay editable; named rows are editable only by their owner.
+ * Actor identity for the Update-content guard (F4 §A.4) and the attach-mode
+ * `X-Ibis-Actor` header (F4 §B.4, live since A5): the explicit
+ * `ibis.identity.actor` setting or the `IBIS_ACTOR` environment variable.
+ * Rows owned by the anonymous local actor (`"unknown"`) stay editable; named
+ * rows are editable only by their owner.
  * @param {vscode.WorkspaceConfiguration} cfg
  * @returns {string}
  */
@@ -1096,5 +1097,6 @@ module.exports = {
   registerMemoryTree,
   registerWorkstreamTree,
   registerCurationMenu,
+  configuredActor,
   MEMORY_KINDS,
 };

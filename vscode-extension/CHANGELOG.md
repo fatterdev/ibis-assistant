@@ -5,6 +5,22 @@ The runtime changelog lives in the [repository root](https://github.com/fatterde
 
 ## [Unreleased]
 
+- **Actor identity + personal-claims knob (F4-A5, 1.0.15)** — new setting
+  `ibis.identity.actor` (or the `IBIS_ACTOR` environment variable): in
+  attach/daemon mode every MCP request the extension issues — initialize
+  included — carries the `X-Ibis-Actor` header, so curation writes attribute
+  correctly on shared servers and the **Update Content** guard (F4-A4) now
+  matches the very identity the runtime sees. The ide-host attach path and
+  its http stdio bridge forward the header; a LAN team server still
+  attributes remote clients via the tools' `actor` argument (the header is
+  trusted from loopback peers only). New setting `ibis.claims.personalMode`
+  (`stub`, the default, | `db_only`) is forwarded to the runtime as
+  `IBIS_CLAIMS_PERSONAL_MODE` for spawned children and daemons started with
+  **Ibis Assistant: Start Daemon** (only when explicitly configured, so a
+  runtime `config.json` choice survives; a daemon started elsewhere keeps
+  its boot-time policy). **Status** reports the effective actor and claims
+  mode. Requires the F4-A5 runtime (the `IBIS_CLAIMS_PERSONAL_MODE`
+  override).
 - **Workstreams view + inline curation menu (F4-A4, 1.0.14)** — the
   activity-bar container grows a second tree, **Workstreams**: roots come
   from MCP `memory_workstreams` (name + current-member count, ordered by

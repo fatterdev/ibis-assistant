@@ -35,6 +35,7 @@ jobs:
           node-version: 20
       - run: node ide-host/src/bridge_framing_test.mjs
       - run: node ide-host/src/session_test.mjs
+      - run: node ide-host/src/http_actor_test.mjs
 
   # A1 retrieval eval (ddofds fase 0): golden dataset over a live SurrealDB
   # sidecar with the deterministic offline embedder. Baseline in

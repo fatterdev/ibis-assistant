@@ -4,7 +4,12 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 
-const { registerMemoryTree, registerWorkstreamTree, registerCurationMenu } = require("./memory-tree");
+const {
+  registerMemoryTree,
+  registerWorkstreamTree,
+  registerCurationMenu,
+  configuredActor,
+} = require("./memory-tree");
 const { registerRememberSelection } = require("./remember-selection");
 const { registerQuickActions } = require("./quick-actions");
 
@@ -347,6 +352,17 @@ function buildSpawnEnv(cfg) {
   if (workspace) {
     env.IBIS_WORKSPACE = workspace;
   }
+  // F4 §B.7: the personal-claims knob reaches the runtime as the
+  // IBIS_CLAIMS_PERSONAL_MODE env override — forwarded only when explicitly
+  // configured, so the default never clobbers a runtime config.json choice.
+  // Spawned children get it directly; Start Daemon inherits it through
+  // `ibis start` into the detached daemon.
+  if (isExplicitlyConfigured(cfg, "claims.personalMode")) {
+    const claimsMode = String(cfg.get("claims.personalMode", "stub")).trim().toLowerCase();
+    if (claimsMode === "stub" || claimsMode === "db_only") {
+      env.IBIS_CLAIMS_PERSONAL_MODE = claimsMode;
+    }
+  }
   return env;
 }
 
@@ -359,15 +375,24 @@ function buildSpawnEnv(cfg) {
 async function resolveBackend(host, cfg) {
   const selection = resolveBackendSelection(cfg, host);
   if (selection.mode !== "spawn") {
-    logVerbose(cfg, `backend: ${selection.mode} ${selection.url}`);
-    return { mode: "http", url: selection.url };
+    // Actor identity (F4 §B.4/A5): the http backend carries the actor so
+    // every callMcpTool ride sends `X-Ibis-Actor` (ide-host postJsonRpc).
+    const actor = configuredActor(cfg);
+    logVerbose(
+      cfg,
+      `backend: ${selection.mode} ${selection.url}${actor ? ` actor=${actor}` : ""}`,
+    );
+    return actor
+      ? { mode: "http", url: selection.url, actor }
+      : { mode: "http", url: selection.url };
   }
 
   if (cfg.get("runtime.autoAttach", false)) {
     for (const url of cfg.get("runtime.autoAttachProbeUrls", []) || []) {
       if (await probeReachable(url, probeTimeoutMs(cfg))) {
-        logVerbose(cfg, `backend: auto-attach ${url} (reachable)`);
-        return { mode: "http", url };
+        const actor = configuredActor(cfg);
+        logVerbose(cfg, `backend: auto-attach ${url}${actor ? ` actor=${actor}` : ""} (reachable)`);
+        return actor ? { mode: "http", url, actor } : { mode: "http", url };
       }
     }
   }
@@ -825,6 +850,17 @@ async function buildStatus(host, cfg) {
     }
     lines.push(`Plugin data dir: ${(backend.mode === "spawn" && backend.env.IBIS_DATA_DIR) || "default"}`);
     lines.push(`Workspace: ${(backend.mode === "spawn" && backend.env.IBIS_WORKSPACE) || "not bound"}`);
+    const actor = configuredActor(cfg);
+    lines.push(
+      backend.mode === "http"
+        ? `Actor identity: ${actor || "unset (rows attribute as unknown — set ibis.identity.actor)"}`
+        : `Actor identity: ${actor || "unset"} (Update-guard only; stdio attributes via the tool actor argument)`,
+    );
+    if (isExplicitlyConfigured(cfg, "claims.personalMode")) {
+      lines.push(
+        `Claims personal mode: ${cfg.get("claims.personalMode", "stub")} (forwarded as IBIS_CLAIMS_PERSONAL_MODE)`,
+      );
+    }
   }
   if (!cfg.get("lmBridge.enabled", true)) {
     lines.push("IDE LM bridge: disabled (ibis.lmBridge.enabled)");
