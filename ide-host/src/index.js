@@ -784,6 +784,14 @@ async function postJsonRpc(url, payload, session, actor = "") {
     session.id = sid;
   }
   const text = await res.text();
+  // Streamable HTTP acknowledges a notification (no `id`) with 202 and an
+  // empty body. That is success, not a tool result.
+  if (!text.trim()) {
+    if (res.status === 202 || res.status === 204) {
+      return null;
+    }
+    throw new Error(`non-JSON MCP response: HTTP ${res.status}`);
+  }
   const msgs = decodeHttpMcpResponse(res.headers.get("content-type") || "", text);
   const raw = msgs[0] || text;
   try {

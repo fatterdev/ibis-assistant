@@ -8,8 +8,8 @@ import { callMcpTool } from "./index.js";
  * tools/call — and no header is sent without one.
  *
  * Fake Streamable HTTP MCP server: records the X-Ibis-Actor header of every
- * POST and answers the ide-host handshake shape (JSON body per message;
- * notifications get a bare result).
+ * POST and answers the ide-host handshake shape (JSON body per request;
+ * notifications get the Streamable HTTP 202 empty acknowledgement).
  */
 const seen = [];
 const server = createServer((req, res) => {
@@ -20,11 +20,12 @@ const server = createServer((req, res) => {
   req.on("end", () => {
     seen.push(String(req.headers["x-ibis-actor"] || ""));
     const msg = JSON.parse(body);
-    res.writeHead(200, { "Content-Type": "application/json" });
     if (msg.id == null) {
-      res.end(JSON.stringify({ jsonrpc: "2.0", result: {} }));
+      res.writeHead(202);
+      res.end();
       return;
     }
+    res.writeHead(200, { "Content-Type": "application/json" });
     if (msg.method === "initialize") {
       res.end(
         JSON.stringify({
