@@ -22,8 +22,7 @@ use ibis_core::config::Config;
 use ibis_db::error::DbError;
 use ibis_db::executor::{Executor, QueryOutcome, Vars};
 use ibis_db::ids::{format_record_id, sanitize_id};
-use ibis_db::value::{Object, RecordId, RecordIdKey, SurrealValue, Value};
-use surrealdb::types::Array;
+use ibis_db::value::{Object, RecordId, SurrealValue, Value};
 use ibis_ingest_code::{ingest_codebase, CodeAIClient, ProgressCallback};
 
 // --- fakes ( MockDB / MockAI) ---
@@ -295,33 +294,16 @@ fn ingest_codebase_pruning() {
         .unwrap()
         .to_string_lossy()
         .into_owned();
-    // WQ-7: source_file ids are arrays `[repo, file_path]`; the mock returns
-    // decoded RecordId values (the live CBOR path), and the DELETE lists use
-    // the canonical `to_sql` rendering (bare repo key, quoted path).
-    let source_file_value = |rel: &str| {
-        Value::RecordId(RecordId::new(
-            "source_file",
-            RecordIdKey::Array(Array::from(vec![
-                Value::RecordId(RecordId::new("repo", sanitize_id("test-repo"))),
-                Value::String(sanitize_id(rel)),
-            ])),
-        ))
-    };
-    let ignored_id = format!(
-        "source_file:[repo:{}, '{}']",
-        sanitize_id("test-repo"),
-        sanitize_id(&ignored_rel)
-    );
-    let deleted_id = format!(
-        "source_file:[repo:{}, '{}']",
-        sanitize_id("test-repo"),
-        sanitize_id("gone.go")
-    );
-    let existing_id = format!(
-        "source_file:[repo:{}, '{}']",
-        sanitize_id("test-repo"),
-        sanitize_id("main.go")
-    );
+    // WQ-7 + F02: source_file ids are arrays `[repo, file_path]` with the
+    // raw path; the mock returns decoded RecordId values (the live CBOR
+    // path), and the DELETE lists use the canonical `to_sql` rendering
+    // (bare repo key, quoted raw path).
+    let repo_ref = format_record_id("repo", &sanitize_id("test-repo"));
+    let source_file_value =
+        |rel: &str| Value::RecordId(ibis_db::ids::source_file_record(&repo_ref, rel));
+    let ignored_id = ibis_db::ids::source_file_id(&repo_ref, &ignored_rel);
+    let deleted_id = ibis_db::ids::source_file_id(&repo_ref, "gone.go");
+    let existing_id = ibis_db::ids::source_file_id(&repo_ref, "main.go");
 
     let deleted_file: PathBuf = tmp_dir.join("gone.go"); // not on disk
     let mock_db = Arc::new(MockDb::new(vec![(

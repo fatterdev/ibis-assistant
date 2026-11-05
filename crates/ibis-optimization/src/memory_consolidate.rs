@@ -1065,10 +1065,19 @@ mod tests {
             }
         }
         let db = Arc::new(ProjectsDb(vec![
-            obj(vec![("project", Value::RecordId(RecordId::new("repo", "alpha")))]),
-            obj(vec![("project", Value::RecordId(RecordId::new("repo", "beta")))]),
+            obj(vec![(
+                "project",
+                Value::RecordId(RecordId::new("repo", "alpha")),
+            )]),
+            obj(vec![(
+                "project",
+                Value::RecordId(RecordId::new("repo", "beta")),
+            )]),
             obj(vec![("project", Value::None)]),
-            obj(vec![("project", Value::RecordId(RecordId::new("issue", "42")))]),
+            obj(vec![(
+                "project",
+                Value::RecordId(RecordId::new("issue", "42")),
+            )]),
         ]));
         let opt = Optimizer::new(Some(db as Arc<dyn Executor>), None, None);
 
@@ -1087,7 +1096,11 @@ mod tests {
         #[async_trait]
         impl Executor for FailingDb {
             async fn execute(&self, _sql: &str) -> Result<QueryOutcome, ibis_db::DbError> {
-                Err(ibis_db::DbError::query("connection lost", "SELECT", std::time::Duration::from_millis(1)))
+                Err(ibis_db::DbError::query(
+                    "connection lost",
+                    "SELECT",
+                    std::time::Duration::from_millis(1),
+                ))
             }
             async fn smart_query(
                 &self,

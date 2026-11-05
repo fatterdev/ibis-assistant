@@ -29,7 +29,7 @@ use ibis_ai::types::{Candidate, Content, GenerationConfig};
 use ibis_ai::{AIProvider, AiError};
 use ibis_db::executor::{Executor, Vars};
 use ibis_db::value::{Embedding, Value};
-use ibis_search::{ActorContext, SearchService, SearchResult};
+use ibis_search::{ActorContext, SearchResult, SearchService};
 
 // ---------------------------------------------------------------------------
 // dataset
@@ -207,7 +207,10 @@ pub fn build_report(
     seeded: bool,
     cases: Vec<CaseResult>,
 ) -> EvalReport {
-    let ok: Vec<&CaseResult> = cases.iter().filter(|c| c.status == CaseStatus::Ok).collect();
+    let ok: Vec<&CaseResult> = cases
+        .iter()
+        .filter(|c| c.status == CaseStatus::Ok)
+        .collect();
     let n = ok.len() as f64;
     let mut by_channel: BTreeMap<String, ChannelStat> = BTreeMap::new();
     for case in &ok {
@@ -483,10 +486,7 @@ const GOLDEN_REASONING: &[GoldenReasoning] = &[GoldenReasoning {
 }];
 
 fn vars_of(pairs: Vec<(&str, Value)>) -> Vars {
-    pairs
-        .into_iter()
-        .map(|(k, v)| (k.to_string(), v))
-        .collect()
+    pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
 }
 
 /// (Re)creates the golden estate in the connected database: idempotent DDL
@@ -516,10 +516,11 @@ pub async fn seed_golden_estate(
 
     let mut rows = 0usize;
 
-    // WQ-7: source_file/file_chunk ids are arrays (`[repo, file_path]`,
-    // `[file_id, line]`); the golden repo component is `repo:⟨golden⟩` and
-    // each file seeds one chunk at line 0. The dataset expected ids reference
-    // exactly these generated strings.
+    // WQ-7 + F02: source_file/file_chunk ids are arrays (`[repo, file_path]`,
+    // `[file_id, line]`); the golden repo component is `repo:⟨golden⟩` (the
+    // repo-record key convention) and the path component is the **raw**
+    // repo-relative path (lossless — F02). The dataset expected ids
+    // reference exactly these generated strings.
     let golden_repo_ref = ibis_db::ids::format_record_id(
         ibis_db::schema::names::REPO,
         &ibis_db::ids::sanitize_id("golden"),
@@ -686,9 +687,7 @@ mod tests {
                     best = Some(v);
                 }
             }
-            Ok(QueryOutcome::Single(
-                best.cloned().unwrap_or(Value::None),
-            ))
+            Ok(QueryOutcome::Single(best.cloned().unwrap_or(Value::None)))
         }
 
         async fn smart_query(&self, sql: &str, _vars: Vars) -> Result<QueryOutcome, DbError> {
@@ -805,7 +804,10 @@ mod tests {
         vec![
             obj(vec![
                 ("id", Value::from_t("file_chunk:g_fc_eval")),
-                ("path", Value::from_t("crates/ibis-optimization/src/eval.rs")),
+                (
+                    "path",
+                    Value::from_t("crates/ibis-optimization/src/eval.rs"),
+                ),
                 ("content", Value::from_t("eval runner scores golden cases")),
                 ("score", Value::from_t(0.95f64)),
             ]),
@@ -840,7 +842,11 @@ mod tests {
         let runner = RetrievalEvalRunner::new(svc);
         // The fake board merges channels in table order: file_chunk rows
         // first, then memory. Both expected hits are found, ranked 1 and 2.
-        let c = case("c1", "retrieval probe", &["memory:g_mem_rrf", "file_chunk:g_fc_eval"]);
+        let c = case(
+            "c1",
+            "retrieval probe",
+            &["memory:g_mem_rrf", "file_chunk:g_fc_eval"],
+        );
         let r = runner.run_case(&c).await;
         assert_eq!(r.status, CaseStatus::Ok, "{:?}", r.error);
         assert_eq!(r.first_rank, Some(1), "file_chunk rows precede memory rows");
@@ -887,7 +893,10 @@ mod tests {
 
         let dup = RetrievalDataset {
             version: "1".to_string(),
-            cases: vec![case("a", "q1", &["memory:g_x"]), case("a", "q2", &["memory:g_x"])],
+            cases: vec![
+                case("a", "q1", &["memory:g_x"]),
+                case("a", "q2", &["memory:g_x"]),
+            ],
         };
         assert!(dup.validate().err().unwrap().contains("duplicate case id"));
 
@@ -912,7 +921,10 @@ mod tests {
     fn normalize_strips_angle_brackets_only() {
         assert_eq!(normalize_record_id("memory:⟨g_mem_x⟩"), "memory:g_mem_x");
         assert_eq!(normalize_record_id(" memory:g_mem_x "), "memory:g_mem_x");
-        assert_eq!(normalize_record_id("reasoning:g_r_decay"), "reasoning:g_r_decay");
+        assert_eq!(
+            normalize_record_id("reasoning:g_r_decay"),
+            "reasoning:g_r_decay"
+        );
         assert_eq!(normalize_record_id("bare"), "bare");
     }
 
@@ -927,7 +939,11 @@ mod tests {
         .unwrap();
         assert!(load_dataset(&path).is_ok());
         let bad = dir.path().join("bad.yaml");
-        std::fs::write(&bad, "version: \"1\"\ncases:\n  - id: r01_x\n    query: q\n  - id: r01_x\n    query: q2\n").unwrap();
+        std::fs::write(
+            &bad,
+            "version: \"1\"\ncases:\n  - id: r01_x\n    query: q\n  - id: r01_x\n    query: q2\n",
+        )
+        .unwrap();
         assert!(load_dataset(&bad).is_err());
         let missing = dir.path().join("absent.yaml");
         assert!(load_dataset(&missing).is_err());
@@ -992,7 +1008,14 @@ mod tests {
             hits: vec![],
             error: Some("x".to_string()),
         }];
-        let report = build_report("ds.yaml", "1", "offline-hash-768", "additive", false, all_error);
+        let report = build_report(
+            "ds.yaml",
+            "1",
+            "offline-hash-768",
+            "additive",
+            false,
+            all_error,
+        );
         assert!(!report.below_threshold(0.5));
         assert_eq!(report.aggregate.cases_ok, 0);
     }
@@ -1009,16 +1032,22 @@ mod tests {
         // 4 files × (source_file + file_chunk) + 5 memories + 1 commit + 1 reasoning
         assert_eq!(rows, 15);
         let calls = db.calls();
-        for table in ["DELETE source_file;", "DELETE memory;", "DELETE commit_chunk;", "DELETE reasoning;"] {
+        for table in [
+            "DELETE source_file;",
+            "DELETE memory;",
+            "DELETE commit_chunk;",
+            "DELETE reasoning;",
+        ] {
             assert!(
                 calls.iter().any(|c| c.contains(table)),
                 "missing wipe {table}"
             );
         }
         for id in [
-            // WQ-7: file_chunk seeds use the array id `[file_id, line]`
-            // (seed literal form — the golden repo component stays wrapped).
-            "CREATE file_chunk:[source_file:[repo:⟨golden⟩, 'src_billing_price_calculator_rs'], 0]",
+            // WQ-7 + F02: file_chunk seeds use the array id
+            // `[file_id, line]` with the raw path component (seed literal
+            // form — the golden repo key stays bare-safe).
+            "CREATE file_chunk:[source_file:[repo:golden, 'src/billing/price_calculator.rs'], 0]",
             "CREATE memory:⟨g_mem_mathmax⟩",
             "CREATE commit_chunk:⟨g_cc_rrf⟩",
             "CREATE reasoning:⟨g_r_decay⟩",

@@ -94,7 +94,9 @@ async fn fresh_schema_init_is_idempotent_and_spots_rows() {
     }
 
     // Edges exist: RELATE through the union-typed contains edge (repo→source_file).
-    exec.execute("CREATE repo:⟨r1⟩ SET name = 'r'; CREATE source_file:⟨r1_f1⟩ SET rel_path = 'f1'; RELATE repo:⟨r1⟩->contains->source_file:⟨r1_f1⟩;")
+    // WQ-7 + F02: source_file ids are arrays `[repo, file_path]` — a scalar
+    // id fails the typed id field coercion.
+    exec.execute("CREATE repo:⟨r1⟩ SET name = 'r'; CREATE source_file:[repo:⟨r1⟩, 'f1'] SET rel_path = 'f1'; RELATE repo:⟨r1⟩->contains->source_file:[repo:⟨r1⟩, 'f1'];")
         .await
         .expect("relate contains");
     let edge = exec
@@ -551,6 +553,228 @@ async fn smart_query_decodes_key_usage_ints() {
     assert_eq!(rows[0].requests, Some(I64(15)));
     assert_eq!(rows[0].owner.as_deref(), Some("gemini-primary"));
     assert!(rows[0].last_updated.is_some());
+
+    cleanup(&exec, &db_name).await;
+}
+
+/// F02 live: lossless `source_file` array ids — the paths that collided
+/// under `sanitize_id` coexist as distinct records, special characters
+/// round-trip, and the canonical rendering survives decode → re-render.
+#[tokio::test]
+async fn source_file_ids_are_lossless_and_collision_free() {
+    let Some((exec, db_name)) = connect_scratch().await else {
+        return;
+    };
+    schema::init_schema(&exec).await.expect("init schema");
+
+    let repo_ref = format!("repo:⟨{}⟩", uuid::Uuid::new_v4().simple());
+    let paths = [
+        "src/a-b.rs",
+        "src/a/b.rs",
+        "Foo.rs",
+        "foo.rs",
+        "with space's file.rs",
+        "uni-code_éà漢字.rs",
+        "back\\slash.rs",
+        "a\nb.rs",
+        "he said \"hi\".rs",
+        "close'; DELETE repo; --",
+        "comma,file.rs",
+        "brk[et].rs",
+    ];
+    let mut ids = Vec::new();
+    for path in paths {
+        let id = ibis_db::ids::source_file_id(&repo_ref, path);
+        assert!(
+            ibis_db::ids::is_safe_record_id(&id),
+            "canonical id must be interpolatable: {id}"
+        );
+        // Create via bound record (the ingest write path)…
+        exec.smart_query(
+            "CREATE $id SET rel_path = $rel;",
+            vars([
+                (
+                    "id",
+                    Value::RecordId(ibis_db::ids::source_file_record(&repo_ref, path)),
+                ),
+                ("rel", Value::from_t(path)),
+            ]),
+        )
+        .await
+        .unwrap_or_else(|e| panic!("create {path}: {e}"));
+        ids.push((path, id));
+    }
+
+    // …and via the interpolated rendering (the read/prune path): every
+    // canonical id resolves to exactly one record.
+    for (path, id) in &ids {
+        let sql = format!("SELECT rel_path FROM {id};");
+        let rows: Vec<RelPathRow> = exec
+            .smart_query(&sql, Vars::new())
+            .await
+            .unwrap_or_else(|e| panic!("select {id}: {e}"))
+            .rows(&sql)
+            .expect("decode");
+        assert_eq!(rows.len(), 1, "{id} must exist exactly once");
+        assert_eq!(rows[0].rel_path.as_deref(), Some(*path), "{id}");
+    }
+
+    // Payload that simulates literal closure plus a trailing statement: the
+    // canonical id carries it as inert string content only.
+    let hostile = "x']; CREATE memory:⟨pwned⟩ SET content = 'owned'; --";
+    let hostile_id = ibis_db::ids::source_file_id(&repo_ref, hostile);
+    assert!(ibis_db::ids::is_safe_record_id(&hostile_id));
+    exec.smart_query(
+        "CREATE $id SET rel_path = $rel;",
+        vars([
+            (
+                "id",
+                Value::RecordId(ibis_db::ids::source_file_record(&repo_ref, hostile)),
+            ),
+            ("rel", Value::from_t(hostile)),
+        ]),
+    )
+    .await
+    .expect("create hostile path");
+
+    // No side effect escaped the literal.
+    let memories = exec
+        .execute("SELECT VALUE id FROM memory;")
+        .await
+        .expect("select memories");
+    let text = format!("{:?}", memories.first());
+    assert!(
+        !text.contains("pwned"),
+        "injection attempt must not create records: {text}"
+    );
+
+    // Decode → re-render round-trip: `format_record` (the prune path) yields
+    // the same canonical id the writer built.
+    let rows_sql = "SELECT id, rel_path FROM source_file;";
+    let rows: Vec<SourceFileIdRow> = exec
+        .smart_query(rows_sql, Vars::new())
+        .await
+        .expect("select files")
+        .rows(rows_sql)
+        .expect("decode files");
+    assert_eq!(rows.len(), paths.len() + 1, "one record per distinct path");
+    for row in &rows {
+        let rendered = ibis_db::ids::format_record(&row.id);
+        assert!(
+            ids.iter().any(|(_, id)| *id == rendered) || rendered == hostile_id,
+            "re-rendered id must match the canonical form: {rendered}"
+        );
+        assert!(
+            ibis_db::ids::is_safe_record_id(&rendered),
+            "decoded rendering must stay interpolatable: {rendered}"
+        );
+    }
+
+    cleanup(&exec, &db_name).await;
+}
+
+#[derive(Debug, surrealdb::types::SurrealValue)]
+struct RelPathRow {
+    rel_path: Option<String>,
+}
+
+#[derive(Debug, surrealdb::types::SurrealValue)]
+struct SourceFileIdRow {
+    id: RecordId,
+    #[allow(dead_code)]
+    rel_path: Option<String>,
+}
+
+/// A2 live: `commit_chunk.updated_at` is declared (F07) — the writer's full
+/// UPSERT (content/hash/date/updated_at) persists every bound value, and a
+/// second schema initialization after seeding stays coherent.
+#[tokio::test]
+async fn commit_chunk_upsert_persists_all_values_and_schema_reinit_stays_coherent() {
+    let Some((exec, db_name)) = connect_scratch().await else {
+        return;
+    };
+    schema::init_schema(&exec).await.expect("init schema");
+
+    exec.smart_query(
+        "UPSERT $id SET content = $content, batch_status = 'pending', commit_hash = $hash, commit_date = $date, updated_at = time::now();",
+        vars([
+            ("id", Value::RecordId(RecordId::new("commit_chunk", "live_f07"))),
+            ("content", Value::from_t("meaning body")),
+            ("hash", Value::from_t("abc123")),
+            ("date", Value::from_t("2026-11-05T10:00:00Z")),
+        ]),
+    )
+    .await
+    .expect("upsert commit_chunk");
+
+    let sql = "SELECT content, commit_hash, commit_date, updated_at FROM commit_chunk:⟨live_f07⟩;";
+    let outcome = exec.smart_query(sql, Vars::new()).await.expect("select");
+    let text = format!("{:?}", outcome.first());
+    assert!(
+        text.contains("meaning body"),
+        "content must persist: {text}"
+    );
+    assert!(text.contains("abc123"), "commit_hash must persist: {text}");
+    assert!(
+        text.contains("2026-11-05"),
+        "commit_date must persist: {text}"
+    );
+    assert!(
+        !text.contains("updated_at: None") && !text.contains("\"updated_at\": None"),
+        "updated_at must be set (declared field), got: {text}"
+    );
+
+    // Re-run the DDL after seeding: endpoints and relations must stay
+    // coherent (characterization probe for the REMOVE FIELD relation note —
+    // no new behavior asserted, only idempotency).
+    schema::init_schema(&exec).await.expect("re-init schema");
+    let re = exec.smart_query(sql, Vars::new()).await.expect("re-select");
+    assert_eq!(
+        format!("{:?}", re.first()),
+        text,
+        "re-init must not alter rows"
+    );
+
+    cleanup(&exec, &db_name).await;
+}
+
+/// F13 live: `migrate_with` applies an unsorted `[3, 2]` list in id order
+/// and ends at the highest version; a re-run is a no-op.
+#[tokio::test]
+async fn migrations_apply_in_id_order_live() {
+    let Some((exec, db_name)) = connect_scratch().await else {
+        return;
+    };
+
+    let m2 = migrate::Migration {
+        id: 2,
+        sql: "DEFINE TABLE IF NOT EXISTS _live_m2 SCHEMALESS;",
+    };
+    let m3 = migrate::Migration {
+        id: 3,
+        sql: "DEFINE TABLE IF NOT EXISTS _live_m3 SCHEMALESS;",
+    };
+    let version = migrate::migrate_with(&exec, &[m3, m2])
+        .await
+        .expect("migrate");
+    assert_eq!(version, 3);
+    assert_eq!(migrate::current_version(&exec).await.expect("current"), 3);
+    for table in ["_live_m2", "_live_m3"] {
+        exec.execute(&format!("SELECT * FROM {table};"))
+            .await
+            .unwrap_or_else(|e| panic!("table {table} must exist: {e}"));
+    }
+    // Re-run: already applied → no-op.
+    let version = migrate::migrate_with(&exec, &[m3, m2])
+        .await
+        .expect("re-migrate");
+    assert_eq!(version, 3);
+
+    // Duplicate ids are rejected outright.
+    let err = migrate::migrate_with(&exec, &[m3, m3])
+        .await
+        .expect_err("duplicate");
+    assert!(err.to_string().contains("duplicate migration id"), "{err}");
 
     cleanup(&exec, &db_name).await;
 }

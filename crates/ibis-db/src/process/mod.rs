@@ -90,8 +90,7 @@ impl ProcessManager {
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
-        let survivors =
-            ibis_core::sidecar_ledger::reconcile(&ledger_dir, RECONCILE_GRACE).await;
+        let survivors = ibis_core::sidecar_ledger::reconcile(&ledger_dir, RECONCILE_GRACE).await;
         tracing::info!(
             "sidecar reconciliation: {} live ledger entr{} kept for data dir {}",
             survivors.len(),
@@ -173,7 +172,11 @@ impl ProcessManager {
             None
         };
 
-        Ok(ProcessManager { child, port, ledger })
+        Ok(ProcessManager {
+            child,
+            port,
+            ledger,
+        })
     }
 
     /// The port the embedded instance was started on.

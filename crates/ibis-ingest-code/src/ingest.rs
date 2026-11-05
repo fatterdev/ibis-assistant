@@ -35,8 +35,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use ibis_db::executor::{Executor, Vars};
 use ibis_db::schema::names as t;
-use ibis_db::value::{RecordId, RecordIdKey, SurrealValue, I64, Value};
-use surrealdb::types::Array;
+use ibis_db::value::{RecordId, SurrealValue, I64};
 use ibis_git::GitRunner;
 use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
@@ -463,23 +462,16 @@ async fn process_file(
     // 1. Calculate hash.
     let hash = file_hash(&file_bytes);
 
-    // WQ-7: the `source_file` id is the array `[repo, file_path]` (repo-relative
-    // path, sanitized) — no hash suffix. One row per (repo, path): git ingest
-    // and code ingest unify on it, and a new file version refreshes the row in
-    // place (the version lives in the `hash` field and in the chunk rows).
+    // WQ-7 + F02: the `source_file` id is the array `[repo, file_path]` —
+    // the **raw** repo-relative path (forward slashes, lossless; the SDK
+    // renders/escapes it). One row per (repo, path): git ingest and code
+    // ingest unify on it, and a new file version refreshes the row in place
+    // (the version lives in the `hash` field and in the chunk rows).
     let repo_ref = ibis_db::ids::format_record_id(t::REPO, &ibis_db::ids::sanitize_id(repo_name));
     let safe_repo_name = ibis_db::ids::sanitize_id(repo_name);
-    let file_id = ibis_db::ids::source_file_id(&repo_ref, rel_path);
-    let file_record = RecordId::new(
-        t::SOURCE_FILE,
-        RecordIdKey::Array(Array::from(vec![
-            Value::RecordId(RecordId::new(
-                t::REPO,
-                ibis_db::ids::sanitize_id(repo_name),
-            )),
-            Value::String(ibis_db::ids::sanitize_id(rel_path)),
-        ])),
-    );
+    let rel_normalized = ibis_db::ids::normalize_rel_path(rel_path);
+    let file_id = ibis_db::ids::source_file_id(&repo_ref, &rel_normalized);
+    let file_record = ibis_db::ids::source_file_record(&repo_ref, &rel_normalized);
 
     // 2. Check if changed / check if the version already exists.
     let select_sql = format!("SELECT hash FROM {file_id};");
@@ -524,7 +516,7 @@ async fn process_file(
         vars_of([
             ("hash", hash.clone().into_value()),
             ("path", path_str(abs_path).into_value()),
-            ("rel", rel_path.into_value()),
+            ("rel", rel_normalized.clone().into_value()),
             ("repo", repo_name.into_value()),
         ]),
     )
@@ -700,10 +692,7 @@ async fn process_file(
         let mut sql = String::from("BEGIN TRANSACTION; ");
         let mut batch_vars: Vars = Vars::new();
         for (k, (_original_index, chunk_obj)) in valid_batch.iter().enumerate() {
-            let chunk_id = ibis_db::ids::file_chunk_id(
-                &file_id,
-                i64::from(chunk_obj.start_line),
-            );
+            let chunk_id = ibis_db::ids::file_chunk_id(&file_id, i64::from(chunk_obj.start_line));
             batch_vars.insert(format!("file{k}"), file_record.clone().into_value());
             batch_vars.insert(format!("hash{k}"), hash.clone().into_value());
             batch_vars.insert(

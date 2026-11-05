@@ -179,6 +179,9 @@ pub const INIT_STATEMENTS: &[&str] = &[
     "DEFINE FIELD IF NOT EXISTS commit_hash ON TABLE commit_chunk TYPE option<string>;",
     // Adapter-supplied verbatim string (display field; not a query key).
     "DEFINE FIELD IF NOT EXISTS commit_date ON TABLE commit_chunk TYPE option<string>;",
+    // Touch stamp of the batch writer (`apply_commit_txn` sets time::now() on
+    // every chunk write; F07 — undeclared writes fail loudly on SCHEMAFULL).
+    "DEFINE FIELD IF NOT EXISTS updated_at ON TABLE commit_chunk TYPE option<datetime>;",
     // Materialized back-reference on commit_chunk.
     "DEFINE FIELD IF NOT EXISTS has_commit_chunk_edges ON TABLE commit_chunk TYPE array<record<has_commit_chunk>> DEFAULT [] READONLY;",
     "DEFINE TABLE IF NOT EXISTS issue SCHEMAFULL;",
