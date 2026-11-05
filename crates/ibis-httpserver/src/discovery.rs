@@ -122,9 +122,7 @@ pub fn guide_markdown(cfg: &Config, tools: &[ToolMeta]) -> String {
     ));
 
     b.push_str("## CLI\n\n");
-    b.push_str(
-        "Setup: `ibis config` | `config fast` | `config full` | `config show`.\n\n",
-    );
+    b.push_str("Setup: `ibis config` | `config fast` | `config full` | `config show`.\n\n");
     b.push_str("The same binary is an MCP client of a running server (`POST /mcp`):\n\n");
     b.push_str("```bash\n");
     b.push_str("ibis ask \"Explain the auth flow\" --branch main\n");

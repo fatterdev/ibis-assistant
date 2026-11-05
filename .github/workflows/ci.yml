@@ -39,8 +39,8 @@ jobs:
 
   # A1 retrieval eval (ddofds fase 0): golden dataset over a live SurrealDB
   # sidecar with the deterministic offline embedder. The 4.0 baseline is
-  # recorded in docs/planning/2026-11-02-a1-retrieval-eval-plan.md (numbers
-  # TBD by the WQ-7 eval) — the 0.75 floor catches gross ranking regressions.
+  # recorded in docs/planning/2026-11-02-a1-retrieval-eval-plan.md — the 0.75
+  # floor catches gross ranking regressions.
   retrieval-eval:
     runs-on: ubuntu-24.04
     steps:
@@ -65,3 +65,42 @@ jobs:
         with:
           name: retrieval-eval-report
           path: artifacts/eval/retrieval-offline.json
+
+  # Live SurrealDB integration gate (remediation plan section 10): the live
+  # suites of every crate that owns SurrealQL run against the pinned v4.0.0
+  # sidecar with IBIS_LIVE_REQUIRED=1 — an unreachable server or a skipped
+  # live test FAILS the job (no silent skips in CI).
+  live-tests:
+    runs-on: ubuntu-24.04
+    env:
+      IBIS_SPIKE_SURREAL_URL: ws://127.0.0.1:38000
+      IBIS_LIVE_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start SurrealDB sidecar (pinned)
+        run: |
+          docker run -d --name surreal -p 38000:8000 surrealdb/surrealdb:v4.0.0 \
+            start -u root -p root --bind 0.0.0.0:8000
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:38000/health && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:38000/health
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # GITHUB_TOKEN: authenticated GitHub API for the SurrealDB/ast-grep
+      # sidecar downloads the process-lifecycle tests may trigger.
+      - name: Live tests (ibis-db)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo test -p ibis-db --test live_surreal
+      - name: Live tests (ibis-ingest-code)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo test -p ibis-ingest-code --tests
+      - name: Live tests (ibis-ingest-logs)
+        run: cargo test -p ibis-ingest-logs --test live_logs
+      - name: Live tests (ibis-search)
+        run: cargo test -p ibis-search --test live_memory_estate
+      - name: Live tests (ibis-server)
+        run: cargo test -p ibis-server --test live_commit_txn

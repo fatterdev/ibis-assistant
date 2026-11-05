@@ -20,7 +20,9 @@ use ibis_db::value::{F64, I64};
 const DEFAULT_URL: &str = "ws://127.0.0.1:38000";
 
 /// Connects to the shared dev server and selects a scratch database.
-/// Returns `None` when the server is unreachable (test skips).
+/// Returns `None` when the server is unreachable (test skips) — unless
+/// `IBIS_LIVE_REQUIRED=1` (CI live gate): then a failed connection FAILS the
+/// test instead of skipping it, and skipped live tests can never pass CI.
 async fn connect_scratch() -> Option<(SurrealDbExecutor, String)> {
     let url = std::env::var("IBIS_SPIKE_SURREAL_URL").unwrap_or_else(|_| DEFAULT_URL.to_string());
     let db_name = format!("laneb_{}", uuid::Uuid::new_v4().simple());
@@ -28,6 +30,9 @@ async fn connect_scratch() -> Option<(SurrealDbExecutor, String)> {
         match SurrealDbExecutor::connect(&url, "ibis_db_tests", &db_name, "root", "root").await {
             Ok(exec) => exec,
             Err(err) => {
+                if std::env::var("IBIS_LIVE_REQUIRED").as_deref() == Ok("1") {
+                    panic!("IBIS_LIVE_REQUIRED=1 but SurrealDB is unreachable: {err}");
+                }
                 eprintln!("live: SurrealDB not reachable ({err}), skipping");
                 return None;
             }

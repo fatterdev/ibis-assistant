@@ -33,7 +33,11 @@ fn pdeathsig_child_dies_when_parent_exits() {
 
     let exe = std::env::current_exe().expect("test binary");
     let output = StdCommand::new(&exe)
-        .args(["--exact", "pdeathsig_child_dies_when_parent_exits", "--nocapture"])
+        .args([
+            "--exact",
+            "pdeathsig_child_dies_when_parent_exits",
+            "--nocapture",
+        ])
         .env(CHILD_ROLE_ENV, "1")
         .output()
         .expect("spawn child role");

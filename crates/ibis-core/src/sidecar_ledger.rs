@@ -226,7 +226,7 @@ mod imp {
 
     use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
     use windows_sys::Win32::System::Console::{GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT};
-use windows_sys::Win32::System::Threading::{
+    use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, GetProcessTimes, OpenProcess, TerminateProcess,
         PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
     };
@@ -280,7 +280,7 @@ use windows_sys::Win32::System::Threading::{
     /// original creation time — so the exit code (`STILL_ACTIVE` check)
     /// decides first, then the creation-time comparison excludes PID reuse.
     /// An un-openable pid reads as dead (safe direction: no kill).
-pub fn process_alive_raw(pid: u32, start_time: u64) -> bool {
+    pub fn process_alive_raw(pid: u32, start_time: u64) -> bool {
         unsafe {
             let handle = OpenProcess(
                 PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
@@ -320,7 +320,7 @@ pub fn process_alive_raw(pid: u32, start_time: u64) -> bool {
         Some(pid)
     }
 
-/// CTRL_BREAK first (delivered when a console happens to be shared),
+    /// CTRL_BREAK first (delivered when a console happens to be shared),
     /// poll the exit code for the grace window, then TerminateProcess. The
     /// handle must carry a query right too: without it `GetExitCodeProcess`
     /// fails, the stale exit-code 0 reads as "already exited" and the
@@ -329,12 +329,11 @@ pub fn process_alive_raw(pid: u32, start_time: u64) -> bool {
     pub async fn terminate_impl(entry: &super::SidecarEntry, grace: Duration) {
         let pid = entry.pid;
         unsafe {
-            let handle =
-                OpenProcess(
-                    PROCESS_TERMINATE | PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
-                    0,
-                    pid,
-                ) as isize;
+            let handle = OpenProcess(
+                PROCESS_TERMINATE | PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                0,
+                pid,
+            ) as isize;
             if handle == 0 {
                 return; // gone between the liveness check and now
             }
@@ -582,7 +581,10 @@ mod tests {
         assert!(owner_alive(&entry));
 
         entry.owner_start_time = own_start.wrapping_add(1);
-        assert!(!owner_alive(&entry), "mismatched owner start time reads dead");
+        assert!(
+            !owner_alive(&entry),
+            "mismatched owner start time reads dead"
+        );
     }
 
     /// e2e of the stale path with real processes: a recorded sidecar whose
@@ -626,7 +628,7 @@ mod tests {
     /// and reconcile is idempotent on the same state.
     #[cfg(any(windows, unix))]
     #[tokio::test]
-async fn reconcile_keeps_entries_owned_by_a_live_ibis() {
+    async fn reconcile_keeps_entries_owned_by_a_live_ibis() {
         let mut sleeper = spawn_sleeper();
         let pid = sleeper.id().expect("sleeper pid");
         let start = process_start_time(pid).expect("sleeper start time");
@@ -639,7 +641,11 @@ async fn reconcile_keeps_entries_owned_by_a_live_ibis() {
         save(&path, &[entry.clone()]);
 
         let survivors = reconcile(&path, Duration::from_secs(2)).await;
-        assert_eq!(survivors, vec![entry.clone()], "foreign-live entry preserved");
+        assert_eq!(
+            survivors,
+            vec![entry.clone()],
+            "foreign-live entry preserved"
+        );
         assert!(entry_alive(&entry), "the kept sidecar must stay alive");
 
         let again = reconcile(&path, Duration::from_secs(2)).await;
@@ -651,11 +657,8 @@ async fn reconcile_keeps_entries_owned_by_a_live_ibis() {
         while entry_alive(&entry) && std::time::Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-assert!(!entry_alive(&entry), "cleanup terminated the sleeper");
-        sleeper
-            .wait()
-            .await
-            .expect("reap the cleaned-up sleeper");
+        assert!(!entry_alive(&entry), "cleanup terminated the sleeper");
+        sleeper.wait().await.expect("reap the cleaned-up sleeper");
     }
 
     /// Dead entries are pruned without any termination attempt.
@@ -685,7 +688,7 @@ assert!(!entry_alive(&entry), "cleanup terminated the sleeper");
         cmd.spawn().expect("spawn sleeper")
     }
 
-/// Spawns a process that exits immediately and returns its (now dead)
+    /// Spawns a process that exits immediately and returns its (now dead)
     /// pid, reaped — the "owner gone" fixture.
     #[cfg(any(windows, unix))]
     fn spawn_exiting_process() -> u32 {

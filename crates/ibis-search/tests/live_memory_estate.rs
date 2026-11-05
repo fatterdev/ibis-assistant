@@ -59,6 +59,9 @@ async fn connect_scratch() -> Option<(Arc<dyn Executor>, String)> {
     let exec = match SurrealDbExecutor::connect(&url, NS, &db_name, "root", "root").await {
         Ok(exec) => exec,
         Err(err) => {
+            if std::env::var("IBIS_LIVE_REQUIRED").as_deref() == Ok("1") {
+                panic!("IBIS_LIVE_REQUIRED=1 but SurrealDB is unreachable: {err}");
+            }
             eprintln!("live: SurrealDB not reachable ({err}), skipping");
             return None;
         }

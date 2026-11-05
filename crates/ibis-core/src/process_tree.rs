@@ -53,17 +53,13 @@ mod imp {
     use std::time::Duration;
 
     use tokio::process::Child;
-    use windows_sys::Win32::System::Console::{
-        GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT,
-    };
+    use windows_sys::Win32::System::Console::{GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT};
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
         SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
         JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
-    use windows_sys::Win32::System::Threading::{
-        CREATE_NEW_PROCESS_GROUP, GetCurrentProcess,
-    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, CREATE_NEW_PROCESS_GROUP};
 
     /// Open job handle for the process lifetime, as isize for Send storage.
     /// Never closed manually: the kernel closing it at process exit is
@@ -131,10 +127,7 @@ mod imp {
     /// into the held job so it still dies with this process. `raw_handle` is
     /// the child process HANDLE as isize.
     pub fn attach_child(raw_handle: isize) -> bool {
-        let Some(job) = *JOB
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-        else {
+        let Some(job) = *JOB.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) else {
             return false;
         };
         unsafe {
@@ -164,7 +157,9 @@ mod imp {
         if let Some(pid) = child.id() {
             let sent = unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) };
             if sent != 0 {
-                tracing::info!("process_tree: CTRL_BREAK_EVENT sent to the child process group (pid {pid})");
+                tracing::info!(
+                    "process_tree: CTRL_BREAK_EVENT sent to the child process group (pid {pid})"
+                );
             }
         }
         match tokio::time::timeout(grace, child.wait()).await {
@@ -375,8 +370,7 @@ mod imp {
 
 #[cfg(unix)]
 pub use imp::{
-    configure_spawn, graceful_stop, run_parent_death_watchdog, watchdog_exit_code,
-    WATCHDOG_FLAG,
+    configure_spawn, graceful_stop, run_parent_death_watchdog, watchdog_exit_code, WATCHDOG_FLAG,
 };
 
 /// Only macOS arms the watchdog (Linux is kernel-covered by PDEATHSIG).
@@ -391,7 +385,10 @@ mod imp {
         Ok(())
     }
 
-    pub async fn graceful_stop(child: &mut tokio::process::Child, _grace: Duration) -> std::io::Result<()> {
+    pub async fn graceful_stop(
+        child: &mut tokio::process::Child,
+        _grace: Duration,
+    ) -> std::io::Result<()> {
         child.kill().await?;
         child.wait().await?;
         Ok(())

@@ -40,7 +40,7 @@ pub mod upload;
 
 pub use auth::{auth_middleware, inject_auth, resolve_actor, resolve_trusted_actor};
 pub use curator::{
-    curator_html, ui_link_meta, ui_resource_meta, CURATOR_CSP, CURATOR_CONNECT_DOMAINS,
+    curator_html, ui_link_meta, ui_resource_meta, CURATOR_CONNECT_DOMAINS, CURATOR_CSP,
     CURATOR_DESCRIPTION, CURATOR_MIME, CURATOR_NAME, CURATOR_URI,
 };
 pub use discovery::{

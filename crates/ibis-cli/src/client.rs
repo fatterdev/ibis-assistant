@@ -1199,7 +1199,8 @@ impl MemoryAction {
             MemoryAction::Delete { id, hard } => {
                 let Some(id) = id else {
                     return Err(CliError::Usage(
-                        "Error: memory ID is required.\nUsage: ibis memory delete <id> [--hard]".to_string(),
+                        "Error: memory ID is required.\nUsage: ibis memory delete <id> [--hard]"
+                            .to_string(),
                     ));
                 };
                 let mut arguments = Args::new();

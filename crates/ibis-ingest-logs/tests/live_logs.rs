@@ -61,7 +61,9 @@ fn fake_ai(reply: &str) -> Arc<ibis_ai::Client> {
 }
 
 /// Connects to the shared dev server and selects a scratch database.
-/// Returns `None` when the server is unreachable (test skips).
+/// Returns `None` when the server is unreachable (test skips) — unless
+/// `IBIS_LIVE_REQUIRED=1` (CI live gate): then a failed connection FAILS the
+/// test instead of skipping it.
 async fn connect_scratch() -> Option<(Arc<dyn Executor>, String)> {
     let url = std::env::var("IBIS_SPIKE_SURREAL_URL").unwrap_or_else(|_| DEFAULT_URL.to_string());
     let db_name = format!("laneg_{}", uuid::Uuid::new_v4().simple());
@@ -69,6 +71,9 @@ async fn connect_scratch() -> Option<(Arc<dyn Executor>, String)> {
         match SurrealDbExecutor::connect(&url, "ibis_db_tests", &db_name, "root", "root").await {
             Ok(exec) => exec,
             Err(err) => {
+                if std::env::var("IBIS_LIVE_REQUIRED").as_deref() == Ok("1") {
+                    panic!("IBIS_LIVE_REQUIRED=1 but SurrealDB is unreachable: {err}");
+                }
                 eprintln!("live: SurrealDB not reachable ({err}), skipping");
                 return None;
             }

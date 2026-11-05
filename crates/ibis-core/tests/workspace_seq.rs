@@ -195,27 +195,18 @@ fn workspace_scenarios() {
         runtime_mode: "plugin".into(),
         ..Default::default()
     };
-    assert_eq!(
-        workspace_start(&cfg).as_deref(),
-        Some("C:\\work\\ibis")
-    );
+    assert_eq!(workspace_start(&cfg).as_deref(), Some("C:\\work\\ibis"));
     std::env::remove_var("CURSOR_WORKSPACE_FOLDER");
 
     // ── FileURIToPath (windows-specific expectations) ────────────────────
     if cfg!(windows) {
-        assert_eq!(
-            file_uri_to_path("file:///C:/work/ibis"),
-            "C:\\work\\ibis"
-        );
+        assert_eq!(file_uri_to_path("file:///C:/work/ibis"), "C:\\work\\ibis");
         assert_eq!(
             file_uri_to_path("c:\\work\\ibis").to_lowercase(),
             "c:\\work\\ibis"
         );
     } else {
-        assert_eq!(
-            file_uri_to_path("file:///tmp/ibis"),
-            "/tmp/ibis"
-        );
+        assert_eq!(file_uri_to_path("file:///tmp/ibis"), "/tmp/ibis");
     }
 
     // ── OwnedClonePath default root ──────────────────────────────────────
