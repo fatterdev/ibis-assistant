@@ -25,21 +25,20 @@ pub(crate) fn f64_vec_value(vec: &[f64]) -> Value {
     Value::from_t(vec.to_vec())
 }
 
-/// Scores commit_chunk by vector similarity + commit_date decay (authorship
-/// time), never embedding ingest time. The vector is bound (`$vec`, F-002).
-/// `math::max` takes a single array on SurrealDB 3.x (D17) — the original 2.x
-/// two-arg form fails live.
-pub(crate) fn commit_chunk_score_expr() -> String {
-    "(vector::similarity::cosine(embedding, $vec) * 0.7) + \
-     (IF commit_date IS NONE THEN 0.3 ELSE math::max([0, 1 - duration::days(time::now() - type::datetime(commit_date)) / 365]) * 0.3 END)"
-        .to_string()
-}
-
 /// `commitChunkAskQuery (vector bound as `$vec`).
-pub(crate) fn commit_chunk_ask_query() -> String {
+///
+/// WQ-7: the channel ranks by the DiskANN index
+/// (`ORDER BY vector::distance::cosine`), projects the raw cosine similarity
+/// as `score` plus the `age_days` decay anchor, and fetches the candidate
+/// window; the temporal decay is a Rust-side rescore (see
+/// [`crate::search::apply_temporal_decay`]).
+pub(crate) fn commit_chunk_ask_query(limit: usize) -> String {
     format!(
-        "SELECT id, content, commit_hash, commit_date, {} as score FROM commit_chunk WHERE embedding != NONE ORDER BY score DESC LIMIT 15;",
-        commit_chunk_score_expr()
+        "SELECT id, content, commit_hash, commit_date, \
+         IF commit_date IS NONE THEN NONE ELSE duration::days(time::now() - type::datetime(commit_date)) END as age_days, \
+         vector::similarity::cosine(embedding, $vec) as score \
+         FROM commit_chunk WHERE embedding != NONE \
+         ORDER BY vector::distance::cosine(embedding, $vec) LIMIT {limit};"
     )
 }
 
@@ -132,7 +131,7 @@ pub async fn load_commit_changed_paths(
         return Ok(out);
     }
     let sql = format!(
-        "SELECT hash, ->changed->source_file.{{path, rel_path}} AS files FROM commit WHERE hash IN $hashes LIMIT {};",
+        "SELECT hash, ->changed->source_file.{{path, rel_path}} AS files FROM commit WHERE hash IN $hashes ORDER BY id LIMIT {};",
         clean.len()
     );
     let mut vars = ibis_db::executor::Vars::new();
@@ -228,12 +227,14 @@ mod tests {
     }
 
     #[test]
-    fn score_expr_binds_vector() {
-        let expr = commit_chunk_score_expr();
-        assert!(expr.contains("vector::similarity::cosine(embedding, $vec)"));
-        assert!(expr.contains("commit_date"));
-        let q = commit_chunk_ask_query();
+    fn ask_query_binds_vector_and_orders_by_distance() {
+        let q = commit_chunk_ask_query(50);
+        assert!(q.contains("vector::similarity::cosine(embedding, $vec)"));
+        assert!(q.contains("commit_date"));
+        assert!(q.contains("age_days"));
         assert!(q.contains("FROM commit_chunk"));
-        assert!(q.contains("ORDER BY score DESC LIMIT 15"));
+        assert!(q.contains(
+            "ORDER BY vector::distance::cosine(embedding, $vec) LIMIT 50"
+        ));
     }
 }

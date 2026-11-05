@@ -232,9 +232,10 @@ impl SearchService {
         };
 
         // Semantic channel: HEAD embeddings ∩ paths in tree(R), bytes at R.
+        // WQ-7: index-served cosine ordering, Rust-side decay rescore.
+        let window = self.candidate_window.max(crate::search::VECTOR_CHANNEL_LIMIT);
         let sql = format!(
-            "SELECT id, file.path as path, content, hash, file.hash as current_hash, {} as score FROM file_chunk WHERE embedding != NONE ORDER BY score DESC LIMIT 15;",
-            crate::search::ask_score_expr()
+            "SELECT id, file.path as path, content, hash, file.hash as current_hash, NONE as age_days, vector::similarity::cosine(embedding, $vec) as score FROM file_chunk WHERE embedding != NONE ORDER BY vector::distance::cosine(embedding, $vec) LIMIT {window};"
         );
         let mut vars = ibis_db::executor::Vars::new();
         vars.insert("vec".into(), crate::commit_meaning::vec_value(vec));
@@ -269,7 +270,10 @@ impl SearchService {
             results.push(SearchResult {
                 id: rows::record_id(rows::field(row, "id")),
                 path,
-                score: rows::numeric_float(rows::field(row, "score")),
+                score: crate::search::apply_temporal_decay(
+                    rows::numeric_float(rows::field(row, "score")),
+                    rows::numeric_float_opt(rows::field(row, "age_days")),
+                ),
                 is_current: false,
                 source_kind: "file_chunk".to_string(),
                 as_of_ref: ancestors.ref_oid().to_string(),

@@ -154,7 +154,7 @@ impl SearchService {
             where_parts.push(format!("project = {repo_id}"));
         }
         let sql = format!(
-            "SELECT id FROM {} WHERE {} LIMIT 1;",
+            "SELECT id FROM {} WHERE {} ORDER BY id LIMIT 1;",
             super::TABLE_MEMORY,
             where_parts.join(" AND ")
         );
@@ -171,7 +171,7 @@ impl SearchService {
             where_parts.push(format!("project = {repo_id}"));
         }
         let sql = format!(
-            "SELECT id FROM {} WHERE {} LIMIT 1;",
+            "SELECT id FROM {} WHERE {} ORDER BY id LIMIT 1;",
             super::TABLE_MEMORY,
             where_parts.join(" AND ")
         );

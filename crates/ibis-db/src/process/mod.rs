@@ -1,7 +1,8 @@
 //! Embedded SurrealDB process lifecycle.
 //!
 //! Contract:
-//! - `surreal start --user <u> --pass <p> --bind 127.0.0.1:<port> surrealkv:<absDataPath>`
+//! - `surreal start --user <u> --pass <p> --bind 127.0.0.1:<port> surrealkv://<absDataPath>`
+//!   (SurrealDB 4.0 GitHub binary: bare `start` subcommand, `surrealkv://` scheme)
 //!   with stdout/stderr appended to `surreal.log` beside the ibis executable
 //!   (args are never logged — they contain the password).
 //! - Readiness: TCP dial every 500ms up to 30s; on timeout the process is killed.
@@ -79,7 +80,7 @@ impl ProcessManager {
             ProcessError::Other(format!("failed to get absolute path for data: {e}"))
         })?;
         let bind_addr = format!("127.0.0.1:{port}");
-        let file_arg = format!("surrealkv:{}", abs_data_path.display());
+        let file_arg = format!("surrealkv://{}", abs_data_path.display());
 
         // Layer 3 reconciliation BEFORE spawning: the ledger beside the data
         // file is the binding for this sidecar — orphaned sidecars from hard

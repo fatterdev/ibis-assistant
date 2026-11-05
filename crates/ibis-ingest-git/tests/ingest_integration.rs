@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use common::{init_repo, mock_ingester, MockDb, MockRedmine};
 
 use ibis_db::ids::{format_record_id, sanitize_id};
-use ibis_db::schema::names::{COMMIT, ISSUE, SOURCE_FILE};
+use ibis_db::schema::names::{COMMIT, ISSUE, REPO};
 use ibis_ingest_git::ingest_repo;
 
 #[tokio::test]
@@ -63,11 +63,13 @@ async fn ingest_repo_quoted_paths() {
         .await
         .expect("IngestRepo failed");
 
-    let expected_id = format_record_id(
-        SOURCE_FILE,
-        &format!("{}_{}", sanitize_id("test-repo"), sanitize_id(file_name)),
+    // WQ-7: source_file ids are arrays `[repo, file_path]` (repo-relative
+    // path, sanitized); the clean (unquoted) path is bound and the record id
+    // has no quotes.
+    let expected_id = ibis_db::ids::source_file_id(
+        &format_record_id(REPO, &sanitize_id("test-repo")),
+        file_name,
     );
-    // The clean (unquoted) path is bound, and the record id has no quotes.
     let found = mock_db.entries().iter().any(|(sql, vars)| {
         sql.contains(&format!("UPSERT {expected_id}"))
             && vars

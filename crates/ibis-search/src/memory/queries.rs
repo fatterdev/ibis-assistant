@@ -117,10 +117,15 @@ impl SearchService {
         let mut log_where = vec![
             "hidden != true".to_string(),
             format!("created_at > time::now() - {since}"),
-            "array::len(<-is_type_of<-log_entry) > 0".to_string(),
+            // WQ-7: the materialized back-reference list on the record
+            // replaces the <-is_type_of<-log_entry edge scan.
+            "array::len(is_type_of_edges) > 0".to_string(),
         ];
         let mut log_bindings: Bindings = Vec::new();
         if !project.is_empty() {
+            // Filtered condition: stays a graph traversal (a `[WHERE]` on the
+            // materialized `related_to_edges.*.out` list does not filter on
+            // the linked record's fields — live probe, WQ-7).
             log_where.push(
                 "array::len(->related_to->source_file[WHERE repo_name = $project]) > 0".to_string(),
             );
@@ -137,7 +142,7 @@ impl SearchService {
         }
 
         let sql = format!(
-            "SELECT id, category, stack_trace, template, severity, created_at, array::len(<-is_type_of<-log_entry) AS occurrences, ->related_to.out AS related FROM error_type WHERE {} ORDER BY created_at DESC LIMIT {limit};",
+            "SELECT id, category, stack_trace, template, severity, created_at, array::len(is_type_of_edges) AS occurrences, related_to_edges.*.out AS related FROM error_type WHERE {} ORDER BY created_at DESC LIMIT {limit};",
             log_where.join(" AND ")
         );
         let outcome = db

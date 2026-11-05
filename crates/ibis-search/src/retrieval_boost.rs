@@ -294,7 +294,7 @@ pub(crate) async fn resolve_linked_symbols(
     if names_bind.is_empty() {
         return Vec::new();
     }
-    let ql = "SELECT name FROM symbol WHERE string::lowercase(name) IN $names LIMIT 50;";
+    let ql = "SELECT name FROM symbol WHERE string::lowercase(name) IN $names ORDER BY name LIMIT 50;";
     let mut vars = ibis_db::executor::Vars::new();
     vars.insert("names".into(), Value::from_t(names_bind));
     let Ok(outcome) = db.smart_query(ql, vars).await else {

@@ -141,7 +141,7 @@ impl SurrealValue for I64 {
             return Err(number_conversion_error(&value, "i64"));
         };
         // Validate integrality: floats/decimals must be whole numbers (Q1).
-        let integral = match n {
+        let integral = match &n {
             Number::Int(_) => true,
             other => other.to_f64().map(|f| f.fract() == 0.0).unwrap_or(false),
         };

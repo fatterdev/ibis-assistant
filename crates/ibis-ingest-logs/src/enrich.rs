@@ -379,7 +379,7 @@ async fn resolve_source_path(analyzer: &LogAnalyzer, basename: &str) -> String {
     let slash_base = format!("/{base}");
     let win_base = format!("\\{base}");
     let sql = format!(
-        "SELECT rel_path, path FROM {}\n\t\tWHERE rel_path = $base\n\t\t   OR string::ends_with(rel_path, $slash_base)\n\t\t   OR string::ends_with(path, $slash_base)\n\t\t   OR string::ends_with(path, $win_base)\n\t\tLIMIT 8;",
+        "SELECT rel_path, path FROM {}\n\t\tWHERE rel_path = $base\n\t\t   OR string::ends_with(rel_path, $slash_base)\n\t\t   OR string::ends_with(path, $slash_base)\n\t\t   OR string::ends_with(path, $win_base)\n\t\tORDER BY id\n\t\tLIMIT 8;",
         schema::SOURCE_FILE
     );
     let v: Vars = vars([
@@ -473,7 +473,9 @@ pub(crate) async fn search_code_context(
         }
         let lowered = term.to_lowercase();
         let sql = format!(
-            "SELECT file.rel_path as rel_path, file.path as path, content\n\t\t\tFROM {}\n\t\t\tWHERE string::lowercase(content) CONTAINS $term\n\t\t\tLIMIT 5;",
+            // WQ-7 lexical channel: BM25 on the file_chunk content index
+            // replaces the lowercase-CONTAINS table scan.
+            "SELECT file.rel_path as rel_path, file.path as path, content\n\t\t\tFROM {}\n\t\t\tWHERE content @1@ $term\n\t\t\tORDER BY search::score(1) DESC\n\t\t\tLIMIT 5;",
             schema::FILE_CHUNK
         );
         let Ok(outcome) = db
@@ -504,7 +506,7 @@ pub(crate) async fn search_code_context(
             continue;
         }
         let sql = format!(
-            "SELECT source_file, source_line, format_string\n\t\t\tFROM {}\n\t\t\tWHERE string::lowercase(format_string) CONTAINS string::lowercase($term)\n\t\t\tLIMIT 3;",
+            "SELECT source_file, source_line, format_string\n\t\t\tFROM {}\n\t\t\tWHERE string::lowercase(format_string) CONTAINS string::lowercase($term)\n\t\t\tORDER BY id\n\t\t\tLIMIT 3;",
             schema::LOG_TEMPLATE
         );
         let Ok(outcome) = db.smart_query(&sql, vars([("term", term.as_str())])).await else {
@@ -673,7 +675,7 @@ pub(crate) async fn resolve_baseline(analyzer: &LogAnalyzer) -> TemporalBaseline
     if let (Some(db), true) = (&analyzer.db, !analyzer.project.is_empty()) {
         let repo_id = format_record_id(schema::REPO, &sanitize_id(&analyzer.project));
         let sql = format!(
-            "SELECT name,\n\t\t\t\t->{contains}->{branch}.name as branches,\n\t\t\t\t->{contains}->{branch}->{pointed_to}->{commit}.hash as tip_hashes\n\t\t\tFROM {repo_id} LIMIT 1;",
+            "SELECT name,\n\t\t\t\t->{contains}->{branch}.name as branches,\n\t\t\t\t->{contains}->{branch}->{pointed_to}->{commit}.hash as tip_hashes\n\t\t\tFROM {repo_id}\n\t\t\tORDER BY id LIMIT 1;",
             contains = schema::CONTAINS,
             branch = schema::BRANCH,
             pointed_to = schema::POINTED_TO,

@@ -17,7 +17,7 @@ pub(crate) async fn lookup_current_file_hash_by_path(
     path: &str,
 ) -> Result<(String, bool)> {
     let db = service.require_db()?;
-    let sql_head = "SELECT hash FROM source_file WHERE (path = $path OR rel_path = $path) AND is_head = true LIMIT 1;";
+    let sql_head = "SELECT hash FROM source_file WHERE (path = $path OR rel_path = $path) AND is_head = true ORDER BY id LIMIT 1;";
     let mut vars = ibis_db::executor::Vars::new();
     vars.insert("path".into(), ibis_db::value::Value::from_t(path));
     let outcome = db

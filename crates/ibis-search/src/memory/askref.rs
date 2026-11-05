@@ -66,7 +66,7 @@ impl SearchService {
             .record_embedding_usage("system:search_vector", query)
             .await;
 
-        let score_expr = crate::search::ask_score_expr();
+        let window = self.candidate_window.max(crate::search::VECTOR_CHANNEL_LIMIT);
         let trusted_actor = actor_ctx.resolve_trusted_actor(actor);
         let mut results: Vec<SearchResult> = Vec::with_capacity(15);
 
@@ -86,13 +86,14 @@ impl SearchService {
             ));
         }
         let sql = format!(
-            "SELECT id, content, status, kind, visibility, owner, introduced_in_oid, invalidated_at_oid, {score_expr} as score FROM memory WHERE {claims_where} ORDER BY score DESC LIMIT 15;"
+            "SELECT id, content, status, kind, visibility, owner, introduced_in_oid, invalidated_at_oid, duration::days(time::now() - created_at) as age_days, vector::similarity::cosine(embedding, $vec) as score FROM memory WHERE {claims_where} ORDER BY vector::distance::cosine(embedding, $vec) LIMIT {window};"
         );
         claims_vars.insert("vec".into(), crate::commit_meaning::vec_value(&vec));
         let outcome = db
             .smart_query(&sql, claims_vars)
             .await
             .map_err(|e| SearchError::other(format!("vector search failed on memory: {e}")))?;
+        let mut claim_rows: Vec<SearchResult> = Vec::new();
         for row in rows::object_rows(&rows::normalize_rows(&outcome).unwrap_or_default()) {
             let introduced_in = rows::scalar_string(rows::field(row, "introduced_in_oid"))
                 .trim()
@@ -115,10 +116,13 @@ impl SearchService {
             if visibility == "personal" && owner != trusted_actor {
                 continue;
             }
-            results.push(SearchResult {
+            claim_rows.push(SearchResult {
                 id: rows::record_id(rows::field(row, "id")),
                 content: rows::scalar_string(rows::field(row, "content")),
-                score: row_score(rows::field(row, "score")),
+                score: crate::search::apply_temporal_decay(
+                    row_score(rows::field(row, "score")),
+                    rows::numeric_float_opt(rows::field(row, "age_days")),
+                ),
                 is_current: false,
                 source_kind: super::TABLE_MEMORY.to_string(),
                 status: rows::scalar_string(rows::field(row, "status")),
@@ -128,6 +132,8 @@ impl SearchService {
                 ..Default::default()
             });
         }
+        claim_rows.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.extend(claim_rows);
 
         // Claim store 4d union: tree(ref) claim files join the claims
         // channel — catches git-owned claims whose rows lack embeddings;
@@ -138,12 +144,13 @@ impl SearchService {
             .await?;
 
         // Δ commit_chunk channel: changelog hits reachable from R only.
-        let sql = crate::commit_meaning::commit_chunk_ask_query();
+        let sql = crate::commit_meaning::commit_chunk_ask_query(window);
         let mut vars = ibis_db::executor::Vars::new();
         vars.insert("vec".into(), crate::commit_meaning::vec_value(&vec));
         let outcome = db.smart_query(&sql, vars).await.map_err(|e| {
             SearchError::other(format!("vector search failed on commit_chunk: {e}"))
         })?;
+        let mut commit_rows: Vec<SearchResult> = Vec::new();
         for row in rows::object_rows(&rows::normalize_rows(&outcome).unwrap_or_default()) {
             let commit_hash = rows::scalar_string(rows::field(row, "commit_hash"))
                 .trim()
@@ -153,12 +160,15 @@ impl SearchService {
                 // as_of ask.
                 continue;
             }
-            results.push(SearchResult {
+            commit_rows.push(SearchResult {
                 id: rows::record_id(rows::field(row, "id")),
                 content: crate::commit_meaning::truncate_commit_meaning(&rows::scalar_string(
                     rows::field(row, "content"),
                 )),
-                score: row_score(rows::field(row, "score")),
+                score: crate::search::apply_temporal_decay(
+                    row_score(rows::field(row, "score")),
+                    rows::numeric_float_opt(rows::field(row, "age_days")),
+                ),
                 is_current: false,
                 source_kind: "commit_chunk".to_string(),
                 commit_hash,
@@ -167,10 +177,12 @@ impl SearchService {
                 ..Default::default()
             });
         }
+        commit_rows.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.extend(commit_rows);
 
         // Reasoning channel: HEAD-contract utility signal (not git-bound).
         let sql = format!(
-            "SELECT id, NONE as path, string::concat(question OR '', '\n', outcome OR '') as content, NONE as hash, NONE as current_hash, {score_expr} as score FROM reasoning WHERE embedding != NONE ORDER BY score DESC LIMIT 15;"
+            "SELECT id, NONE as path, string::concat(question OR '', '\n', outcome OR '') as content, NONE as hash, NONE as current_hash, NONE as age_days, vector::similarity::cosine(embedding, $vec) as score FROM reasoning WHERE embedding != NONE ORDER BY vector::distance::cosine(embedding, $vec) LIMIT {window};"
         );
         let mut vars = ibis_db::executor::Vars::new();
         vars.insert("vec".into(), crate::commit_meaning::vec_value(&vec));
@@ -178,11 +190,15 @@ impl SearchService {
             .smart_query(&sql, vars)
             .await
             .map_err(|e| SearchError::other(format!("vector search failed on reasoning: {e}")))?;
+        let mut reasoning_rows: Vec<SearchResult> = Vec::new();
         for row in rows::object_rows(&rows::normalize_rows(&outcome).unwrap_or_default()) {
-            results.push(SearchResult {
+            reasoning_rows.push(SearchResult {
                 id: rows::record_id(rows::field(row, "id")),
                 content: rows::scalar_string(rows::field(row, "content")),
-                score: row_score(rows::field(row, "score")),
+                score: crate::search::apply_temporal_decay(
+                    row_score(rows::field(row, "score")),
+                    rows::numeric_float_opt(rows::field(row, "age_days")),
+                ),
                 is_current: true,
                 source_kind: "reasoning".to_string(),
                 as_of_ref: ancestors.ref_oid().to_string(),
@@ -190,6 +206,8 @@ impl SearchService {
                 ..Default::default()
             });
         }
+        reasoning_rows.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.extend(reasoning_rows);
 
         // Code channel (phase 3d): honest hybrid — HEAD embeddings ∩ tree(R)
         // paths, bodies replaced by bytes at R via git show

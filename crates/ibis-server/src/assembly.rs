@@ -485,7 +485,9 @@ impl ibis_ai::ChunkStore for DbChunkStore {
         limit: usize,
     ) -> Result<Vec<ibis_ai::PendingChunkRow>, ibis_ai::AiError> {
         let sql = format!(
-            "SELECT id, content FROM {table} WHERE batch_status = 'pending' LIMIT {limit};"
+            // 4.0: LIMIT without ORDER BY returns an arbitrary subset of a
+            // split scan — the batch order is `id` (WQ-7).
+            "SELECT id, content FROM {table} WHERE batch_status = 'pending' ORDER BY id LIMIT {limit};"
         );
         let outcome = self
             .0
@@ -511,7 +513,7 @@ impl ibis_ai::ChunkStore for DbChunkStore {
         limit: usize,
     ) -> Result<Vec<ibis_ai::PendingCommitRow>, ibis_ai::AiError> {
         let sql = format!(
-            "SELECT id, hash, date, repo.name as repo_name, message FROM commit WHERE batch_status = 'pending' LIMIT {limit};"
+            "SELECT id, hash, date, repo.name as repo_name, message FROM commit WHERE batch_status = 'pending' ORDER BY id LIMIT {limit};"
         );
         let outcome = self
             .0
@@ -757,7 +759,7 @@ mod tests {
             ),
             ("content", Value::String("chunk body".into())),
         ]);
-        let sql = "SELECT id, content FROM file_chunk WHERE batch_status = 'pending' LIMIT 100;";
+        let sql = "SELECT id, content FROM file_chunk WHERE batch_status = 'pending' ORDER BY id LIMIT 100;";
         let rows = ibis_db::value::decode_row_list::<IdContentRow>(&raw, sql).expect("decode");
         assert_eq!(rows.len(), 1);
         let row = &rows[0];
@@ -789,7 +791,7 @@ mod tests {
             ("message", Value::String("feat: x".into())),
         ]);
         let sql = "SELECT id, hash, date, repo.name as repo_name, message FROM commit \
-                   WHERE batch_status = 'pending' LIMIT 100;";
+                   WHERE batch_status = 'pending' ORDER BY id LIMIT 100;";
         let rows = ibis_db::value::decode_row_list::<CommitRow>(&raw, sql).expect("decode");
         assert_eq!(rows.len(), 1);
         let row = &rows[0];

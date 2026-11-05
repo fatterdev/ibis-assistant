@@ -53,7 +53,7 @@ base64.workspace = true
 # Row decoding + typed datetime bindings (SurrealValue derive expands
 # `surrealdb::` paths, so the crate must be in scope — same pattern as
 # ibis-db).
-surrealdb = { version = "3.3.4", features = ["protocol-ws"] }
+surrealdb = { version = "4.0.0", features = ["protocol-ws"] }
 
 # Windows SCM service lifecycle (D10)
 windows-service = "0.8"

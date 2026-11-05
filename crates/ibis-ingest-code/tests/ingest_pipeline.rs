@@ -22,7 +22,8 @@ use ibis_core::config::Config;
 use ibis_db::error::DbError;
 use ibis_db::executor::{Executor, QueryOutcome, Vars};
 use ibis_db::ids::{format_record_id, sanitize_id};
-use ibis_db::value::{Object, RecordId, SurrealValue, Value};
+use ibis_db::value::{Object, RecordId, RecordIdKey, SurrealValue, Value};
+use surrealdb::types::Array;
 use ibis_ingest_code::{ingest_codebase, CodeAIClient, ProgressCallback};
 
 // --- fakes ( MockDB / MockAI) ---
@@ -147,15 +148,14 @@ fn temp_repo(name: &str) -> PathBuf {
 }
 
 /// True when some captured statement looks like the file record UPSERT for
-/// `rel_path` ( wasProcessed helper).
+/// `rel_path` ( wasProcessed helper). WQ-7: source_file ids are arrays
+/// `[repo, file_path]` — built with the ingest's own helper.
 fn was_processed(calls: &[String], tmp_dir: &Path, abs: &Path) -> bool {
     let rel = abs.strip_prefix(tmp_dir).unwrap().to_string_lossy();
-    let needle = format!(
-        "source_file:⟨{}_{}",
-        sanitize_id("test-repo"),
-        sanitize_id(&rel)
-    );
-    calls.iter().any(|sql| sql.contains(&needle))
+    let repo_ref = format_record_id("repo", &sanitize_id("test-repo"));
+    let needle_prefix = ibis_db::ids::source_file_id(&repo_ref, &rel);
+    let needle = needle_prefix.trim_end_matches(']');
+    calls.iter().any(|sql| sql.contains(needle))
 }
 
 #[test]
@@ -175,14 +175,11 @@ fn ingest_codebase_delta() {
     std::fs::write(&file_path, "package main\nfunc main() {}").unwrap();
 
     let expected_hash = file_hash_of(&file_path);
-    let file_id = format_record_id(
-        "source_file",
-        &format!(
-            "{}_{}_{}",
-            sanitize_id("test-repo"),
-            sanitize_id("main.go"),
-            expected_hash
-        ),
+    // WQ-7: source_file ids are arrays `[repo, file_path]` (no hash suffix),
+    // built with the ingest's own helper.
+    let file_id = ibis_db::ids::source_file_id(
+        &format_record_id("repo", &sanitize_id("test-repo")),
+        "main.go",
     );
     let cfg = Config::default();
 
@@ -213,7 +210,7 @@ fn ingest_codebase_delta() {
             mock_db
                 .calls()
                 .iter()
-                .any(|sql| sql.contains("UPSERT file_chunk:⟨") && sql.contains("batch_status='pending'")),
+                .any(|sql| sql.contains("UPSERT file_chunk:[") && sql.contains("batch_status='pending'")),
             "expected CREATE file_chunk statement with batch_status='pending', but not found. Calls: {:?}",
             mock_db.calls()
         );
@@ -298,17 +295,32 @@ fn ingest_codebase_pruning() {
         .unwrap()
         .to_string_lossy()
         .into_owned();
-    let ignored_id = format_record_id(
-        "source_file",
-        &format!("{}_{}", sanitize_id("test-repo"), sanitize_id(&ignored_rel)),
+    // WQ-7: source_file ids are arrays `[repo, file_path]`; the mock returns
+    // decoded RecordId values (the live CBOR path), and the DELETE lists use
+    // the canonical `to_sql` rendering (bare repo key, quoted path).
+    let source_file_value = |rel: &str| {
+        Value::RecordId(RecordId::new(
+            "source_file",
+            RecordIdKey::Array(Array::from(vec![
+                Value::RecordId(RecordId::new("repo", sanitize_id("test-repo"))),
+                Value::String(sanitize_id(rel)),
+            ])),
+        ))
+    };
+    let ignored_id = format!(
+        "source_file:[repo:{}, '{}']",
+        sanitize_id("test-repo"),
+        sanitize_id(&ignored_rel)
     );
-    let deleted_id = format_record_id(
-        "source_file",
-        &format!("{}_{}", sanitize_id("test-repo"), sanitize_id("gone.go")),
+    let deleted_id = format!(
+        "source_file:[repo:{}, '{}']",
+        sanitize_id("test-repo"),
+        sanitize_id("gone.go")
     );
-    let existing_id = format_record_id(
-        "source_file",
-        &format!("{}_{}", sanitize_id("test-repo"), sanitize_id("main.go")),
+    let existing_id = format!(
+        "source_file:[repo:{}, '{}']",
+        sanitize_id("test-repo"),
+        sanitize_id("main.go")
     );
 
     let deleted_file: PathBuf = tmp_dir.join("gone.go"); // not on disk
@@ -316,15 +328,15 @@ fn ingest_codebase_pruning() {
         "SELECT id, path FROM source_file",
         rows(vec![
             obj([
-                ("id", string_row(&ignored_id)),
+                ("id", source_file_value(&ignored_rel)),
                 ("path", string_row(&ignored_file.to_string_lossy())),
             ]),
             obj([
-                ("id", string_row(&deleted_id)),
+                ("id", source_file_value("gone.go")),
                 ("path", string_row(&deleted_file.to_string_lossy())),
             ]),
             obj([
-                ("id", string_row(&existing_id)),
+                ("id", source_file_value("main.go")),
                 ("path", string_row(&existing_file.to_string_lossy())),
             ]),
         ]),
@@ -372,7 +384,7 @@ fn ingest_codebase_versioning() {
 
     let has_queue_call = |db: &MockDb| {
         db.calls().iter().any(|sql| {
-            sql.contains("UPSERT file_chunk:⟨") && sql.contains("batch_status='pending'")
+            sql.contains("UPSERT file_chunk:[") && sql.contains("batch_status='pending'")
         })
     };
 
@@ -400,7 +412,7 @@ fn ingest_codebase_versioning() {
     run("version1", mock_db.clone());
     for sql in mock_db.calls() {
         assert!(
-            !(sql.contains("UPSERT file_chunk:⟨") && sql.contains("batch_status='pending'")),
+            !(sql.contains("UPSERT file_chunk:[") && sql.contains("batch_status='pending'")),
             "expected 0 queuing calls for returning to V1 (cache hit), got call: {sql}"
         );
     }

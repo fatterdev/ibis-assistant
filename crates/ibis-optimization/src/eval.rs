@@ -516,12 +516,22 @@ pub async fn seed_golden_estate(
 
     let mut rows = 0usize;
 
+    // WQ-7: source_file/file_chunk ids are arrays (`[repo, file_path]`,
+    // `[file_id, line]`); the golden repo component is `repo:⟨golden⟩` and
+    // each file seeds one chunk at line 0. The dataset expected ids reference
+    // exactly these generated strings.
+    let golden_repo_ref = ibis_db::ids::format_record_id(
+        ibis_db::schema::names::REPO,
+        &ibis_db::ids::sanitize_id("golden"),
+    );
+
     for f in GOLDEN_FILES {
-        let sf_id = f.id.replacen("g_fc_", "g_sf_", 1);
+        let sf_id = ibis_db::ids::source_file_id(&golden_repo_ref, f.path);
+        let chunk_id = ibis_db::ids::file_chunk_id(&sf_id, 0);
         let emb = embed_of(ai, f.content).await?;
         db.smart_query(
             &format!(
-                "CREATE source_file:⟨{sf_id}⟩ SET path = $path, rel_path = $path, \
+                "CREATE {sf_id} SET path = $path, rel_path = $path, \
                  hash = $hash, is_head = true;"
             ),
             vars_of(vec![
@@ -530,13 +540,11 @@ pub async fn seed_golden_estate(
             ]),
         )
         .await
-        .map_err(|e| format!("seed {sf_id}: {e}"))?;
+        .map_err(|e| format!("seed {}: {e}", sf_id))?;
         db.smart_query(
             &format!(
-                "CREATE file_chunk:⟨{id}⟩ SET file = source_file:⟨{sf_id}⟩, \
-                 content = $content, hash = $hash, embedding = $embedding;",
-                id = f.id,
-                sf_id = sf_id
+                "CREATE {chunk_id} SET file = {sf_id}, \
+                 content = $content, hash = $hash, start_line = 0, embedding = $embedding;"
             ),
             vars_of(vec![
                 ("content", Value::from_t(f.content)),
@@ -545,7 +553,7 @@ pub async fn seed_golden_estate(
             ]),
         )
         .await
-        .map_err(|e| format!("seed {}: {e}", f.id))?;
+        .map_err(|e| format!("seed {chunk_id}: {e}"))?;
         rows += 2;
     }
 
@@ -1008,7 +1016,9 @@ mod tests {
             );
         }
         for id in [
-            "CREATE file_chunk:⟨g_fc_price⟩",
+            // WQ-7: file_chunk seeds use the array id `[file_id, line]`
+            // (seed literal form — the golden repo component stays wrapped).
+            "CREATE file_chunk:[source_file:[repo:⟨golden⟩, 'src_billing_price_calculator_rs'], 0]",
             "CREATE memory:⟨g_mem_mathmax⟩",
             "CREATE commit_chunk:⟨g_cc_rrf⟩",
             "CREATE reasoning:⟨g_r_decay⟩",

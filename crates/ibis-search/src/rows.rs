@@ -76,6 +76,15 @@ pub fn numeric_float(value: &Value) -> f64 {
     }
 }
 
+/// Optional float (NONE/NULL/absent → None) — e.g. the `age_days` decay
+/// anchor projected by the vector channels (WQ-7).
+pub fn numeric_float_opt(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(n) => n.to_f64(),
+        _ => None,
+    }
+}
+
 /// `stringSlice: array-of-strings → Vec (other shapes → empty).
 pub fn string_slice(value: &Value) -> Vec<String> {
     match value {

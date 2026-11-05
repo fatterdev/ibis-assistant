@@ -3,7 +3,14 @@
 //! Semantics are implemented verbatim:
 //! - [`format_record_id`] — angle-bracket wrapping for SurrealDB 3.0 compat,
 //!   skipping re-wrap, with the numeric-ID exception on the `issue` table (Q4/Q5).
-//! - [`is_safe_record_id`] — single record reference safe to interpolate.
+//! - [`source_file_id`] / [`file_chunk_id`] — canonical **array record ids**
+//!   for the composite keys (WQ-7, SurrealDB 4 named id parts): the repo key
+//!   reuses the `⟨⟩`-wrapped scalar form (which 4.0 still parses as a string
+//!   key) and the path element is a quoted string. These ids interpolate
+//!   safely because every component is sanitized first.
+//! - [`is_safe_record_id`] — single record reference safe to interpolate,
+//!   including the canonical array-id forms produced above and their decoded
+//!   renderings.
 //! - [`sanitize_id`] — safe record-ID suffix.
 //! - [`escape_sql`] — legacy string-literal escaping (F-002: only for
 //!   identifiers/internal use; all content-bearing queries must use bound
@@ -12,13 +19,29 @@
 
 use surrealdb::types::{RecordId, RecordIdKey, ToSql, Value};
 
+use crate::schema::names::REPO;
+
 /// Characters that make a record ID unsafe to interpolate.
 const UNSAFE_ID_CHARS: [char; 8] = [';', '\n', '\r', '\t', ' ', '\'', '"', '\\'];
 
+/// Maximum nesting depth accepted by the array-id validator.
+const MAX_ARRAY_ID_DEPTH: usize = 3;
+
 /// Reports whether `id` is a single Surreal record reference safe to interpolate.
 pub fn is_safe_record_id(id: &str) -> bool {
+    is_safe_record_id_depth(id, 0)
+}
+
+fn is_safe_record_id_depth(id: &str, depth: usize) -> bool {
+    if depth > MAX_ARRAY_ID_DEPTH {
+        return false;
+    }
     let id = id.trim();
-    if id.is_empty() || id.chars().any(|c| UNSAFE_ID_CHARS.contains(&c)) {
+    if id.is_empty()
+        || id
+            .chars()
+            .any(|c| matches!(c, ';' | '\n' | '\r' | '\t' | '\\'))
+    {
         return false;
     }
     let Some((table, key)) = id.split_once(':') else {
@@ -27,7 +50,86 @@ pub fn is_safe_record_id(id: &str) -> bool {
     if table.is_empty() || key.is_empty() {
         return false;
     }
-    safe_record_id_table().is_match(table) && safe_record_id_key().is_match(key)
+    if !safe_record_id_table().is_match(table) {
+        return false;
+    }
+    let key = key.trim();
+    // Array record id (WQ-7 composite keys): components carry their own
+    // quoting/spacing rules, validated structurally.
+    if key.starts_with('[') && key.ends_with(']') {
+        return is_safe_array_key(key, depth + 1);
+    }
+    if key.chars().any(|c| UNSAFE_ID_CHARS.contains(&c)) {
+        return false;
+    }
+    safe_record_id_key().is_match(key)
+}
+
+/// Validates the inside of a canonical array record id (`[repo:⟨r⟩, 'p', 42]`).
+fn is_safe_array_key(key: &str, depth: usize) -> bool {
+    let inner = &key[1..key.len() - 1];
+    if inner.trim().is_empty() {
+        return false;
+    }
+    let mut parts: Vec<&str> = Vec::new();
+    let mut bracket = 0usize;
+    let mut in_string = false;
+    let mut start = 0usize;
+    for (i, c) in inner.char_indices() {
+        match c {
+            '\'' => in_string = !in_string,
+            '[' if !in_string => bracket += 1,
+            ']' if !in_string => bracket = bracket.saturating_sub(1),
+            ',' if !in_string && bracket == 0 => {
+                parts.push(&inner[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&inner[start..]);
+    for part in parts {
+        let part = part.trim();
+        if part.is_empty() {
+            return false;
+        }
+        if part.len() >= 2 && part.starts_with('\'') && part.ends_with('\'') {
+            // Quoted string component: only sanitized characters.
+            if !part[1..part.len() - 1]
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+            {
+                return false;
+            }
+        } else if !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()) {
+            // Integer component.
+        } else if !is_safe_record_id_depth(part, depth) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Canonical array record id for a `source_file` row: `[repo, file_path]`.
+///
+/// The `file_path` component is the **repo-relative path, sanitized** — git
+/// ingest and code ingest both call this, so their rows unify. `repo_ref` is
+/// either the repo record id (`repo:⟨name⟩`) or the raw repo name.
+pub fn source_file_id(repo_ref: &str, path: &str) -> String {
+    let repo_component = if repo_ref.contains(':') {
+        repo_ref.trim().to_string()
+    } else {
+        format_record_id(REPO, &sanitize_id(repo_ref))
+    };
+    format!("source_file:[{}, '{}']", repo_component, sanitize_id(path))
+}
+
+/// Canonical array record id for a `file_chunk` row: `[file_id, line]`.
+///
+/// `file_ref` must be the canonical [`source_file_id`] string; `line` is the
+/// chunk's `start_line`.
+pub fn file_chunk_id(file_ref: &str, line: i64) -> String {
+    format!("file_chunk:[{}, {}]", file_ref.trim(), line)
 }
 
 /// Returns a SurrealDB record ID formatted with angled brackets for v3.0 compatibility.
@@ -62,10 +164,12 @@ pub fn format_record_id(table: &str, id: &str) -> String {
 }
 
 /// Formats a decoded [`RecordId`] into the project-canonical interpolated form
-/// (angle-bracket wrap + numeric exception).
+/// (angle-bracket wrap + numeric exception; array keys render through `to_sql`,
+/// which yields the canonical `[component, …]` literal).
 pub fn format_record(record: &RecordId) -> String {
     match &record.key {
         RecordIdKey::Number(n) => format!("{}:{n}", record.table),
+        RecordIdKey::Array(arr) => format!("{}:{}", record.table, arr.to_sql()),
         RecordIdKey::String(s) => format_record_id(record.table.as_str(), s),
         other => format_record_id(record.table.as_str(), &other.to_sql()),
     }
@@ -187,6 +291,7 @@ fn coerce_record_id_map(map: &surrealdb::types::Object) -> String {
 pub fn record_id_to_plain(record: &RecordId) -> String {
     match &record.key {
         RecordIdKey::Number(n) => format!("{}:{n}", record.table),
+        RecordIdKey::Array(arr) => format!("{}:{}", record.table, arr.to_sql()),
         RecordIdKey::String(s) => format!("{}:{s}", record.table),
         other => format!("{}:{}", record.table, other.to_sql()),
     }
@@ -203,10 +308,13 @@ fn safe_record_id_table() -> &'static regex::Regex {
     RE.get_or_init(|| regex::Regex::new("^[a-z][a-z0-9_]*$").expect("static regex"))
 }
 
-// safeRecordIDKey matches the ID segment (optionally angle-bracket wrapped).
+// safeRecordIDKey matches the ID segment (optionally angle-bracket or
+// backtick wrapped — 4.0 renders wrapped keys with backticks).
 fn safe_record_id_key() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    RE.get_or_init(|| regex::Regex::new("^(?:⟨)?[a-zA-Z0-9_.-]+(?:⟩)?$").expect("static regex"))
+    RE.get_or_init(|| {
+        regex::Regex::new("^(?:⟨)?[a-zA-Z0-9_.-]+(?:⟩)?$|^`[^`]*`$").expect("static regex")
+    })
 }
 
 #[cfg(test)]
@@ -345,6 +453,51 @@ mod tests {
         assert_eq!(format_record(&angled), "memory:⟨ws_abc⟩");
         let numeric = RecordId::new("issue", RecordIdKey::Number(42));
         assert_eq!(format_record(&numeric), "issue:42");
+    }
+
+    #[test]
+    fn test_source_file_id_and_file_chunk_id() {
+        let fid = source_file_id("repo:⟨alpha⟩", "src/Main.rs");
+        assert_eq!(fid, "source_file:[repo:⟨alpha⟩, 'src_main_rs']");
+        // Bare repo name wraps like any scalar id.
+        assert_eq!(
+            source_file_id("Alpha", "src/Main.rs"),
+            "source_file:[repo:⟨alpha⟩, 'src_main_rs']"
+        );
+        let cid = file_chunk_id(&fid, 42);
+        assert_eq!(
+            cid,
+            "file_chunk:[source_file:[repo:⟨alpha⟩, 'src_main_rs'], 42]"
+        );
+    }
+
+    #[test]
+    fn test_is_safe_record_id_array_forms() {
+        let ok = [
+            "source_file:[repo:⟨alpha⟩, 'src_main_rs']",
+            "file_chunk:[source_file:[repo:⟨alpha⟩, 'src_main_rs'], 42]",
+            "source_file:[repo:alpha, 'x']",
+            "file_chunk:[source_file:[repo:⟨alpha⟩, 'src_main_rs'], 0]",
+        ];
+        let bad = [
+            "source_file:[repo:⟨alpha⟩, 'has space']",
+            "source_file:[repo:⟨a⟩, 'x'; DELETE repo]",
+            "file_chunk:[source_file:[repo:⟨alpha⟩, 'x'], 42",
+            "source_file:[repo:⟨alpha⟩, 'x',]",
+            "source_file:[repo:`a`, 'x'] DROP",
+        ];
+        for id in ok {
+            assert!(is_safe_record_id(id), "safe({id:?}) = false; want true");
+        }
+        for id in bad {
+            assert!(!is_safe_record_id(id), "safe({id:?}) = true; want false");
+        }
+    }
+
+    #[test]
+    fn test_is_safe_record_id_backtick_keys() {
+        assert!(is_safe_record_id("repo:`123`"));
+        assert!(!is_safe_record_id("repo:`1` DROP"));
     }
 
     fn obj_value(pairs: impl IntoIterator<Item = (&'static str, Value)>) -> Value {

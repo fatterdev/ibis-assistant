@@ -686,15 +686,12 @@ impl crate::search::SearchService {
             }
         }
 
-        // Wider candidate pool so keyword/entity re-ranking can surface
-        // lexical matches just outside the pure vector top-K. Never below the
-        // caller's limit: `clamp(limit, 45)` panics with min > max when the
-        // requested limit exceeds the cap (regression: limit=50 from the IDE
-        // tree view killed the handler task and hung the tool call).
+        // WQ-7: the fetch is a candidate window ranked by the DiskANN index; the
+        // keyword/entity re-ranking rescores inside the window.
         let fetch_limit = (limit * 3).min(45).max(limit);
 
         let sql = format!(
-            "SELECT id, kind, title, string::slice(content, 0, {MEMORY_SEARCH_SUMMARY_RUNES}) AS content, status, confidence, visibility, owner, tags, branch, valid_from, valid_until, created_at, updated_at, vector::similarity::cosine(embedding, $vec) AS score FROM memory WHERE {} ORDER BY score DESC LIMIT {fetch_limit};",
+            "SELECT id, kind, title, string::slice(content, 0, {MEMORY_SEARCH_SUMMARY_RUNES}) AS content, status, confidence, visibility, owner, tags, branch, valid_from, valid_until, created_at, updated_at, vector::similarity::cosine(embedding, $vec) AS score FROM memory WHERE {} ORDER BY vector::distance::cosine(embedding, $vec) LIMIT {fetch_limit};",
             where_parts.join(" AND ")
         );
         bindings.push(("vec".into(), crate::commit_meaning::vec_value_f32(&vector)));
@@ -985,7 +982,9 @@ impl crate::search::SearchService {
             ibis_db::value::Value::from_t(lowered.as_str()),
         );
         let sql = format!(
-            "SELECT id FROM memory WHERE ({vis_filter}) AND (string::contains(string::lowercase(title OR ''), $subject) OR string::contains(string::lowercase(content), $subject)) ORDER BY updated_at DESC LIMIT 1;"
+            // WQ-7 lexical channel: BM25 on the content index replaces the
+            // `string::contains` scan; best-ranked match wins.
+            "SELECT id FROM memory WHERE ({vis_filter}) AND content @1@ $subject ORDER BY search::score(1) DESC LIMIT 1;"
         );
         let outcome = db
             .smart_query(&sql, bindings)

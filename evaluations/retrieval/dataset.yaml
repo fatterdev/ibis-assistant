@@ -2,15 +2,15 @@ version: "1"
 cases:
   - id: r01_price_discounts
     query: "where are volume discounts applied to invoice totals?"
-    expected_ids: ["file_chunk:g_fc_price"]
+    expected_ids: ["file_chunk:[source_file:[repo:golden, 'src_billing_price_calculator_rs'], 0]"]
     note: "code channel; seed dal task T2 (convenzioni pricing) di fixture-tasks.md"
   - id: r02_sidecar_kill
     query: "what kills the sidecar children when the parent process exits?"
-    expected_ids: ["file_chunk:g_fc_sidecar"]
+    expected_ids: ["file_chunk:[source_file:[repo:golden, 'crates_ibis_core_src_process_tree_rs'], 0]"]
     note: "code channel; scenario sidecar-lifecycle (job object)"
   - id: r03_eval_metrics
     query: "which module computes MRR and recall over the golden dataset?"
-    expected_ids: ["file_chunk:g_fc_eval"]
+    expected_ids: ["file_chunk:[source_file:[repo:golden, 'crates_ibis_optimization_src_eval_rs'], 0]"]
     note: "code channel; auto-riferimento A1"
   - id: r04_mcp_timeout
     query: "what is the MCP response timeout during plugin store init?"
@@ -42,9 +42,9 @@ cases:
     note: "reasoning channel; outcome salvato (time decay 0.3)"
   - id: r11_multi_eval_rrf
     query: "how is retrieval quality measured and which ranking change improves it?"
-    expected_ids: ["file_chunk:g_fc_eval", "commit_chunk:g_cc_rrf"]
+    expected_ids: ["file_chunk:[source_file:[repo:golden, 'crates_ibis_optimization_src_eval_rs'], 0]", "commit_chunk:g_cc_rrf"]
     note: "multi-expected su canali code+commit"
   - id: r12_multi_sidecar
     query: "sidecar lifecycle guarantees and spawn constraints"
-    expected_ids: ["file_chunk:g_fc_sidecar", "memory:g_mem_spawn_thread"]
+    expected_ids: ["file_chunk:[source_file:[repo:golden, 'crates_ibis_core_src_process_tree_rs'], 0]", "memory:g_mem_spawn_thread"]
     note: "multi-expected su canali code+memory"

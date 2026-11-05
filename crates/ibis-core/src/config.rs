@@ -54,12 +54,17 @@ pub struct SearchConfig {
     /// additive with a warning.
     #[serde(rename = "fusion")]
     pub fusion: String,
+    /// Candidate window (WQ-7): per-channel fetch size above the final 15-hit
+    /// cut, shared by the temporal rescore and the future A3 reranker.
+    #[serde(rename = "candidates")]
+    pub candidates: u32,
 }
 
 impl Default for SearchConfig {
     fn default() -> Self {
         SearchConfig {
             fusion: "additive".to_string(),
+            candidates: 50,
         }
     }
 }

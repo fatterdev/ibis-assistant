@@ -334,7 +334,7 @@ impl Optimizer {
             ));
         }
         let query = format!(
-            "SELECT id, kind, title, content, visibility, owner, vector::similarity::cosine(embedding, $obs_embedding) AS score FROM memory WHERE {} ORDER BY score DESC LIMIT 3;",
+            "SELECT id, kind, title, content, visibility, owner, vector::similarity::cosine(embedding, $obs_embedding) AS score FROM memory WHERE {} ORDER BY vector::distance::cosine(embedding, $obs_embedding) LIMIT 3;",
             where_parts.join(" AND ")
         );
         let mut vars = bindings;

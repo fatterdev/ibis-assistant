@@ -177,7 +177,7 @@ impl SearchService {
         let db = self.require_db()?;
         let lowered = arg.to_lowercase();
         let sql =
-            "SELECT id FROM workstream WHERE string::lowercase(name OR '') = $ws_name LIMIT 1;";
+            "SELECT id FROM workstream WHERE string::lowercase(name OR '') = $ws_name ORDER BY id LIMIT 1;";
         let outcome = db
             .smart_query(
                 sql,

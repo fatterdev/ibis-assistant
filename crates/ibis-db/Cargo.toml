@@ -16,7 +16,7 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-surrealdb = { version = "3.3.4", features = ["protocol-ws"] }
+surrealdb = { version = "4.0.0", features = ["protocol-ws"] }
 tar = "0.4"
 thiserror.workspace = true
 tokio.workspace = true

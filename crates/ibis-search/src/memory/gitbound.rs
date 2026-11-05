@@ -86,7 +86,7 @@ impl SearchService {
             }
         }
         let db = self.require_db()?;
-        let sql = "SELECT id FROM commit WHERE hash = $oid LIMIT 1;";
+        let sql = "SELECT id FROM commit WHERE hash = $oid ORDER BY id LIMIT 1;";
         let mut vars = ibis_db::executor::Vars::new();
         vars.insert("oid".into(), Value::from_t(oid));
         let outcome = db

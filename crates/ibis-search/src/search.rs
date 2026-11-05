@@ -29,8 +29,14 @@ use crate::retrieval_boost::{
 use crate::rows;
 use crate::ActorContext;
 
-/// Per-table hit budget for the vector channels.
-pub(crate) const VECTOR_CHANNEL_LIMIT: usize = 15;
+/// Per-table hit budget for the vector channels (the final cut after fusion).
+pub const VECTOR_CHANNEL_LIMIT: usize = 15;
+
+/// Default candidate window (WQ-7): channels fetch this many rows index-ordered
+/// (`ORDER BY vector::distance::cosine` / `search::score`), the temporal
+/// rescore and the future A3 reranker run inside the window, and the final cut
+/// stays [`VECTOR_CHANNEL_LIMIT`]. Configurable via `search.candidates`.
+pub const DEFAULT_CANDIDATE_WINDOW: usize = 50;
 
 /// A knowledge chunk result — code, commit meaning, memory or reasoning
 /// (`Result; wire names preserved exactly).
@@ -115,8 +121,12 @@ pub struct SearchService {
     /// (`world_state.code_cache_disabled`, default false = cache on).
     pub hot_ref_cache_disabled: bool,
     /// Channel fusion mode (`search.fusion`: additive|rrf — A2; default
-    /// additive for safe rollout until the A1 eval validates RRF).
+    /// additive until the WQ-7 retune re-decides on the 4.0 baseline).
     pub fusion_mode: FusionMode,
+    /// Candidate window (`search.candidates`, WQ-7): fetch size of every
+    /// channel above the final [`VECTOR_CHANNEL_LIMIT`] cut, shared by the
+    /// temporal rescore and the future A3 reranker.
+    pub candidate_window: usize,
     /// Process-local TTL cache of ancestor sets (lazily created).
     pub(crate) ancestor_cache: std::sync::OnceLock<ibis_git::AncestorCache>,
 }
@@ -132,6 +142,7 @@ impl Default for SearchService {
             personal_claims_policy: String::new(),
             hot_ref_cache_disabled: false,
             fusion_mode: FusionMode::default(),
+            candidate_window: DEFAULT_CANDIDATE_WINDOW,
             ancestor_cache: std::sync::OnceLock::new(),
         }
     }
@@ -216,6 +227,9 @@ struct ChunkResult {
     commit_hash: String,
     status: String,
     kind: String,
+    /// Days since the temporal anchor (memory `created_at`, commit_chunk
+    /// `commit_date`); `None` = no anchor (constant decay term).
+    age_days: Option<f64>,
     /// Set when the canonical HEAD hash lookup matched this chunk's hash
     /// (drives the "is current" bump/epsilon and the result flag).
     at_head: bool,
@@ -234,18 +248,23 @@ impl ChunkResult {
             status: rows::scalar_string(rows::field(row, "status")),
             kind: rows::scalar_string(rows::field(row, "kind")),
             score: rows::numeric_float(rows::field(row, "score")),
+            age_days: rows::numeric_float_opt(rows::field(row, "age_days")),
             at_head: false,
         }
     }
 }
 
-/// Vector-similarity + created_at time-decay score expression shared by the
-/// four channels. The embedding binds as `$vec` (F-002). `math::max` takes a
-/// single array on SurrealDB 3.x (D17) — the original 2.x two-arg form fails live.
-pub(crate) fn ask_score_expr() -> String {
-    "(vector::similarity::cosine(embedding, $vec) * 0.7) + \
-     (IF created_at IS NONE THEN 0.3 ELSE math::max([0, 1 - duration::days(time::now() - created_at) / 365]) * 0.3 END)"
-        .to_string()
+/// Rust-side temporal decay (WQ-7): the SQL channel ranks by the index
+/// (`ORDER BY vector::distance::cosine`), so decay is a **rescore on the
+/// returned window** and can never pull a row back in from outside it.
+/// Mirrors the retired `ask_score_expr`: temporal term `0.3` without an
+/// anchor, else `max(0, 1 - days/365) * 0.3`; similarity weight `0.7`.
+pub(crate) fn apply_temporal_decay(score: f64, age_days: Option<f64>) -> f64 {
+    let temporal = match age_days {
+        None => 0.3,
+        Some(days) => (1.0 - days / 365.0).max(0.0) * 0.3,
+    };
+    score * 0.7 + temporal
 }
 
 impl SearchService {
@@ -276,7 +295,9 @@ impl SearchService {
             .await;
 
         let vec_json = commit_meaning::vec_value(&vec);
-        let score_expr = ask_score_expr();
+        let window = self.candidate_window.max(VECTOR_CHANNEL_LIMIT);
+        let dist_expr = "vector::distance::cosine(embedding, $vec)";
+        let sim_expr = "vector::similarity::cosine(embedding, $vec)";
 
         let trusted_actor = actor.resolve_trusted_actor("");
         let (memory_visibility, memory_vars) = ask_memory_visibility_sql(&trusted_actor);
@@ -285,42 +306,74 @@ impl SearchService {
             memory_currentness_sql(),
             memory_visibility
         );
+        // Lexical channel filter: currentness + visibility, no embedding clause.
+        let lexical_where = format!(
+            "{} AND {}",
+            memory_currentness_sql(),
+            memory_visibility
+        );
 
         struct TableQuery<'a> {
             name: &'a str,
             sql: String,
+            /// Vector channels get the Rust temporal rescore; lexical (BM25)
+            /// channels keep their raw score.
+            temporal: bool,
         }
         let queries = [
             TableQuery {
                 name: "file_chunk",
                 sql: format!(
-                    "SELECT id, file.path as path, content, hash, file.hash as current_hash, {score_expr} as score FROM file_chunk WHERE embedding != NONE ORDER BY score DESC LIMIT {VECTOR_CHANNEL_LIMIT};"
+                    "SELECT id, file.path as path, content, hash, file.hash as current_hash, {sim_expr} as score FROM file_chunk WHERE embedding != NONE ORDER BY {dist_expr} LIMIT {window};"
                 ),
+                temporal: true,
             },
             TableQuery {
                 name: "commit_chunk",
-                sql: commit_meaning::commit_chunk_ask_query(),
+                sql: commit_meaning::commit_chunk_ask_query(window),
+                temporal: true,
             },
             TableQuery {
                 name: "memory",
                 sql: format!(
-                    "SELECT id, NONE as path, content, status, kind, NONE as hash, NONE as current_hash, {score_expr} as score FROM memory WHERE {memory_where} ORDER BY score DESC LIMIT {VECTOR_CHANNEL_LIMIT};"
+                    "SELECT id, NONE as path, content, status, kind, duration::days(time::now() - created_at) as age_days, NONE as hash, NONE as current_hash, {sim_expr} as score FROM memory WHERE {memory_where} ORDER BY {dist_expr} LIMIT {window};"
                 ),
+                temporal: true,
             },
             TableQuery {
                 name: "reasoning",
                 sql: format!(
-                    "SELECT id, NONE as path, string::concat(question OR '', '\n', outcome OR '') as content, NONE as hash, NONE as current_hash, {score_expr} as score FROM reasoning WHERE embedding != NONE ORDER BY score DESC LIMIT {VECTOR_CHANNEL_LIMIT};"
+                    "SELECT id, NONE as path, string::concat(question OR '', '\n', outcome OR '') as content, NONE as hash, NONE as current_hash, NONE as age_days, {sim_expr} as score FROM reasoning WHERE embedding != NONE ORDER BY {dist_expr} LIMIT {window};"
                 ),
+                temporal: true,
+            },
+            // Lexical channel (WQ-7): BM25 on memory.title / memory.content.
+            // Two separate queries — one FULLTEXT index per field — fused as
+            // independent rank lists.
+            TableQuery {
+                name: "memory_text_title",
+                sql: format!(
+                    "SELECT id, NONE as path, content, status, kind, NONE as hash, NONE as current_hash, search::score(1) as score FROM memory WHERE title @1@ $q AND {lexical_where} ORDER BY search::score(1) DESC LIMIT {window};"
+                ),
+                temporal: false,
+            },
+            TableQuery {
+                name: "memory_text_content",
+                sql: format!(
+                    "SELECT id, NONE as path, content, status, kind, NONE as hash, NONE as current_hash, search::score(1) as score FROM memory WHERE content @1@ $q AND {lexical_where} ORDER BY search::score(1) DESC LIMIT {window};"
+                ),
+                temporal: false,
             },
         ];
 
         let mut chunks: Vec<ChunkResult> = Vec::new();
+        let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut channel_chunks: Vec<Vec<usize>> = Vec::new();
         for tq in &queries {
             let start = chunks.len();
             let mut vars: Vars = memory_vars.iter().cloned().collect();
             vars.insert("vec".into(), vec_json.clone());
+            vars.insert("q".into(), ibis_db::value::Value::from_t(query));
             let outcome = db.smart_query(&tq.sql, vars).await.map_err(|e| {
                 SearchError::other(format!("vector search failed on {}: {e}", tq.name))
             })?;
@@ -330,13 +383,28 @@ impl SearchService {
                     tq.name
                 )));
             };
+            let mut channel_rows: Vec<ChunkResult> = Vec::new();
             for row in rows::object_rows(&rows_values) {
-                let c = ChunkResult::from_row(row, tq.name);
+                let mut c = ChunkResult::from_row(row, if tq.name.starts_with("memory_text") { "memory" } else { tq.name });
                 if c.id.is_empty() && c.content.is_empty() {
                     continue;
                 }
-                chunks.push(c);
+                // Cross-channel dedupe by record id (a memory hit can arrive
+                // from both the vector and a lexical channel; first wins).
+                if !seen_ids.insert(c.id.clone()) {
+                    continue;
+                }
+                if tq.temporal {
+                    c.score = apply_temporal_decay(c.score, c.age_days);
+                }
+                channel_rows.push(c);
             }
+            if tq.temporal {
+                // Rescore may reorder within the window: ranks follow the
+                // decayed score, not the distance order.
+                channel_rows.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            }
+            chunks.extend(channel_rows);
             channel_chunks.push((start..chunks.len()).collect());
         }
 

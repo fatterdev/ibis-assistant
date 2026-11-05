@@ -18,7 +18,7 @@ use tokio::sync::mpsc;
 use ibis_db::executor::{Executor, Vars};
 use ibis_db::ids::{format_record_id, sanitize_id};
 use ibis_db::schema::names::{
-    AUTHOR, AUTHORED, CHANGED, COMMIT, COUPLED_WITH, IMPLEMENTS, PARENT_OF, REPO, SOURCE_FILE,
+    AUTHOR, AUTHORED, CHANGED, COMMIT, COUPLED_WITH, IMPLEMENTS, PARENT_OF, REPO,
 };
 use ibis_db::value::{RecordId, Value};
 use ibis_git::sync::{history_oids, ingest_log_batch};
@@ -487,11 +487,10 @@ impl<'a> StreamWriter<'a> {
             0.0
         };
 
-        let safe_repo_name = sanitize_id(self.repo_name);
-        let file_id = format_record_id(
-            SOURCE_FILE,
-            &format!("{safe_repo_name}_{}", sanitize_id(&path)),
-        );
+        // WQ-7: `source_file` ids are arrays `[repo, file_path]` (the
+        // repo-relative path, sanitized) — the same id code ingest writes, so
+        // the git-ingest row and the code-ingest row unify.
+        let file_id = ibis_db::ids::source_file_id(self.repo_id, &path);
 
         let path_var = self.next_var("path");
         self.push_stmt(format!("UPSERT {file_id} SET path = ${path_var};"));

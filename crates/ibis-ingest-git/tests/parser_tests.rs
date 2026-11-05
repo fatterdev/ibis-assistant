@@ -7,15 +7,12 @@ use std::sync::Arc;
 
 use common::{mock_ingester, MockDb};
 
-use ibis_db::ids::{format_record_id, sanitize_id};
-use ibis_db::schema::names::SOURCE_FILE;
 use ibis_ingest_git::process_git_log_lines;
 
-fn file_id(repo: &str, path: &str) -> String {
-    format_record_id(
-        SOURCE_FILE,
-        &format!("{}_{}", sanitize_id(repo), sanitize_id(path)),
-    )
+fn file_id(_repo: &str, path: &str) -> String {
+    // WQ-7: source_file ids are arrays `[repo, file_path]`; the stream
+    // writer receives `repo:test` as the repo record id.
+    ibis_db::ids::source_file_id("repo:test", path)
 }
 
 #[tokio::test]

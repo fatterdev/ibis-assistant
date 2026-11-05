@@ -1,0 +1,177 @@
+{
+  "dataset": "evaluations/retrieval/dataset.yaml",
+  "version": "1",
+  "embedder": "offline-hash-768",
+  "fusion": "additive",
+  "seeded": true,
+  "aggregate": {
+    "cases": 12,
+    "cases_ok": 12,
+    "cases_error": 0,
+    "mrr": 0.9166666666666666,
+    "recall_at_5": 0.9583333333333334,
+    "recall_at_15": 1.0,
+    "by_channel": {
+      "commit_chunk": {
+        "cases": 1
+      },
+      "file_chunk": {
+        "cases": 5
+      },
+      "memory": {
+        "cases": 5
+      },
+      "reasoning": {
+        "cases": 1
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "r01_price_discounts",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "file_chunk",
+      "hits": [
+        1
+      ]
+    },
+    {
+      "id": "r02_sidecar_kill",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "file_chunk",
+      "hits": [
+        1
+      ]
+    },
+    {
+      "id": "r03_eval_metrics",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "file_chunk",
+      "hits": [
+        1
+      ]
+    },
+    {
+      "id": "r04_mcp_timeout",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "memory",
+      "hits": [
+        1
+      ]
+    },
+    {
+      "id": "r05_spawn_threads",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "memory",
+      "hits": [
+        1
+      ]
+    },
+    {
+      "id": "r06_mathmax_gotcha",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "memory",
+      "hits": [
+        1
+      ]
+    },
+    {
+      "id": "r07_surreal_sidecar_url",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "memory",
+      "hits": [
+        1
+      ]
+    },
+    {
+      "id": "r08_rrf_decision",
+      "status": "ok",
+      "mrr": 0.5,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 2,
+      "top_channel": "memory",
+      "hits": [
+        2
+      ]
+    },
+    {
+      "id": "r09_rrf_commit",
+      "status": "ok",
+      "mrr": 0.5,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 2,
+      "top_channel": "commit_chunk",
+      "hits": [
+        2
+      ]
+    },
+    {
+      "id": "r10_time_decay",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "reasoning",
+      "hits": [
+        1
+      ]
+    },
+    {
+      "id": "r11_multi_eval_rrf",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 0.5,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "file_chunk",
+      "hits": [
+        1,
+        9
+      ]
+    },
+    {
+      "id": "r12_multi_sidecar",
+      "status": "ok",
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_15": 1.0,
+      "first_rank": 1,
+      "top_channel": "file_chunk",
+      "hits": [
+        1,
+        2
+      ]
+    }
+  ]
+}

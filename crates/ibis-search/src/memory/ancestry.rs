@@ -63,7 +63,7 @@ pub(crate) async fn git_bound_claims_for_project(
     }
     let repo_id = super::repo_record_id(project_name);
     let sql = format!(
-        "SELECT id, kind, title, status, visibility, owner, introduced_in_oid, invalidated_at_oid FROM memory WHERE project = {repo_id} AND introduced_in_oid != NONE LIMIT {};",
+        "SELECT id, kind, title, status, visibility, owner, introduced_in_oid, invalidated_at_oid FROM memory WHERE project = {repo_id} AND introduced_in_oid != NONE ORDER BY id LIMIT {};",
         limit + 1
     );
     let outcome = db

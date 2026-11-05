@@ -241,8 +241,8 @@ pub async fn analyze_blast_radius(
 		name,
 		kind,
 		file.path as file_path,
-		<-calls<-symbol.name as direct_callers,
-		->calls->symbol.name as calls_out,
+		calls_received_edges.*.in.name as direct_callers,
+		calls_made_edges.*.out.name as calls_out,
 		<-calls<-symbol<-calls<-symbol.name as blast_radius
 	FROM {symbol_id};
 	"#
@@ -283,7 +283,8 @@ pub async fn find_dead_code(
 	FROM symbol
 	WHERE string::starts_with(id, 'symbol:{safe_repo}')
 	  AND (kind = 'function_declaration' OR kind = 'method_declaration')
-	  AND array::len(<-calls) = 0;
+	  AND array::len(calls_received_edges) = 0
+	ORDER BY id;
 	"#
     );
     let outcome = db

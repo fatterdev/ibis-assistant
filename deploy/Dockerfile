@@ -7,7 +7,7 @@
 #
 # Pinned components (bump them together with the runtime release):
 #   - builder toolchain : rust:1-bookworm
-#   - SurrealDB sidecar : v3.3.5 (release tarball; the CI retrieval-eval job
+#   - SurrealDB sidecar : v4.0.0 (release tarball; the CI retrieval-eval job
 #     pins the same version)
 #   - ast-grep          : 0.51.1
 # The sidecars ship beside the ibis binary and DB_AUTO_UPDATE=false keeps the
@@ -15,7 +15,7 @@
 # GHCR publishing is deferred (master work queue §3.6, publish gate).
 
 ARG RUST_IMAGE=rust:1-bookworm
-ARG SURREAL_VERSION=3.3.5
+ARG SURREAL_VERSION=4.0.0
 ARG SG_VERSION=0.51.1
 
 # ---------------------------------------------------------------------------

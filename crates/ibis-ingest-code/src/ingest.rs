@@ -35,7 +35,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use ibis_db::executor::{Executor, Vars};
 use ibis_db::schema::names as t;
-use ibis_db::value::{RecordId, SurrealValue, I64};
+use ibis_db::value::{RecordId, RecordIdKey, SurrealValue, I64, Value};
+use surrealdb::types::Array;
 use ibis_git::GitRunner;
 use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
@@ -462,17 +463,23 @@ async fn process_file(
     // 1. Calculate hash.
     let hash = file_hash(&file_bytes);
 
-    // Use repo-relative path + hash for the ID to allow history; prefix with
-    // repoName to avoid collisions between multiple repositories.
+    // WQ-7: the `source_file` id is the array `[repo, file_path]` (repo-relative
+    // path, sanitized) — no hash suffix. One row per (repo, path): git ingest
+    // and code ingest unify on it, and a new file version refreshes the row in
+    // place (the version lives in the `hash` field and in the chunk rows).
+    let repo_ref = ibis_db::ids::format_record_id(t::REPO, &ibis_db::ids::sanitize_id(repo_name));
     let safe_repo_name = ibis_db::ids::sanitize_id(repo_name);
-    let file_key = format!(
-        "{}_{}_{}",
-        safe_repo_name,
-        ibis_db::ids::sanitize_id(rel_path),
-        hash
+    let file_id = ibis_db::ids::source_file_id(&repo_ref, rel_path);
+    let file_record = RecordId::new(
+        t::SOURCE_FILE,
+        RecordIdKey::Array(Array::from(vec![
+            Value::RecordId(RecordId::new(
+                t::REPO,
+                ibis_db::ids::sanitize_id(repo_name),
+            )),
+            Value::String(ibis_db::ids::sanitize_id(rel_path)),
+        ])),
     );
-    let file_id = ibis_db::ids::format_record_id(t::SOURCE_FILE, &file_key);
-    let file_record = RecordId::new(t::SOURCE_FILE, file_key.clone());
 
     // 2. Check if changed / check if the version already exists.
     let select_sql = format!("SELECT hash FROM {file_id};");
@@ -506,25 +513,9 @@ async fn process_file(
 
     tracing::info!("Processing {}...", rel_path);
 
-    // 3. Update the file node (pointer to the current version): mark this
-    // hash-suffixed record as HEAD and clear is_head on older versions of
-    // the same path so temporal refresh/ask can resolve the canonical hash.
-    let clear_head_sql = format!(
-        "UPDATE {} SET is_head = false WHERE (path = $path OR rel_path = $rel) AND id != {file_id} AND is_head = true;",
-        t::SOURCE_FILE
-    );
-    if let Err(err) = db
-        .smart_query(
-            &clear_head_sql,
-            vars_of([
-                ("path", path_str(abs_path).into_value()),
-                ("rel", rel_path.into_value()),
-            ]),
-        )
-        .await
-    {
-        tracing::warn!("Failed to clear previous HEAD markers for {rel_path}: {err}");
-    }
+    // 3. Update the file node (pointer to the current version). WQ-7: one row
+    // per (repo, rel_path) — no older-version rows to demote, so the legacy
+    // "clear is_head on older versions" sweep is gone.
     let upsert_sql = format!(
         "UPSERT {file_id} SET hash = $hash, path = $path, rel_path = $rel, repo_name = $repo, is_head = true, updated_at = time::now();"
     );
@@ -708,17 +699,10 @@ async fn process_file(
         // (F-A03).
         let mut sql = String::from("BEGIN TRANSACTION; ");
         let mut batch_vars: Vars = Vars::new();
-        for (k, (original_index, chunk_obj)) in valid_batch.iter().enumerate() {
-            // Chunk ID also uses the prefixed relative path.
-            let chunk_id = ibis_db::ids::format_record_id(
-                t::FILE_CHUNK,
-                &format!(
-                    "{}_{}_{}_{}",
-                    safe_repo_name,
-                    ibis_db::ids::sanitize_id(rel_path),
-                    hash,
-                    original_index
-                ),
+        for (k, (_original_index, chunk_obj)) in valid_batch.iter().enumerate() {
+            let chunk_id = ibis_db::ids::file_chunk_id(
+                &file_id,
+                i64::from(chunk_obj.start_line),
             );
             batch_vars.insert(format!("file{k}"), file_record.clone().into_value());
             batch_vars.insert(format!("hash{k}"), hash.clone().into_value());

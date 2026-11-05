@@ -2,7 +2,7 @@
 //!
 //! Behavior contract:
 //! - `surreal[.exe]` next to the ibis executable (fallback: PATH lookup).
-//! - Version probe via `surreal version`; upgrade check against
+//! - Version probe via `surreal version --json`; upgrade check against
 //!   `https://api.github.com/repos/surrealdb/surrealdb/releases/latest`
 //!   (30s API timeout, 5-minute download timeout, degrade to the local binary
 //!   on failure).
@@ -54,19 +54,19 @@ pub fn surreal_bin_path() -> PathBuf {
     }
 }
 
-/// Parses `surreal version` output (e.g. `surreal 2.0.4 ...` → `2.0.4`).
-pub fn parse_version_output(out: &str) -> Result<String, ProcessError> {
-    let parts: Vec<&str> = out.split_whitespace().collect();
-    if parts.len() >= 2 && parts[0].eq_ignore_ascii_case("surreal") {
-        return Ok(parts[1].to_string());
-    }
-    if let Some(first) = parts.first() {
-        return Ok((*first).to_string());
-    }
-    Err(ProcessError::VersionOutput(out.to_string()))
+/// Parses the JSON output of `surreal version --json`
+/// (e.g. `{"arch":"x86_64","os":"windows","version":"4.0.0"}` → `4.0.0`).
+pub fn parse_version_json(out: &str) -> Result<String, ProcessError> {
+    let value: serde_json::Value =
+        serde_json::from_str(out).map_err(|_| ProcessError::VersionOutput(out.to_string()))?;
+    value
+        .get("version")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| ProcessError::VersionOutput(out.to_string()))
 }
 
-/// Runs `surreal version` and extracts the version string.
+/// Runs `surreal version --json` and extracts the version string.
 pub async fn local_version(bin: &Path) -> Result<String, ProcessError> {
     // Bare names (no parent dir) go through the OS PATH lookup; real paths must exist.
     let is_bare = bin.parent().is_none_or(|p| p == Path::new(""));
@@ -75,7 +75,9 @@ pub async fn local_version(bin: &Path) -> Result<String, ProcessError> {
     }
     let output = tokio::time::timeout(
         VERSION_PROBE_TIMEOUT,
-        tokio::process::Command::new(bin).arg("version").output(),
+        tokio::process::Command::new(bin)
+            .args(["version", "--json"])
+            .output(),
     )
     .await
     .map_err(|_| ProcessError::VersionOutput("version probe timed out".to_string()))?
@@ -86,7 +88,7 @@ pub async fn local_version(bin: &Path) -> Result<String, ProcessError> {
             output.status
         )));
     }
-    parse_version_output(&String::from_utf8_lossy(&output.stdout))
+    parse_version_json(&String::from_utf8_lossy(&output.stdout))
 }
 
 /// Fetches the latest SurrealDB release from the GitHub API.
@@ -395,45 +397,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_version_output() {
+    fn parses_version_json() {
         assert_eq!(
-            parse_version_output("surreal 2.0.4 linux amd64").unwrap(),
-            "2.0.4"
+            parse_version_json(r#"{"arch":"x86_64","os":"windows","version":"4.0.0"}"#).unwrap(),
+            "4.0.0"
         );
-        assert_eq!(parse_version_output("Surreal 3.3.4").unwrap(), "3.3.4");
-        assert_eq!(parse_version_output("3.3.4").unwrap(), "3.3.4");
-        assert!(parse_version_output("").is_err());
+        assert!(parse_version_json(r#"{"arch":"x86_64","os":"linux"}"#).is_err());
+        assert!(parse_version_json("surreal 4.0.0 windows amd64").is_err());
     }
 
     #[test]
     fn matches_release_assets() {
         let release = GitHubRelease {
-            tag_name: "v3.3.4".to_string(),
+            tag_name: "v4.0.0".to_string(),
             assets: vec![
                 GitHubAsset {
-                    name: "surreal-v3.3.4.darwin-arm64.tgz".to_string(),
+                    name: "surreal-v4.0.0.darwin-arm64.tgz".to_string(),
                     browser_download_url: "https://example.com/darwin.tgz".to_string(),
                 },
                 GitHubAsset {
-                    name: "surreal-v3.3.4.linux-amd64.tgz".to_string(),
+                    name: "surreal-v4.0.0.linux-amd64.tgz".to_string(),
                     browser_download_url: "https://example.com/linux.tgz".to_string(),
                 },
                 GitHubAsset {
-                    name: "surreal-v3.3.4.windows-amd64.zip".to_string(),
-                    browser_download_url: "https://example.com/win.zip".to_string(),
+                    name: "surreal-v4.0.0.windows-amd64.exe".to_string(),
+                    browser_download_url: "https://example.com/win.exe".to_string(),
                 },
                 GitHubAsset {
-                    name: "surreal-v3.3.4 checksums.txt".to_string(),
+                    name: "checksums.txt".to_string(),
                     browser_download_url: "https://example.com/sums".to_string(),
                 },
             ],
         };
         let win = match_asset(&release, "windows", "amd64").expect("windows asset");
-        assert_eq!(win.name, "surreal-v3.3.4.windows-amd64.zip");
+        assert_eq!(win.name, "surreal-v4.0.0.windows-amd64.exe");
         let linux = match_asset(&release, "linux", "amd64").expect("linux asset");
-        assert_eq!(linux.name, "surreal-v3.3.4.linux-amd64.tgz");
+        assert_eq!(linux.name, "surreal-v4.0.0.linux-amd64.tgz");
         let darwin = match_asset(&release, "darwin", "arm64").expect("darwin asset");
-        assert_eq!(darwin.name, "surreal-v3.3.4.darwin-arm64.tgz");
+        assert_eq!(darwin.name, "surreal-v4.0.0.darwin-arm64.tgz");
         assert!(match_asset(&release, "plan9", "amd64").is_none());
     }
 
