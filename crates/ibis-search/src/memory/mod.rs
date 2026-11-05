@@ -595,8 +595,12 @@ impl crate::search::SearchService {
                 "id IN (SELECT VALUE in FROM {ES_PART_OF_WORKSTREAM} WHERE out = {workstream_id})"
             ));
         }
+        // The `store` marker rides the browse projection (F4 §A.4): the
+        // VSIX curation menu pre-disables git-owned claims ("repo is SoT"),
+        // which are indistinguishable otherwise — the field is already on
+        // the `Memory` model and every other mutating surface re-reads it.
         let sql = format!(
-            "SELECT id, kind, title, content, status, confidence, visibility, owner, tags, branch, valid_from, valid_until, created_at, updated_at FROM memory WHERE {} ORDER BY updated_at DESC LIMIT {limit};",
+            "SELECT id, kind, title, content, status, confidence, visibility, owner, tags, branch, valid_from, valid_until, created_at, updated_at, store FROM memory WHERE {} ORDER BY updated_at DESC LIMIT {limit};",
             where_parts.join(" AND ")
         );
         let outcome = db
@@ -1273,6 +1277,33 @@ mod tests {
         assert!(
             current_sql.contains("(status = 'current')"),
             "explicit current keeps the currentness predicate: {current_sql}"
+        );
+    }
+
+    /// F4 §A.4 residual closure: the browse projection carries the claim
+    /// store marker (`store`) so the VSIX curation menu can pre-disable
+    /// git-owned claims — they are indistinguishable without it.
+    #[tokio::test]
+    async fn list_memories_projects_the_store_marker() {
+        let (fake, svc) = search_service_with_one_memory();
+        svc.list_memories(
+            &crate::ActorContext::LOCAL,
+            MemoryListParams::default(),
+        )
+        .await
+        .expect("browse");
+        let sql = fake
+            .smart_calls
+            .lock()
+            .unwrap()
+            .clone()
+            .iter()
+            .find(|q| q.contains("FROM memory"))
+            .cloned()
+            .expect("memory query");
+        assert!(
+            sql.contains("created_at, updated_at, store FROM memory"),
+            "the store marker must ride the browse projection: {sql}"
         );
     }
 
