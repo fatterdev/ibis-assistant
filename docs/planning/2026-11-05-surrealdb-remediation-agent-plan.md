@@ -13,7 +13,14 @@ regressione unitari e live (`fix(db)` `79bde42`, `fix(ingest-code)` `5c0e146`,
 rrf k ∈ {1,10,60}, [verdetto](./2026-11-05-wq7-fusion-verdict.md), [baseline
 A1](./2026-11-02-a1-retrieval-eval-plan.md)). Live test richiesti in CI con
 `IBIS_LIVE_REQUIRED=1` (job `live-tests`). Deviazioni documentate nella
-sezione "Note di esecuzione" in fondo.
+sezione "Note di esecuzione" in fondo. Gate sezione 11 verde (fmt, clippy
+`-D warnings`, `cargo test --workspace`, `git diff --check`, batteria live su
+sidecar 4.0.0 con `IBIS_LIVE_REQUIRED=1`, zero skip). Review indipendente
+(research-only, agente non autore) su `9451eea..HEAD`: zero blocker, F01–F13
+tutti chiusi con test discriminanti; i 2 MAJOR trovati dalla review sono
+stati corretti in consegna con nuovi test di regressione (`fix(ingest-code)`
+finalize atomico `e16aa43`, `fix(search)` attribuzione RRF per rank `b14c077`
+— report completo in fondo, §15).
 
 ## Note di esecuzione — scostamenti dal piano
 
@@ -382,23 +389,23 @@ Includere i test di regressione nel commit del rispettivo fix. Ogni commit integ
 
 Consegnare soltanto quando tutte le condizioni sono soddisfatte:
 
-- [ ] F01–F13 hanno ciascuno almeno un test di regressione.
-- [ ] I comportamenti SurrealQL critici hanno copertura live.
-- [ ] Nessun live test richiesto in CI risulta skippato.
-- [ ] Nessun chunk fallback collide.
-- [ ] Nessun path distinto collide e i path speciali fanno round-trip.
-- [ ] Nessun contenuto nuovo usa un embedding precedente.
-- [ ] V1 → V2 → V1 produce chunk coerenti.
-- [ ] Commit e log persistono tutti i valori bound.
-- [ ] Tailer e pruning non perdono dati dopo errori.
-- [ ] RRF somma i contributi cross-channel e deduplica il board finale.
-- [ ] BM25 non entra grezzo nel blend.
-- [ ] Title/content e `file_chunk` lessicale sono coperti.
-- [ ] Le migrazioni sono ordinate e idempotenti.
-- [ ] Baseline e documentazione contengono soltanto misure rieseguite.
-- [ ] `cargo fmt`, clippy, workspace test, live test ed eval sono verdi.
-- [ ] La review indipendente non presenta finding bloccanti aperti.
-- [ ] Il working tree è pulito.
+- [x] F01–F13 hanno ciascuno almeno un test di regressione.
+- [x] I comportamenti SurrealQL critici hanno copertura live.
+- [x] Nessun live test richiesto in CI risulta skippato.
+- [x] Nessun chunk fallback collide.
+- [x] Nessun path distinto collide e i path speciali fanno round-trip.
+- [x] Nessun contenuto nuovo usa un embedding precedente.
+- [x] V1 → V2 → V1 produce chunk coerenti.
+- [x] Commit e log persistono tutti i valori bound.
+- [x] Tailer e pruning non perdono dati dopo errori.
+- [x] RRF somma i contributi cross-channel e deduplica il board finale.
+- [x] BM25 non entra grezzo nel blend.
+- [x] Title/content e `file_chunk` lessicale sono coperti.
+- [x] Le migrazioni sono ordinate e idempotenti.
+- [x] Baseline e documentazione contengono soltanto misure rieseguite.
+- [x] `cargo fmt`, clippy, workspace test, live test ed eval sono verdi.
+- [x] La review indipendente non presenta finding bloccanti aperti.
+- [x] Il working tree è pulito.
 
 ## 14. Report finale richiesto
 
@@ -414,3 +421,144 @@ Il report di consegna deve includere:
 8. review finale indipendente e stato del working tree.
 
 Non dichiarare il lavoro completato se manca una di queste evidenze o se un finding resta senza test.
+
+## 15. Report di consegna (05/11)
+
+### 15.1 Commit
+
+| Commit | Sintesi |
+|---|---|
+| `79bde42` | fix(db): id lossless (F02), `commit_chunk.updated_at` (F07a), migrazioni ordinate (F13) |
+| `5c0e146` | fix(ingest-code): chunk fallback unici (F01), embedding invalidation (F08), versioning (F10), pruning atomico (F12) |
+| `fde13c1` | fix(server): bind variabili transazione commit (F07b) |
+| `49038ff` | fix(logs): id canonici analyzer (F09), offset retry-safe (F11), propagate errori persist |
+| `9f6c66d` | fix(search): fusione cross-channel (F03), calibrazione BM25 (F04), canale `file_chunk_text` (F06), subject su titolo (F05) |
+| `622644c` | test(eval): dataset 20 case, `absent_ids`, canali per caso, flag `--rrf-k` |
+| `90a3391` | ci: job `live-tests` con `IBIS_LIVE_REQUIRED=1` |
+| `bb20052` | fix(ingest-code): retry conflitti transazione SurrealKV (scritture idempotenti) |
+| `5daf532` | test(ai): `default_api_url_substituted` deterministico con Ollama locale attivo |
+| `58537b4` | docs: republish verified WQ-7 baseline and verdict |
+| `e16aa43` | fix(ingest-code): finalize atomico hash UPSERT + cleanup stale chunk (post-review) |
+| `b14c077` | fix(search): attribuzione best-channel in RRF per rank, non per ordine di query (post-review) |
+
+### 15.2 Mappa F01–F13 → test
+
+Nomi di test (greppabili) con file di appartenenza; tutti discriminanti sul
+codice pre-fix (verificato dalla review indipendente per ispezione).
+
+| Finding | Test di regressione | Live |
+|---|---|---|
+| F01 | `chunk_content_matrix`, `chunk_content_start_lines_are_unique` (`ibis-ingest-code/src/ingest.rs`) | `fallback_chunks_get_unique_start_lines`, `chunks_span_multiple_batches` (`tests/ingest_live.rs`) |
+| F02 | `test_source_file_id_is_lossless`, `test_is_safe_record_id_array_forms`, `test_sanitize_id` (`ibis-db/src/ids.rs`) | `source_file_ids_are_lossless_and_collision_free` (`ibis-db/tests/live_surreal.rs`, probe injection inerte) |
+| F03 | `ask_project_rrf_fusion_sums_cross_channel_ranks`, `ask_project_additive_sums_cross_channel_scores`, `rrf_fuse_sums_cross_channel_contributions` (`ibis-search`) | eval r16/r17 + dataset cross-channel |
+| F04 | `calibrate_lexical_is_bounded_monotone_and_scale_order_invariant` (`retrieval_boost.rs`), `ask_project_additive_sums_cross_channel_scores` | eval baseline additive |
+| F05 | `memory_id_for_subject` title/content (unit, `ibis-search/src/memory/mod.rs`) | `subject_lookup_finds_title_matches` (`tests/live_memory_estate.rs`) |
+| F06 | `ask_project_additive_sums_cross_channel_scores` (canale `file_chunk_text`), `ask_project_rrf_fusion_sums_cross_channel_ranks` (canale in RRF) | `lexical_file_chunk_channel_reaches_ask_project` (`tests/live_memory_estate.rs`) |
+| F07 | `apply_commit_txn_binds_every_variable` (`ibis-server/src/assembly.rs`), re-init schema nel test `commit_chunk_upsert_persists_all_values_and_schema_reinit_stays_coherent` | `commit_txn_persists_every_bound_value`, `commit_txn_failure_marks_failed_and_sql_error_rolls_back` (`ibis-server/tests/live_commit_txn.rs`) |
+| F08 | `ingest_codebase_versioning` (assert `embedding = NONE` sul riuso, `tests/ingest_pipeline.rs`) | `version_round_trip_leaves_a_coherent_manifest` (`tests/ingest_live.rs`) |
+| F09 | `ingest_error_links_canonical_source_file`, `ingest_error_collision_free_paths`, `ingest_error_failure_surfaces_as_batch_error` (`ibis-ingest-logs/src/analyzer.rs`) | `anomaly_links_canonical_source_file` (`tests/live_logs.rs`) |
+| F10 | `ingest_codebase_versioning` (manifest hash avanzato, cleanup incluso) + `finalize_transaction_is_atomic_and_propagates` (post-review) | `version_round_trip_leaves_a_coherent_manifest` (V1→V2→V1) |
+| F11 | `failed_batch_retries_before_offset_advances`, `restart_before_retry_does_not_skip` (`ibis-ingest-logs/src/tailer.rs`) | `offset_roundtrip_on_log_file_record` (`tests/live_logs.rs`) |
+| F12 | `prune_transaction_is_atomic_and_propagates` (iniezione su entrambe le DELETE) | `prune_removes_files_and_chunks_without_orphans` (`tests/ingest_live.rs`) |
+| F13 | `unsorted_migrations_apply_in_id_order`, `duplicate_migration_ids_are_rejected`, `failed_migration_does_not_advance_version` (`ibis-db/src/migrate.rs`) | `migrations_apply_in_id_order_live` (`tests/live_surreal.rs`) |
+
+### 15.3 Comandi ed esiti
+
+| Comando | Esito |
+|---|---|
+| `cargo fmt --all -- --check` | pulito (exit 0), anche dopo le fix post-review |
+| `cargo clippy --workspace --all-targets -- -D warnings` | pulito (exit 0) |
+| `cargo test --workspace` | exit 0, 0 failed — eseguito due volte: pre e post fix review |
+| `git diff --check` | pulito |
+| `cargo test -p ibis-ai --lib runner` | 11 passed (verifica pre-commit di `5daf532`) |
+| Batteria live (sidecar SurrealDB **4.0.0**, `ws://127.0.0.1:38000`, `IBIS_LIVE_REQUIRED=1`, `--test-threads=1`): `-p ibis-db --test live_surreal -p ibis-ingest-code --tests -p ibis-ingest-logs --test live_logs -p ibis-search --test live_memory_estate -p ibis-server --test live_commit_txn` | exit 0 — live eseguiti: `live_surreal` 11, `ingest_live` 4, `live_logs` 5, `live_memory_estate` 12, `live_commit_txn` 2 (34 test live, zero skip: con `IBIS_LIVE_REQUIRED=1` una connessione fallita è panic). L'unico `ignored` presente nella batteria è `generate_discovery_fixture` (generatore di fixture per design, non è un test live SurrealDB). Eseguita due volte, pre e post fix review. |
+
+Test non eseguiti: nessuno rispetto al perimetro del piano (l'eval è coperto
+dalle run pre-consegna §15.4; nessun numero citato dipende dall'attribuzione
+di canale corretta in §15.5, quindi le fix post-review non richiedono
+re-run dell'eval).
+
+### 15.4 Eval (offline, sidecar 4.0.0, 20/20 case)
+
+| Configurazione | MRR | recall@5 | recall@15 |
+|---|---|---|---|
+| **additive (default)** | **0.950** | **0.975** | **1.0** |
+| rrf k=1 | 0.842 | 0.950 | — |
+| rrf k=10 | 0.918 | 0.925 | — |
+| rrf k=60 | 0.908 | 0.925 | — |
+
+Gli 8 case nuovi del dataset fanno tutti MRR 1.0 con canale attribuito;
+zero violazioni `absent_leaks`. Report: `artifacts/eval/remediation-*.json`,
+baseline committata `evaluations/retrieval/baseline-4.0.0-offline-additive.json`.
+
+**Decisione fusione:** `additive` resta default — riconfermata dalle misure
+post-fix (non precostituita): a parità di recall@15, additive batte tutte le
+configurazioni RRF su MRR e recall@5 ([verdetto
+WQ-7](./2026-11-05-wq7-fusion-verdict.md)).
+
+### 15.5 Fix post-review (2 MAJOR, chiusi in consegna)
+
+1. **Finestra crash del cleanup stale-chunk** (`e16aa43`): l'UPSERT dell'hash
+   file e la `DELETE … hash != $hash` erano statement separati; un crash
+   fra i due avanzava l'hash con chunk stantii ancora presenti, e il prossimo
+   pass sarebbe tornato presto (`current_db_hash == hash`) lasciandoli per
+   sempre. Ora le due scritture sono un'unica transazione atomica
+   (`BEGIN TRANSACTION; UPSERT …; DELETE …; COMMIT TRANSACTION;`) — la
+   finestra non esiste più e l'invariante "hash = versione coerente" è
+   atomico. Test: `finalize_transaction_is_atomic_and_propagates`
+   (iniezione fallimento sulla parte cleanup: nessun UPSERT hash può
+   viaggiare senza il cleanup nella stessa statement); `ingest_codebase_versioning`
+   aggiornato a pinnare la transazione unica.
+2. **Attribuzione canale degenere in RRF** (`b14c077`): la strength
+   `1.0 / score.max(1.0)` è sempre 1.0 (score di canale ≤ 1), quindi il
+   "best channel" era sempre il primo in ordine di query. Ora la strength è
+   il rank reale (`1/rank`) letto dalle stesse `rank_lists` che alimentano
+   `rrf_fuse` — il ranking RRF non cambia (era già corretto), cambia solo la
+   diagnostica `channel`, ora affidabile. Test:
+   `ask_project_rrf_best_channel_follows_rank_not_query_order` (rank-1 in un
+   canale successivo deve battere rank-2 nel primo canale); il tie-break a
+   parità di rank resta deterministico (primo canale in ordine).
+
+### 15.6 CI e prova live
+
+`90a3391` aggiunge il job `live-tests`: SurrealDB **v4.0.0** pinnato (immagine
+Docker + health-check), `IBIS_SPIKE_SURREAL_URL` puntato sul container,
+`IBIS_LIVE_REQUIRED=1` che converte lo skip in failure, step separati per
+crate che falliscono il job. Prova di esecuzione reale: batteria live locale
+§15.3 con la stessa variabile (skip impossibile). NB: consegna senza push per
+vincolo del mandato — l'evidenza di esecuzione è la run locale sopra; la run
+CI si produca al primo push sul repo (`terenzif/ibis-assistant`).
+
+### 15.7 Rischi residui (review indipendente, nessun blocker)
+
+- **MINOR — coda tailer illimitata** (`ibis-ingest-logs/src/tailer.rs`): con
+  AI/DB giù a lungo i batch pendenti si accumulano nel `VecDeque` senza cap
+  né backoff (retry a ogni tick). Serve una decisione di design (cap o
+  backoff) — follow-up dedicato, fuori dal perimetro remediation.
+- **MINOR — collisione backslash su POSIX** (`ibis-db/src/ids.rs::normalize_rel_path`):
+  `\` → `/` collidono su filesystem dove `\` è un carattere legittimo del
+  nome file. Trade-off documentato nel docstring, coerente col piano; edge
+  residuo del tema F02.
+- **MINOR — `absent_leaks` non-gating** (`ibis-optimization/src/eval.rs`):
+  le violazioni sono registrate nel report ma non fanno scendere sotto la
+  soglia `--min-recall-5`. Oggi zero leak; renderle gating è un cambio di
+  contratto del CLI eval A1 (exit code), proposto come follow-up.
+- NIT: `DbError::Decode` riusato per id migrazione duplicato;
+  asserzione loosa `contains("2")` in `live_logs` (mitigata dai check esatti
+  dei record); tie-break `source_rank` (content prima di title) non pinna il
+  vincitore in unit test; attribuzione additive O(board×canali) — irrilevante
+  alle window attuali.
+- L'attribuzione additive e i numeri eval non dipendono dalla fix §15.5.2
+  (solo diagnostica RRF): nessun numero citato in §15.4 è invalidated.
+
+### 15.8 Review indipendente e stato
+
+Review research-only da agente non autore sul diff `9451eea..HEAD` (piano,
+diff per-crate, workflow CI, baseline JSON, doc): F01–F13 tutti chiusi con
+test discriminanti (nessun assert indebolito, nessun test solo-SQL dove il
+bug è comportamentale, harness live senza skip impliciti, DB scratch con
+cleanup); nessun panic/race/SQL-injection (id via rendering SDK + validatore
+escape-aware con probe live di injection inerte); numeri doc/JSON coerenti
+(MRR 0.950 / r@5 0.975 / r@15 1.0, per-channel 20 ✓, deviazioni oneste).
+Esiti: 0 blocker, 2 MAJOR → chiusi in consegna (§15.5), 2 MINOR + 5 NIT →
+rischi residui (§15.7). Working tree pulito a consegna avvenuta.
