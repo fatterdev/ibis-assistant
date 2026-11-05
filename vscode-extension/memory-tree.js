@@ -221,21 +221,33 @@ class MemoryNode {
 function entryNode(memory, kindIcon, cfg) {
   const kindMeta = MEMORY_KINDS.find((k) => k.kind === memory.kind);
   const description = [
+    memory.store === "git" ? "git" : "",
     memory.status && memory.status !== "current" ? memory.status : "",
     memory.visibility === "personal" ? "personal" : "",
     Array.isArray(memory.tags) && memory.tags.length ? memory.tags.slice(0, 3).join(", ") : "",
   ]
     .filter(Boolean)
     .join(" · ");
+  const tooltip = memoryTooltip(memory);
+  if (memory.store === "git") {
+    // F4 §A.4: git-owned claims keep every curation action disabled — the
+    // file in .ibis/claims/ is the source of truth and the runtime rejects
+    // the mutating calls anyway.
+    tooltip.appendMarkdown(
+      "\n\n_Repo is source of truth — supersede via `.ibis/claims/` commit._",
+    );
+  }
   const node = new MemoryNode(
     memory.title || memory.id,
     {
       icon: kindMeta ? kindMeta.icon : kindIcon || "bookmark",
-      contextValue: cfg && ownedByMe(memory, cfg)
-        ? "ibisMemoryEntryUpdatable"
-        : "ibisMemoryEntry",
+      contextValue: memory.store === "git"
+        ? "ibisMemoryEntryGit"
+        : cfg && ownedByMe(memory, cfg)
+          ? "ibisMemoryEntryUpdatable"
+          : "ibisMemoryEntry",
       description,
-      tooltip: memoryTooltip(memory),
+      tooltip,
       command: {
         command: "ibis.memory.openDetail",
         title: "Open memory detail",

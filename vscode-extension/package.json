@@ -172,17 +172,17 @@
       "view/item/context": [
         {
           "command": "ibis.memory.share",
-          "when": "viewItem =~ /^ibisMemoryEntry/",
+          "when": "viewItem =~ /^ibisMemoryEntry(Updatable)?$/",
           "group": "curation@1"
         },
         {
           "command": "ibis.memory.archive",
-          "when": "viewItem =~ /^ibisMemoryEntry/",
+          "when": "viewItem =~ /^ibisMemoryEntry(Updatable)?$/",
           "group": "curation@2"
         },
         {
           "command": "ibis.memory.supersede",
-          "when": "viewItem =~ /^ibisMemoryEntry/",
+          "when": "viewItem =~ /^ibisMemoryEntry(Updatable)?$/",
           "group": "curation@3"
         },
         {

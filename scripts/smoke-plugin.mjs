@@ -341,6 +341,15 @@ check(
   "F4 §A.4 update guard",
 );
 check(
+  "vscode-extension: git-owned claims are excluded from the curation menu with the repo-is-SoT tooltip",
+  memoryTreeSource.includes("ibisMemoryEntryGit") &&
+    memoryTreeSource.includes('supersede via `.ibis/claims/` commit') &&
+    (vsixPkg.contributes.menus["view/item/context"] || [])
+      .filter((m) => m.command === "ibis.memory.share" || m.command === "ibis.memory.archive")
+      .every((m) => String(m.when).includes("(Updatable)?")),
+  "store marker from memory_list (feat(server) bfa86ea) drives the context value",
+);
+check(
   "vscode-extension: both memory trees refresh on focus without re-running searches",
   memoryTreeSource.includes("onDidChangeTreeViewVisibility") &&
     memoryTreeSource.includes("refreshOnFocus") &&

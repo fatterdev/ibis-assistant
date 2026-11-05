@@ -18,12 +18,14 @@ The runtime changelog lives in the [repository root](https://github.com/fatterde
   (`memory_update content`, re-embeds; offered on owner-matching rows, with
   a "create a superseding memory instead" fallback on governance errors).
   Every action toasts the compact result and logs the full tool output; the
-  runtime's rejections (git-owned claims, personal-row ownership) surface
-  verbatim. Both trees **refresh on focus** — kind badges and expanded
+  runtime's rejections (personal-row ownership) surface verbatim. Git-owned
+  claims (the `store` marker projected by `memory_list`) are excluded from
+  the menu entirely with the badge `git` and the tooltip "repo is source of
+  truth — supersede via `.ibis/claims/` commit". Both trees **refresh on
+  focus** — kind badges and expanded
   parents re-derive from embedding-free `memory_list` calls; search results
   are never auto-refreshed (rerun the search instead). Requires the F4-A3
-  runtime (the `memory_workstreams` tool and the `memory_list` workstream
-  filter).
+  runtime plus the `store` marker in the `memory_list` projection.
 - **Memory status filter (F4-A2, 1.0.13)** — the Memory tree browses only
   still-valid memories by default: new setting `ibis.memory.statusFilter`
   (`current`, the default, or `all`) is passed as `status` to MCP
