@@ -834,10 +834,30 @@ mod tests {
 
     #[tokio::test]
     async fn default_api_url_substituted() {
-        // Empty api_url falls back to the loopback default; nothing answers on
-        // the default port in tests, so auto_start=false produces the
-        // disabled error.
-        let err = ensure_ollama("", "m", false, false).await.unwrap_err();
-        assert!(err.to_string().contains("auto-start is disabled"));
+        // Empty api_url falls back to the loopback default. The environment
+        // may or may not run an Ollama on that port — both outcomes prove the
+        // substitution (the request reached 11434):
+        // - nothing answers → "auto-start is disabled";
+        // - a local Ollama answers → Ok without a spawned process.
+        match ensure_ollama("", "m", false, false).await {
+            Err(err) => assert!(
+                err.to_string().contains("auto-start is disabled"),
+                "unexpected error: {err}"
+            ),
+            Ok(outcome) => assert!(outcome.process.is_none(), "no daemon was started"),
+        }
+
+        // Deterministic error path: a port with NO listener must always
+        // produce the auto-start-disabled error (auto_start=false).
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("probe bind");
+        let port = probe.local_addr().expect("probe port").port();
+        drop(probe);
+        let err = ensure_ollama(&format!("http://127.0.0.1:{port}"), "m", false, false)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("auto-start is disabled"),
+            "unexpected error: {err}"
+        );
     }
 }
