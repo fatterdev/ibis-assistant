@@ -13,7 +13,6 @@
 //! `BenchmarkIngestCodebase_Write` (200KB file) are pinned behaviorally by
 //! `ingest_codebase_delta` (skip unchanged) and `ingest_codebase_batching`.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -22,16 +21,19 @@ use ibis_core::config::Config;
 use ibis_db::error::DbError;
 use ibis_db::executor::{Executor, QueryOutcome, Vars};
 use ibis_db::ids::{format_record_id, sanitize_id};
-use ibis_db::value::{Object, RecordId, SurrealValue, Value};
+use ibis_db::value::{Object, RecordId, RecordIdKey, SurrealValue, Value};
 use ibis_ingest_code::{ingest_codebase, CodeAIClient, ProgressCallback};
+use surrealdb::types::Array;
 
 // --- fakes ( MockDB / MockAI) ---
 
 /// Fake `db.Executor`: captures every statement; `return_data` maps a
 /// case-insensitive SQL substring to the rows returned for the first match.
+/// `fail_on` injects a failure on statements containing the substring.
 struct MockDb {
     calls: Mutex<Vec<String>>,
     return_data: Vec<(String, Value)>,
+    fail_on: Option<String>,
 }
 
 impl MockDb {
@@ -42,6 +44,7 @@ impl MockDb {
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v))
                 .collect(),
+            fail_on: None,
         }
     }
 
@@ -50,6 +53,14 @@ impl MockDb {
     }
 
     fn lookup(&self, sql: &str) -> Result<QueryOutcome, DbError> {
+        if let Some(fail) = &self.fail_on {
+            if sql.contains(fail.as_str()) {
+                return Err(DbError::Query {
+                    message: format!("injected failure on {fail}"),
+                    duration_ms: 0,
+                });
+            }
+        }
         let lower = sql.to_lowercase();
         for (pattern, val) in &self.return_data {
             if lower.contains(&pattern.to_lowercase()) {
@@ -325,79 +336,216 @@ fn ingest_codebase_pruning() {
     )]));
     ingest(mock_db.clone(), &tmp_dir, None).expect("Error");
 
-    // Verify deletes: file-record DELETEs (not the file_chunk ones).
-    let mut deleted_ids = HashMap::new();
-    for sql in mock_db.calls() {
-        if sql.starts_with("DELETE") && !sql.contains("file_chunk") {
-            if sql.contains(&ignored_id) {
-                deleted_ids.insert(ignored_id.clone(), true);
-            }
-            if sql.contains(&deleted_id) {
-                deleted_ids.insert(deleted_id.clone(), true);
-            }
-            if sql.contains(&existing_id) {
-                panic!("Existing file {existing_id} was deleted! SQL: {sql}");
-            }
-        }
-    }
-    assert!(
-        deleted_ids.contains_key(&ignored_id),
-        "ignored file was not deleted. Calls: {:?}",
-        mock_db.calls()
+    // Verify deletes: with the atomic transaction the file ids appear in the
+    // single BEGIN…COMMIT statement that also deletes their chunks.
+    let all_calls = mock_db.calls();
+    let txn_deletes: Vec<&String> = all_calls
+        .iter()
+        .filter(|sql| sql.contains("BEGIN TRANSACTION;") && sql.contains("DELETE ["))
+        .collect();
+    assert_eq!(
+        txn_deletes.len(),
+        1,
+        "one prune transaction: {txn_deletes:?}"
     );
     assert!(
-        deleted_ids.contains_key(&deleted_id),
-        "deleted file (physically missing) was NOT deleted from DB! It should be removed as it's not in HEAD."
+        txn_deletes[0].contains(&ignored_id) && txn_deletes[0].contains(&deleted_id),
+        "obsolete files are deleted atomically with their chunks: {}",
+        txn_deletes[0]
+    );
+    assert!(
+        !txn_deletes[0].contains(&existing_id),
+        "existing file {existing_id} must not be deleted: {}",
+        txn_deletes[0]
+    );
+    assert!(
+        !all_calls.iter().any(|sql| sql.starts_with("DELETE [")
+            || (sql.starts_with("DELETE ") && !sql.contains("file_chunk WHERE"))),
+        "no file-only DELETE may run outside the transaction: {all_calls:?}"
     );
 }
 
 #[test]
-fn ingest_codebase_versioning() {
-    // Scenario: content V1 → V2 → V1. V1 embeddings must not regenerate when
-    // switching back (the hash-keyed count check is the cache).
-    let tmp_dir = temp_repo("repo_versioning");
+fn revert_rebuilds_full_manifest_per_chunk() {
+    // F10/B3 (replaces the count()-cache test that rewarded the defect):
+    // V1 → V2 → V1. On the return to V1 the chunk set on disk is a MIX of
+    // residual V1 chunks (keys V2 never reclaimed) and V2 chunks (keys
+    // re-written by V2). The ingest must rebuild the full manifest:
+    // residual-V1-hash chunks are resumes (untouched, embedding preserved),
+    // V2-hash chunks are re-queued with `embedding = NONE` and V1 content.
+    let tmp_dir = temp_repo("repo_revert");
     let path = tmp_dir.join("main.go");
     let cfg = Config::default();
 
-    let run = |content: &str, db: Arc<MockDb>| {
-        std::fs::write(&path, content).unwrap();
-        ingest(db, &tmp_dir, Some(&cfg)).expect("ingest failed");
+    let v1 = format!("{}\n{}\n", "A".repeat(600), "B".repeat(600));
+    let v1_hash = {
+        std::fs::write(&path, &v1).unwrap();
+        file_hash_of(&path)
     };
-
-    let has_queue_call = |db: &MockDb| {
-        db.calls().iter().any(|sql| {
-            sql.contains("UPSERT file_chunk:[") && sql.contains("batch_status='pending'")
-        })
+    let file_id = ibis_db::ids::source_file_id(
+        &format_record_id("repo", &sanitize_id("test-repo")),
+        "main.go",
+    );
+    let sf_record = ibis_db::ids::source_file_record(
+        &format_record_id("repo", &sanitize_id("test-repo")),
+        "main.go",
+    );
+    let chunk_row = |line: i64, hash: &str| {
+        obj([
+            (
+                "id",
+                Value::RecordId(RecordId::new(
+                    "file_chunk",
+                    RecordIdKey::Array(Array::from(vec![
+                        Value::RecordId(sf_record.clone()),
+                        Value::Number(surrealdb::types::Number::Int(line)),
+                    ])),
+                )),
+            ),
+            ("hash", string_row(hash)),
+            ("batch_status", string_row("completed")),
+        ])
     };
+    // V1 → V2 → back to V1 on disk; the DB still holds the mixed state:
+    // line 1 was re-written by V2 (hash V2), line 2 still carries the
+    // original V1 hash.
+    let v2_hash = "0".repeat(64);
+    std::fs::write(&path, &v1).unwrap();
+    let state_rows = rows(vec![chunk_row(1, &v2_hash), chunk_row(2, &v1_hash)]);
+    let mock_db = Arc::new(MockDb::new(vec![(
+        "SELECT id, hash, batch_status FROM file_chunk",
+        state_rows,
+    )]));
+    ingest(mock_db.clone(), &tmp_dir, Some(&cfg)).expect("ingest failed");
 
-    // 1. Ingest V1 → queued.
-    let mock_db = Arc::new(MockDb::new(vec![]));
-    run("version1", mock_db.clone());
+    let calls = mock_db.calls();
+    let upserts: Vec<&String> = calls
+        .iter()
+        .filter(|sql| sql.contains("UPSERT file_chunk:["))
+        .collect();
+    assert_eq!(
+        upserts.len(),
+        1,
+        "exactly one chunk must be re-queued (the V2-hash one), calls: {calls:?}"
+    );
     assert!(
-        has_queue_call(&mock_db),
-        "expected V1 to be queued (CREATE file_chunk ... pending)"
+        upserts[0].contains(file_id.as_str()) && upserts[0].contains(", 1]"),
+        "the V2-hash chunk (line 1) is the re-queued one: {}",
+        upserts[0]
+    );
+    assert!(
+        upserts[0].contains("embedding = NONE"),
+        "a reused key with new content must invalidate the previous embedding: {}",
+        upserts[0]
+    );
+    assert!(
+        upserts[0].contains("batch_status='pending'"),
+        "re-queued chunk goes back to pending: {}",
+        upserts[0]
+    );
+    // Exactly one chunk UPSERT total: the line-2 resume chunk is untouched.
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|sql| sql.contains("UPSERT file_chunk:["))
+            .count(),
+        1,
+        "resume chunk with current hash must be left untouched: {calls:?}"
+    );
+    // The file hash advances only after the manifest was fully queued, and
+    // the stale-chunk cleanup runs.
+    assert!(
+        calls
+            .iter()
+            .any(|sql| sql.starts_with(&format!("UPSERT {file_id} SET hash"))),
+        "source_file hash must be persisted: {calls:?}"
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|sql| sql.contains("DELETE file_chunk WHERE file =")
+                && sql.contains("hash != $hash")),
+        "stale-version chunks must be cleaned up: {calls:?}"
+    );
+    // Ordering: every chunk write precedes the file-hash UPSERT.
+    let last_chunk_write = calls
+        .iter()
+        .position(|sql| sql.contains("UPSERT file_chunk:["))
+        .unwrap();
+    let file_upsert = calls
+        .iter()
+        .position(|sql| sql.starts_with(&format!("UPSERT {file_id} SET hash")))
+        .unwrap();
+    assert!(
+        last_chunk_write < file_upsert,
+        "file hash must advance after chunk queuing, not before"
+    );
+}
+
+#[test]
+fn prune_transaction_is_atomic_and_propagates() {
+    // F12/B4: chunk + file deletion run in one transaction; a failure on
+    // either statement propagates (no silent orphans) and the retry
+    // completes.
+    let tmp_dir = temp_repo("repo_prune_atomic");
+    let main_go = tmp_dir.join("main.go");
+    std::fs::write(&main_go, "package main").unwrap();
+    let gone: PathBuf = tmp_dir.join("gone.go"); // not on disk
+
+    let ignored_rel = "gone.go";
+    let repo_ref = format_record_id("repo", &sanitize_id("test-repo"));
+    let deleted_id = ibis_db::ids::source_file_id(&repo_ref, ignored_rel);
+    let source_file_value =
+        Value::RecordId(ibis_db::ids::source_file_record(&repo_ref, ignored_rel));
+    let mock_rows = vec![(
+        "SELECT id, path FROM source_file",
+        rows(vec![obj([
+            ("id", source_file_value),
+            ("path", string_row(&gone.to_string_lossy())),
+        ])]),
+    )];
+
+    // Failure on the chunk DELETE: the error propagates and the transaction
+    // is a single statement (no partial deletes possible).
+    let mut mock_db = Arc::new(MockDb::new(mock_rows.clone()));
+    Arc::get_mut(&mut mock_db).unwrap().fail_on = Some("DELETE file_chunk".to_string());
+    let err = ingest(mock_db.clone(), &tmp_dir, None).expect_err("prune failure must propagate");
+    assert!(
+        err.to_string().contains("prune transaction failed"),
+        "{err}"
+    );
+    let calls = mock_db.calls();
+    assert!(
+        !calls.iter().any(|sql| sql.starts_with("DELETE [")),
+        "no file-only DELETE may run outside the transaction: {calls:?}"
+    );
+    assert!(
+        calls.iter().any(|sql| sql.contains("BEGIN TRANSACTION;")
+            && sql.contains("DELETE file_chunk WHERE file IN [")
+            && sql.contains(&deleted_id)),
+        "chunk + file deletes share one atomic transaction: {calls:?}"
     );
 
-    // 2. Ingest V2 (different content) → queued.
-    let mock_db = Arc::new(MockDb::new(vec![]));
-    run("version2", mock_db.clone());
-    assert!(has_queue_call(&mock_db), "expected V2 to be queued");
+    // Failure on the file DELETE propagates the same way.
+    let mut mock_db = Arc::new(MockDb::new(mock_rows.clone()));
+    Arc::get_mut(&mut mock_db).unwrap().fail_on = Some(format!("DELETE [{deleted_id}]"));
+    let err = ingest(mock_db.clone(), &tmp_dir, None).expect_err("prune failure must propagate");
+    assert!(
+        err.to_string().contains("prune transaction failed"),
+        "{err}"
+    );
 
-    // 3. Ingest V1 again: the count query reports existing embeddings.
-    let mock_db = Arc::new(MockDb::new(vec![(
-        "SELECT count()",
-        rows(vec![obj([(
-            "count",
-            Value::Number(surrealdb::types::Number::Int(5)),
-        )])]),
-    )]));
-    run("version1", mock_db.clone());
-    for sql in mock_db.calls() {
-        assert!(
-            !(sql.contains("UPSERT file_chunk:[") && sql.contains("batch_status='pending'")),
-            "expected 0 queuing calls for returning to V1 (cache hit), got call: {sql}"
-        );
-    }
+    // Retry with the failure cleared: the whole batch completes.
+    let mock_db = Arc::new(MockDb::new(mock_rows));
+    ingest(mock_db.clone(), &tmp_dir, None).expect("retry succeeds");
+    assert!(
+        mock_db
+            .calls()
+            .iter()
+            .any(|sql| sql.contains("COMMIT TRANSACTION;") && sql.contains(&deleted_id)),
+        "retry deletes the obsolete file: {:?}",
+        mock_db.calls()
+    );
 }
 
 #[test]

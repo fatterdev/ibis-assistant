@@ -27,3 +27,6 @@ tokio.workspace = true
 tracing.workspace = true
 walkdir.workspace = true
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+uuid = { version = "1", features = ["v4"] }

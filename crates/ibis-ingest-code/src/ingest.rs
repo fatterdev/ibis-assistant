@@ -252,12 +252,9 @@ pub async fn ingest_codebase(
     }
 
     // Prune phase: delete files from DB that are no longer active in git HEAD.
-    if let Err(err) = prune_repo(db.as_ref(), &abs_path, &active_files).await {
-        tracing::error!(
-            "Error pruning obsolete files for {}: {err}",
-            abs_path.display()
-        );
-    }
+    // F12/B4: prune failures propagate — a failed reconciliation must not
+    // masquerade as a completed ingest.
+    prune_repo(db.as_ref(), &abs_path, &active_files).await?;
 
     tracing::info!("Code analysis complete for {}", abs_path.display());
     report(progress.as_ref(), 4, 4, "Ingest complete");
@@ -348,11 +345,13 @@ struct FileHashRow {
     hash: Option<String>,
 }
 
-/// The `SELECT count FROM file_chunk …` projection (Q1: count may arrive as
-/// Int/Float/Decimal).
+/// The `SELECT id, hash, batch_status FROM file_chunk WHERE file = …`
+/// projection that drives the per-chunk resume/invalidate decision (F08/F10).
 #[derive(Debug, SurrealValue)]
-struct ChunkCountRow {
-    count: Option<I64>,
+struct ChunkStateRow {
+    id: Option<RecordId>,
+    hash: Option<String>,
+    batch_status: Option<String>,
 }
 
 /// Builds a [`Vars`] map from `(key, SurrealValue)` pairs.
@@ -411,7 +410,10 @@ async fn prune_repo(
 
     tracing::info!("Deleting {} obsolete files...", to_delete.len());
 
-    // Batch delete (50 ids per batch).
+    // F12/B4: chunk and file deletion run in ONE atomic transaction and
+    // errors propagate — the old best-effort two-DELETE sequence left chunk
+    // orphans whenever the second DELETE failed, and those orphans were no
+    // longer reachable by any cleanup (the file row was already gone).
     for batch in to_delete.chunks(50) {
         let unsafe_count = batch
             .iter()
@@ -429,18 +431,15 @@ async fn prune_repo(
             continue;
         }
         let id_list = safe.join(", ");
-
-        // 1. Delete chunks.
-        let chunk_sql = format!("DELETE {} WHERE file IN [{}];", t::FILE_CHUNK, id_list);
-        if let Err(err) = db.execute(&chunk_sql).await {
-            tracing::warn!("Failed to delete chunks: {err}");
-        }
-
-        // 2. Delete files.
-        let file_sql = format!("DELETE [{id_list}];");
-        if let Err(err) = db.execute(&file_sql).await {
-            tracing::warn!("Failed to delete files: {err}");
-        }
+        let txn_sql = format!(
+            "BEGIN TRANSACTION; DELETE {} WHERE file IN [{}]; DELETE [{}]; COMMIT TRANSACTION;",
+            t::FILE_CHUNK,
+            id_list,
+            id_list
+        );
+        db.smart_query(&txn_sql, Vars::new())
+            .await
+            .map_err(|e| CodeIngestError::other(format!("prune transaction failed: {e}")))?;
     }
 
     Ok(())
@@ -486,8 +485,9 @@ async fn process_file(
         Err(_) => String::new(),
     };
 
-    // Optimization: if the current DB hash matches the disk hash, we are
-    // 100% up to date.
+    // Optimization: if the current DB hash matches the disk hash, the last
+    // pass completed fully (F10/B3: the file hash is persisted only AFTER
+    // every chunk batch of that pass was queued), so nothing to do.
     if !current_db_hash.is_empty() && current_db_hash == hash {
         return Ok(());
     }
@@ -504,50 +504,6 @@ async fn process_file(
     }
 
     tracing::info!("Processing {}...", rel_path);
-
-    // 3. Update the file node (pointer to the current version). WQ-7: one row
-    // per (repo, rel_path) — no older-version rows to demote, so the legacy
-    // "clear is_head on older versions" sweep is gone.
-    let upsert_sql = format!(
-        "UPSERT {file_id} SET hash = $hash, path = $path, rel_path = $rel, repo_name = $repo, is_head = true, updated_at = time::now();"
-    );
-    db.smart_query(
-        &upsert_sql,
-        vars_of([
-            ("hash", hash.clone().into_value()),
-            ("path", path_str(abs_path).into_value()),
-            ("rel", rel_normalized.clone().into_value()),
-            ("repo", repo_name.into_value()),
-        ]),
-    )
-    .await
-    .map_err(|e| CodeIngestError::other(format!("db update error: {e}")))?;
-
-    // Check if chunks already exist for this file hash to avoid redundant AI
-    // processing and storage.
-    let count_sql = format!(
-        "SELECT count() FROM {} WHERE file = {file_id} AND hash = $hash;",
-        t::FILE_CHUNK
-    );
-    if let Ok(outcome) = db
-        .smart_query(&count_sql, vars_of([("hash", hash.clone().into_value())]))
-        .await
-    {
-        let count = outcome
-            .rows::<ChunkCountRow>(&count_sql)
-            .ok()
-            .and_then(|rows| rows.into_iter().next())
-            .and_then(|row| row.count)
-            .map(|c| c.get())
-            .unwrap_or(0);
-        if count > 0 {
-            tracing::info!(
-                "  - Using existing embeddings for hash {}",
-                truncate_hash(&hash)
-            );
-            return Ok(()); // Already have embeddings for this version!
-        }
-    }
 
     // 5. Chunk & persist (the async batch manager embeds later).
     let mut logs: Vec<LogTemplate> = Vec::new();
@@ -599,16 +555,17 @@ async fn process_file(
         persist_call_edges(db, rel_path, repo_name, &file_id, &calls).await;
         ast_chunks
     } else {
-        // Whole-file fallback chunking.
+        // Whole-file fallback chunking (F01: real line spans — all-zero
+        // spans collapsed every fallback chunk onto the same record key).
         let raw_chunks = chunk_content(&file_bytes, 1000)?;
         raw_chunks
             .into_iter()
-            .map(|content| AstChunk {
+            .map(|(start, end, content)| AstChunk {
                 symbol_name: String::new(),
                 kind: String::new(),
                 content,
-                start_line: 0,
-                end_line: 0,
+                start_line: start as u32,
+                end_line: end as u32,
             })
             .collect()
     };
@@ -673,8 +630,39 @@ async fn process_file(
     }
 
     // Batching logic.
+    //
+    // F08/F10 (B2/B3): the chunk state of the file is read ONCE and drives a
+    // per-chunk decision — a chunk whose stored hash already equals the new
+    // file hash is a resume of the same version (its content is identical by
+    // deterministic chunking, so any embedding it carries is still valid and
+    // it is left untouched); every other chunk carries NEW content on an
+    // existing key, so its previous embedding is invalidated before the row
+    // goes back to `pending`.
+    let state_sql = format!(
+        "SELECT id, hash, batch_status FROM {} WHERE file = {file_id};",
+        t::FILE_CHUNK
+    );
+    let mut existing: std::collections::HashMap<String, (String, String)> =
+        std::collections::HashMap::new();
+    if let Ok(outcome) = db.execute(&state_sql).await {
+        for row in outcome
+            .rows::<ChunkStateRow>(&state_sql)
+            .unwrap_or_default()
+        {
+            let Some(id) = row.id else { continue };
+            existing.insert(
+                ibis_db::ids::format_record(&id),
+                (
+                    row.hash.unwrap_or_default(),
+                    row.batch_status.unwrap_or_default(),
+                ),
+            );
+        }
+    }
+
     let batch_size = 100;
-    for (start, batch) in valid_chunks.chunks(batch_size).enumerate() {
+    let mut queue_failed = false;
+    'batches: for (start, batch) in valid_chunks.chunks(batch_size).enumerate() {
         let batch_start = start * batch_size;
         let mut valid_batch: Vec<(usize, &AstChunk)> = Vec::new();
         for (k, chunk) in batch.iter().enumerate() {
@@ -686,13 +674,21 @@ async fn process_file(
             continue;
         }
 
-        // Store chunks with batch_status = 'pending'; idempotent
-        // (IF NOT EXISTS) so a partial resume preserves existing embeddings
-        // (F-A03).
         let mut sql = String::from("BEGIN TRANSACTION; ");
         let mut batch_vars: Vars = Vars::new();
+        let mut writes = 0usize;
         for (k, (_original_index, chunk_obj)) in valid_batch.iter().enumerate() {
             let chunk_id = ibis_db::ids::file_chunk_id(&file_id, i64::from(chunk_obj.start_line));
+            // Same version already on disk (resume of an interrupted pass):
+            // keep the row — its embedding, pending state or completed
+            // embedding all stay valid.
+            if existing
+                .get(&chunk_id)
+                .is_some_and(|(stored_hash, _)| stored_hash == &hash)
+            {
+                continue;
+            }
+            writes += 1;
             batch_vars.insert(format!("file{k}"), file_record.clone().into_value());
             batch_vars.insert(format!("hash{k}"), hash.clone().into_value());
             batch_vars.insert(
@@ -713,12 +709,11 @@ async fn process_file(
                 I64::new(i64::from(chunk_obj.end_line)).into_value(),
             );
 
-            // `UPSERT` (3.x) replaces the removed `CREATE … IF NOT EXISTS` (D17 R1):
-            // on a partial resume the deterministic chunk id already exists and
-            // the embedding field is NOT in the SET list, so its value survives
-            // (F-A03) while content/hash/lines refresh.
+            // F08: the SET list includes `embedding = NONE` — a reused chunk
+            // key with new content must never keep the previous version's
+            // vector. `batch_status = 'pending'` re-queues it for embedding.
             sql.push_str(&format!(
-                "UPSERT {chunk_id} SET file=$file{k}, hash=$hash{k}, content=$content{k}, symbol_name=$sym{k}, kind=$kind{k}, start_line=$s{k}, end_line=$e{k}, batch_status='pending'; "
+                "UPSERT {chunk_id} SET file=$file{k}, hash=$hash{k}, content=$content{k}, symbol_name=$sym{k}, kind=$kind{k}, start_line=$s{k}, end_line=$e{k}, embedding = NONE, batch_status='pending'; "
             ));
 
             // If the chunk represents a symbol (function/class), explicitly
@@ -744,10 +739,16 @@ async fn process_file(
                 sql.push_str(&format!("RELATE {file_id}->{}->{symbol_id}; ", t::CONTAINS));
             }
         }
+        if writes == 0 {
+            // Fully-resumed batch: nothing to write.
+            continue;
+        }
         sql.push_str("COMMIT;");
 
         if let Err(err) = db.smart_query(&sql, batch_vars).await {
             tracing::error!("Failed to persist pending chunks for {rel_path}: {err}");
+            queue_failed = true;
+            break 'batches;
         }
         tracing::info!(
             "  - Queued {}/{} chunks for {}",
@@ -756,6 +757,46 @@ async fn process_file(
             rel_path
         );
     }
+
+    if queue_failed {
+        // F10/B3: the file hash must only advance after every chunk batch of
+        // the version was queued — a partial pass stays retryable.
+        return Err(CodeIngestError::other(format!(
+            "chunk persistence failed for {rel_path}; file version left retryable"
+        )));
+    }
+
+    // F10/B3: the file node (pointer to the current version) is written only
+    // now that every chunk batch was queued. One row per (repo, rel_path);
+    // no older-version rows to demote (the legacy "clear is_head" sweep is
+    // gone with the composite key).
+    let upsert_sql = format!(
+        "UPSERT {file_id} SET hash = $hash, path = $path, rel_path = $rel, repo_name = $repo, is_head = true, updated_at = time::now();"
+    );
+    db.smart_query(
+        &upsert_sql,
+        vars_of([
+            ("hash", hash.clone().into_value()),
+            ("path", path_str(abs_path).into_value()),
+            ("rel", rel_normalized.clone().into_value()),
+            ("repo", repo_name.into_value()),
+        ]),
+    )
+    .await
+    .map_err(|e| CodeIngestError::other(format!("db update error: {e}")))?;
+
+    // F10/B3: the array-id key space `[file, start_line]` carries no version
+    // dimension — chunks of older versions left on keys the current manifest
+    // does not reclaim are stale duplicates, not history. Drop them once the
+    // current version is fully queued, so the file's chunk set is exactly
+    // its current version.
+    let cleanup_sql = format!(
+        "DELETE {} WHERE file = {file_id} AND hash != $hash;",
+        t::FILE_CHUNK
+    );
+    db.smart_query(&cleanup_sql, vars_of([("hash", hash.clone().into_value())]))
+        .await
+        .map_err(|e| CodeIngestError::other(format!("stale chunk cleanup failed: {e}")))?;
 
     Ok(())
 }
@@ -837,22 +878,38 @@ fn file_hash(content: &[u8]) -> String {
 /// cap that failed whole files on long lines (minified code); Rust line
 /// iteration has no cap. Invalid UTF-8 is replaced like the JSON-marshal
 /// write path did.
-fn chunk_content(content: &[u8], size: usize) -> Result<Vec<String>, CodeIngestError> {
+///
+/// F01: every chunk carries its **real** `start_line`/`end_line` (1-based) —
+/// the composite chunk key is `[file, start_line]`, so a constant
+/// `start_line = 0` collapsed all fallback chunks of a file onto one
+/// record. The numbering stays correct when empty chunks are dropped later
+/// (each chunk carries its own line span).
+fn chunk_content(
+    content: &[u8],
+    size: usize,
+) -> Result<Vec<(usize, usize, String)>, CodeIngestError> {
     let text = String::from_utf8_lossy(content);
-    let mut chunks: Vec<String> = Vec::new();
+    let mut chunks: Vec<(usize, usize, String)> = Vec::new();
     let mut current = String::new();
-    for line in text.lines() {
+    let mut current_start = 0usize;
+    let mut current_end = 0usize;
+    for (idx, line) in text.lines().enumerate() {
+        let line_no = idx + 1;
         // Flush only a non-empty current chunk (F-A11: pushed an empty
         // chunk for an oversized first line and its 64KB scanner cap failed
         // whole files; Rust keeps the oversized line as its own chunk).
         if current.len() + line.len() > size && !current.is_empty() {
-            chunks.push(std::mem::take(&mut current));
+            chunks.push((current_start, current_end, std::mem::take(&mut current)));
+        }
+        if current.is_empty() {
+            current_start = line_no;
         }
         current.push_str(line);
         current.push('\n');
+        current_end = line_no;
     }
     if !current.is_empty() {
-        chunks.push(current);
+        chunks.push((current_start, current_end, current));
     }
     Ok(chunks)
 }
@@ -885,15 +942,41 @@ mod tests {
     fn chunk_content_matrix() {
         // Scenario: TestChunkContent.
         let text = "line1\nline2\nline3\nline4\nline5";
-        // Infinite size → 1 chunk, trailing newline appended per line.
+        // Infinite size → 1 chunk spanning the whole file.
         let chunks = chunk_content(text.as_bytes(), 100).unwrap();
         assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0], format!("{text}\n"));
+        assert_eq!(chunks[0], (1, 5, format!("{text}\n")));
 
-        // Small size → 1 line per chunk.
+        // Small size → 1 line per chunk, real line numbers (F01).
         let chunks = chunk_content(text.as_bytes(), 10).unwrap();
         assert_eq!(chunks.len(), 5, "chunks: {chunks:?}");
-        assert_eq!(chunks[0], "line1\n");
+        assert_eq!(chunks[0], (1, 1, "line1\n".to_string()));
+        assert_eq!(chunks[4], (5, 5, "line5\n".to_string()));
+    }
+
+    /// F01: fallback chunks carry distinct, monotonic start lines — the
+    /// composite chunk key `[file, start_line]` must not collapse them.
+    #[test]
+    fn chunk_content_start_lines_are_unique() {
+        let line = "This is a sample line of text to simulate code content.\n";
+        let text = line.repeat(30);
+        let chunks = chunk_content(text.as_bytes(), 100).unwrap();
+        assert!(chunks.len() > 3, "chunks: {chunks:?}");
+        let mut starts: Vec<usize> = chunks.iter().map(|(s, _, _)| *s).collect();
+        let unique = starts.len();
+        starts.sort_unstable();
+        starts.dedup();
+        assert_eq!(unique, starts.len(), "start lines must be unique");
+        assert!(
+            starts.windows(2).all(|w| w[0] < w[1]),
+            "start lines must be monotonic: {starts:?}"
+        );
+        // Line spans are contiguous and cover the file.
+        assert_eq!(chunks.first().unwrap().0, 1);
+        assert_eq!(chunks.last().unwrap().1, 30);
+        for w in chunks.windows(2) {
+            assert_eq!(w[0].1 + 1, w[1].0, "spans must be contiguous: {chunks:?}");
+        }
     }
 
     #[test]
@@ -904,7 +987,7 @@ mod tests {
         let text = line.repeat(1000);
         let chunks = chunk_content(text.as_bytes(), 100).unwrap();
         assert!(chunks.len() > 10);
-        assert!(chunks.iter().all(|c| !c.is_empty()));
+        assert!(chunks.iter().all(|c| !c.2.trim().is_empty()));
     }
 
     #[test]
@@ -915,8 +998,8 @@ mod tests {
         let text = format!("{long_line}\nshort\n");
         let chunks = chunk_content(text.as_bytes(), 1000).unwrap();
         assert!(!chunks.is_empty());
-        assert!(chunks[0].starts_with("xxxx"));
-        assert!(chunks.iter().any(|c| c.contains("short")));
+        assert!(chunks[0].2.starts_with("xxxx"));
+        assert!(chunks.iter().any(|c| c.2.contains("short")));
     }
 
     #[test]
