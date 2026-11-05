@@ -562,24 +562,31 @@ impl SearchService {
             }
         }
         // Best-contributing channel per document (F03/D1 diagnostics): pick the
-        // channel whose contribution to this document is strongest.
+        // channel whose contribution to this document is strongest. In
+        // additive mode that is the largest per-channel score; in RRF mode
+        // scores carry no comparable units, so the strength is the rank
+        // position (rank 1 = strongest) from the same rank lists that feed
+        // the fusion — never the per-channel score, whose `.max(1.0)`
+        // clamp would flatten every strength to 1.0 and let the first
+        // channel in query order win regardless of its rank.
         for hit in hits.iter_mut() {
             let Some(c) = chunks.get(hit.payload) else {
                 continue;
             };
-            let strength_of = |h: &ChunkResult| match self.fusion_mode {
-                FusionMode::Additive => h.score,
-                // In RRF the contribution strength is the rank position
-                // (rank 1 = strongest).
-                FusionMode::Rrf => 1.0 / h.score.max(1.0),
-            };
             let mut best: Option<(&str, f64)> = None;
-            for channel in &channels {
-                if let Some(h) = channel.iter().find(|h| h.id == c.id) {
-                    let strength = strength_of(h);
-                    if best.is_none_or(|(_, s)| strength > s) {
-                        best = Some((h.channel.as_str(), strength));
-                    }
+            for (channel_idx, channel) in channels.iter().enumerate() {
+                let Some(h) = channel.iter().find(|h| h.id == c.id) else {
+                    continue;
+                };
+                let strength = match self.fusion_mode {
+                    FusionMode::Additive => h.score,
+                    FusionMode::Rrf => rank_lists[channel_idx]
+                        .iter()
+                        .find(|(payload, _)| *payload == hit.payload)
+                        .map_or(0.0, |(_, rank)| 1.0 / *rank as f64),
+                };
+                if best.is_none_or(|(_, s)| strength > s) {
+                    best = Some((h.channel.as_str(), strength));
                 }
             }
             if let Some((name, _)) = best {
@@ -990,6 +997,70 @@ mod tests {
             all.iter()
                 .any(|q| q.contains("FROM file_chunk WHERE content @1@")),
             "file_chunk_text channel must be part of ask_project: {all:?}"
+        );
+    }
+
+    /// RRF attribution (F03/D1 diagnostics): the best-contributing channel is
+    /// the one with the strongest RANK (rank 1 beats rank 2), not the first
+    /// channel in query order — per-channel scores are not comparable units and
+    /// their `.max(1.0)` clamp would flatten every strength to 1.0.
+    #[tokio::test]
+    async fn ask_project_rrf_best_channel_follows_rank_not_query_order() {
+        // Vector channel: `a` at rank 1, `b` at rank 2. Lexical channel: `b`
+        // at rank 1 (and `a` absent). If attribution followed query order, `b`
+        // would be credited to the vector channel it ranks second in.
+        let file_rows = vec![
+            obj(vec![
+                ("id", Value::from_t("file_chunk:a")),
+                ("path", Value::from_t("/src/a.go")),
+                ("content", Value::from_t("func main()")),
+                ("score", Value::from_t(0.9f64)),
+            ]),
+            obj(vec![
+                ("id", Value::from_t("file_chunk:b")),
+                ("path", Value::from_t("/src/b.go")),
+                ("content", Value::from_t("func help()")),
+                ("score", Value::from_t(0.8f64)),
+            ]),
+        ];
+        let lexical_rows = vec![obj(vec![
+            ("id", Value::from_t("file_chunk:b")),
+            ("path", Value::from_t("/src/b.go")),
+            ("content", Value::from_t("func help()")),
+            ("score", Value::from_t(5.0f64)),
+        ])];
+        let fake = Arc::new(FakeDb::new(vec![
+            ("FROM file_chunk WHERE embedding", rows_of(file_rows)),
+            ("FROM file_chunk WHERE content @1@", rows_of(lexical_rows)),
+        ]));
+        let mut svc = service(fake, Some(fake_ai()));
+        svc.fusion_mode = FusionMode::Rrf;
+        let results = svc
+            .ask_project(&ActorContext::LOCAL, "test query")
+            .await
+            .expect("ask_project");
+
+        let score = |id: &str| results.iter().find(|r| r.id == id).unwrap().score;
+        let channel = |id: &str| results.iter().find(|r| r.id == id).unwrap().channel.clone();
+        // `b` sums two channel contributions (vector rank-2 + lexical rank-1)
+        // and outranks `a` (vector rank-1 only).
+        assert!(
+            score("file_chunk:b") > score("file_chunk:a"),
+            "cross-channel ranks sum: {} vs {}",
+            score("file_chunk:b"),
+            score("file_chunk:a")
+        );
+        // Attribution follows the strongest rank: `b`'s lexical rank-1 beats
+        // its vector rank-2, even though the vector channel runs first.
+        assert_eq!(
+            channel("file_chunk:b"),
+            "file_chunk_text",
+            "rank-1 in the later channel must outrank rank-2 in the first channel"
+        );
+        assert_eq!(
+            channel("file_chunk:a"),
+            "file_chunk",
+            "single-channel documents keep their own channel"
         );
     }
 
