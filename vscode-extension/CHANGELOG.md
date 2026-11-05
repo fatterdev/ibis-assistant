@@ -5,6 +5,25 @@ The runtime changelog lives in the [repository root](https://github.com/fatterde
 
 ## [Unreleased]
 
+- **Workstreams view + inline curation menu (F4-A4, 1.0.14)** — the
+  activity-bar container grows a second tree, **Workstreams**: roots come
+  from MCP `memory_workstreams` (name + current-member count, ordered by
+  most recently touched), children from `memory_list(workstream=…)` under
+  the shared `ibis.memory.statusFilter` (both view titles show `all` while
+  the unfiltered browse is active). Entry rows of both views carry an inline
+  curation menu: **Share** to team (`memory_share`), **Archive**
+  (`memory_update status=archived`, confirmed), **Supersede…**
+  (`memory_add supersedes=…`, kind/visibility prefilled — the governance
+  route for rows you cannot write), and **Update Content…**
+  (`memory_update content`, re-embeds; offered on owner-matching rows, with
+  a "create a superseding memory instead" fallback on governance errors).
+  Every action toasts the compact result and logs the full tool output; the
+  runtime's rejections (git-owned claims, personal-row ownership) surface
+  verbatim. Both trees **refresh on focus** — kind badges and expanded
+  parents re-derive from embedding-free `memory_list` calls; search results
+  are never auto-refreshed (rerun the search instead). Requires the F4-A3
+  runtime (the `memory_workstreams` tool and the `memory_list` workstream
+  filter).
 - **Memory status filter (F4-A2, 1.0.13)** — the Memory tree browses only
   still-valid memories by default: new setting `ibis.memory.statusFilter`
   (`current`, the default, or `all`) is passed as `status` to MCP

@@ -302,6 +302,63 @@ check(
   "current -> status arg, all -> explicit all marker, view title badge",
 );
 
+// F4-A4: workstreams view + inline curation menu + refresh on focus.
+const workstreamView = (vsixPkg.contributes.views.ibis || []).find(
+  (v) => v.id === "ibis.workstreamExplorer",
+);
+check(
+  "vscode-extension: Workstreams view contributed in the ibis activity-bar container",
+  Boolean(workstreamView) && workstreamView.name === "Workstreams",
+  workstreamView ? `name=${workstreamView.name}` : "missing view",
+);
+check(
+  "vscode-extension: workstream tree roots come from memory_workstreams and children from memory_list(workstream) under the status filter",
+  memoryTreeSource.includes('"memory_workstreams", {}') &&
+    memoryTreeSource.includes('workstream: ws.id || ws.name') &&
+    memoryTreeSource.includes('statusFilterOf'),
+  "feat(vscode): workstreams view and inline curation menu",
+);
+for (const command of [
+  "ibis.memory.share",
+  "ibis.memory.archive",
+  "ibis.memory.supersede",
+  "ibis.memory.updateContent",
+]) {
+  const menuItem = (vsixPkg.contributes.menus["view/item/context"] || []).find(
+    (m) => m.command === command,
+  );
+  check(
+    `vscode-extension: curation command ${command} contributed, registered, and on the entry context menu`,
+    commandIds.includes(command) && memoryTreeSource.includes(`"${command}"`) &&
+      Boolean(menuItem) && String(menuItem.when || "").includes("ibisMemoryEntry"),
+    menuItem ? `when=${menuItem.when}` : "missing menu entry",
+  );
+}
+check(
+  "vscode-extension: Update Content menu item is guarded to the owner-matching context value",
+  memoryTreeSource.includes("ibisMemoryEntryUpdatable") &&
+    memoryTreeSource.includes("ownedByMe"),
+  "F4 §A.4 update guard",
+);
+check(
+  "vscode-extension: both memory trees refresh on focus without re-running searches",
+  memoryTreeSource.includes("onDidChangeTreeViewVisibility") &&
+    memoryTreeSource.includes("refreshOnFocus") &&
+    memoryTreeSource.includes('event.viewId === "ibis.memoryExplorer"') &&
+    memoryTreeSource.includes('event.viewId === "ibis.workstreamExplorer"') &&
+    (memoryTreeSource.split('"memory_search"').length - 1) === 1,
+  "F4 §A.5: search roots never auto-refresh (the quoted tool call appears only in the explicit fetch)",
+);
+check(
+  "vscode-extension: workstream refresh command contributed with a view-title button",
+  commandIds.includes("ibis.workstream.refresh") &&
+    memoryTreeSource.includes('"ibis.workstream.refresh"') &&
+    (vsixPkg.contributes.menus["view/title"] || []).some(
+      (m) => m.command === "ibis.workstream.refresh" && m.when === "view == ibis.workstreamExplorer",
+    ),
+  "feat(vscode): workstreams view refresh",
+);
+
 const instructions = (vsixPkg.contributes && vsixPkg.contributes.chatInstructions) || [];
 const instructionFile = instructions.length === 1
   ? join(root, "vscode-extension", instructions[0].path.replace("./", ""))

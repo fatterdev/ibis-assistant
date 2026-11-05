@@ -4,7 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 
-const { registerMemoryTree } = require("./memory-tree");
+const { registerMemoryTree, registerWorkstreamTree, registerCurationMenu } = require("./memory-tree");
 const { registerRememberSelection } = require("./remember-selection");
 const { registerQuickActions } = require("./quick-actions");
 
@@ -158,7 +158,10 @@ async function activate(context) {
   await startLmBridge(host, cfg);
   registerMcpProvider(context, host);
   createStatusBarItem(context, host);
-  registerMemoryTree(context, { getConfig, resolveBackend, logLine }, host);
+  const treeApi = { getConfig, resolveBackend, logLine };
+  registerMemoryTree(context, treeApi, host);
+  registerWorkstreamTree(context, treeApi, host);
+  registerCurationMenu(context, treeApi, host);
   registerQuickActions(context);
   registerRememberSelection(
     context,

@@ -2,7 +2,7 @@
   "name": "ibis-assistant",
   "displayName": "Ibis Assistant",
   "description": "Living project memory over MCP for VS Code. Spawns an isolated Ibis Assistant (Rust) stdio child or attaches to a shared personal runtime for graph, logs, tickets, and typed memory.",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "publisher": "fatterdev",
   "license": "Apache-2.0",
   "icon": "assets/icon.png",
@@ -88,6 +88,27 @@
         "title": "Ibis Assistant: Open Memory Detail"
       },
       {
+        "command": "ibis.memory.share",
+        "title": "Ibis Assistant: Share Memory"
+      },
+      {
+        "command": "ibis.memory.archive",
+        "title": "Ibis Assistant: Archive Memory"
+      },
+      {
+        "command": "ibis.memory.supersede",
+        "title": "Ibis Assistant: Supersede Memory"
+      },
+      {
+        "command": "ibis.memory.updateContent",
+        "title": "Ibis Assistant: Update Memory Content"
+      },
+      {
+        "command": "ibis.workstream.refresh",
+        "title": "Ibis Assistant: Refresh Workstreams",
+        "icon": "$(sync)"
+      },
+      {
         "command": "ibis.rememberSelection",
         "title": "Ibis Assistant: Remember Selection"
       },
@@ -116,6 +137,10 @@
           "name": "Memory"
         },
         {
+          "id": "ibis.workstreamExplorer",
+          "name": "Workstreams"
+        },
+        {
           "id": "ibis.quickActions",
           "name": "Quick Actions"
         }
@@ -137,11 +162,54 @@
           "command": "ibis.memory.toggleStatusFilter",
           "group": "navigation@3",
           "when": "view == ibis.memoryExplorer"
+        },
+        {
+          "command": "ibis.workstream.refresh",
+          "group": "navigation@1",
+          "when": "view == ibis.workstreamExplorer"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "ibis.memory.share",
+          "when": "viewItem =~ /^ibisMemoryEntry/",
+          "group": "curation@1"
+        },
+        {
+          "command": "ibis.memory.archive",
+          "when": "viewItem =~ /^ibisMemoryEntry/",
+          "group": "curation@2"
+        },
+        {
+          "command": "ibis.memory.supersede",
+          "when": "viewItem =~ /^ibisMemoryEntry/",
+          "group": "curation@3"
+        },
+        {
+          "command": "ibis.memory.updateContent",
+          "when": "viewItem == ibisMemoryEntryUpdatable",
+          "group": "curation@4"
         }
       ],
       "commandPalette": [
         {
           "command": "ibis.memory.openDetail",
+          "when": "false"
+        },
+        {
+          "command": "ibis.memory.share",
+          "when": "false"
+        },
+        {
+          "command": "ibis.memory.archive",
+          "when": "false"
+        },
+        {
+          "command": "ibis.memory.supersede",
+          "when": "false"
+        },
+        {
+          "command": "ibis.memory.updateContent",
           "when": "false"
         }
       ],
@@ -444,7 +512,7 @@
           "default": "current",
           "scope": "window",
           "order": 43,
-          "markdownDescription": "Status filter for the Memory tree kind browse and search (`memory_list` / `memory_search`). Toggle it from the view title with **Ibis Assistant: Toggle Memory Status Filter**; the view title shows `all` when the unfiltered browse is active."
+          "markdownDescription": "Status filter for the Memory tree kind browse and search (`memory_list` / `memory_search`), the Workstreams view children, and the search results. Toggle it from the view title with **Ibis Assistant: Toggle Memory Status Filter**; both view titles show `all` when the unfiltered browse is active."
         },
         "ibis.workingState.useWorkspaceProject": {
           "type": "boolean",

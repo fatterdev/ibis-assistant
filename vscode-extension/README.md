@@ -17,7 +17,9 @@ This extension is the VS Code packaging: it attaches to the always-on Ibis Assis
 - **MCP server provider** — VS Code's MCP integration (`registerMcpServerDefinitionProvider`) attaches to the personal daemon over Streamable HTTP by default, or spawns `ibis -mode stdio -runtime-mode plugin` when `ibis.runtime.mode=spawn` is selected.
 - **Status bar item** — shows the effective backend (attach/offline/spawn) plus LM-bridge and MCP-provider indicators; click it to run **Ibis Assistant: Status**, which offers **Start Daemon** when the personal daemon is unreachable.
 - **Start Daemon** — **Ibis Assistant: Start Daemon** launches `ibis start` detached (the daemon outlives VS Code) and re-probes the endpoint until the MCP server answers.
-- **Memory tree view** — activity-bar view browses typed memory by kind via MCP `memory_list` (current-status rows by default; `ibis.memory.statusFilter` / the title-bar filter button widens to every status), with semantic search honoring the same filter, refresh, and a read-only detail editor (MCP `memory_expand`).
+- **Memory tree view** — activity-bar view browses typed memory by kind via MCP `memory_list` (current-status rows by default; `ibis.memory.statusFilter` / the title-bar filter button widens to every status), with semantic search honoring the same filter, refresh, and a read-only detail editor (MCP `memory_expand`). Both trees refresh on focus; search results are never re-run automatically (the embedding cost is paid only by an explicit search).
+- **Workstreams view** — second tree in the same activity-bar container: roots from MCP `memory_workstreams` (name + current-member count, most-recently-touched first), children from `memory_list(workstream=…)` under the same status filter, same detail editor.
+- **Inline curation menu** — right-click an entry (Memory or Workstreams view) to **Share** to team (`memory_share`), **Archive** (`memory_update status=archived`, confirmed), **Supersede…** (`memory_add supersedes=…` with kind/visibility prefilled — the governance route for rows you cannot write), or **Update Content…** (`memory_update content`, re-embeds; offered on owner-matching rows, falls back to Supersede on governance errors). Every action toasts the result and logs the full tool output; git-owned claims surface the runtime's repo-is-source-of-truth rejections.
 - **Remember with provenance** — **Ibis Assistant: Remember Selection** (editor context menu) captures the selection plus `file:start-end` range, and **Ibis Assistant: Remember File** (editor/Explorer context menu) captures a fact about a whole file; both bind `memory_add` to the source file via `source_path` + sha256 `source_hash`, so they go stale when the file changes.
 - **Session contract for agents** — the `ibis-session-contract` chat instruction (attach it in chat via *Add Instructions*) teaches agent sessions the tool selection map and memory hygiene; the **Get Started** walkthrough covers onboarding.
 - **IDE LM bridge** — when `vscode.lm` is available, the runtime can use IDE-provided models (`use_ide_provided_models`); embeddings stay on Ollama.
@@ -39,7 +41,7 @@ Local VSIX (recommended while the Marketplace publishing is pending):
 cd vscode-extension
 npm install
 npx --yes @vscode/vsce package --no-dependencies
-code --install-extension .\ibis-assistant-1.0.12.vsix
+code --install-extension .\ibis-assistant-1.0.14.vsix
 ```
 
 For iterative development open this folder in an **Extension Development Host** (`F5`) instead of `code --install-extension` on the source directory (that CLI only accepts an extension id or a `.vsix` file).
@@ -69,6 +71,9 @@ For iterative development open this folder in an **Extension Development Host** 
 | **Ibis Assistant: Remember** | Typed durable memory (`memory_add`) with kind quick pick and configurable default kind/visibility. |
 | **Ibis Assistant: Set working state** | Branch/session scratchpad (`set_working_state`), optionally with the workspace folder as project name. |
 | **Ibis Assistant: Toggle Memory Status Filter** | Flips `ibis.memory.statusFilter` between `current` (default) and `all`; the Memory view title shows `all` while the unfiltered browse is active. |
+| **Ibis Assistant: Refresh Workstreams** | Re-fetches the Workstreams view roots (`memory_workstreams`) and their children. Also available as the view-title sync button. |
+
+The **Share / Archive / Supersede… / Update Content…** actions live on the entry context menu of the Memory and Workstreams views (see *Inline curation menu* above); they are intentionally hidden from the Command Palette.
 
 ## Settings
 
@@ -112,7 +117,7 @@ All settings live under `ibis.*` in VS Code Settings. Precedence is **explicit V
 |---------|---------|-------------|
 | `ibis.memory.defaultKind` | `ask` | Kind used by **Ibis Assistant: Remember**: `ask` keeps the quick pick, otherwise `decision` / `fix` / `rule` / `constraint` / `gotcha` / `design` / `fact` writes directly. |
 | `ibis.memory.defaultVisibility` | `team` | `visibility` for `memory_add`: sharing-first `team`, or `personal` (owner-only). |
-| `ibis.memory.statusFilter` | `current` | Status filter for the Memory tree kind browse and search: `current` shows only still-valid memories, `all` includes superseded/archived/stale rows. Toggle from the view title. |
+| `ibis.memory.statusFilter` | `current` | Status filter for the Memory tree kind browse and search and the Workstreams view children: `current` shows only still-valid memories, `all` includes superseded/archived/stale rows. Toggle from the view title. |
 | `ibis.workingState.useWorkspaceProject` | `true` | Sends the first workspace folder name as `project_name` to `set_working_state`. |
 | `ibis.status.outputMode` | `toast` | **Ibis Assistant: Status** destination: `toast`, `output`, or `both`. |
 | `ibis.debug.verboseLogging` | `false` | Logs verbose activation and backend-resolution details to the output channel. |
