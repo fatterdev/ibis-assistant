@@ -21,15 +21,16 @@ services:
       # Optional team config (git_repos, discovery_root, ai.*, smtp, …):
       # mount read-write if the settings UI should persist changes.
       # - ./config.json:/opt/ibis/config.json
+    extra_hosts:
+      # Reach the host Ollama from Linux/WSL engines (Docker Desktop also
+      # provides the alias; this makes the compose path work either way).
+      - "host.docker.internal:host-gateway"
     environment:
       LOG_LEVEL: INFO
       # Embeddings default to Ollama on 127.0.0.1 — unreachable inside the
-      # container, so point them at the team Ollama host (AI features degrade
-      # to non-embedding channels otherwise; the server still boots):
-      # EMBEDDING_URL: http://host.docker.internal:11434   # Docker Desktop hosts
-      # EMBEDDING_URL: http://<ollama-lan-host>:11434      # Linux hosts (add
-      #   extra_hosts: ["host.docker.internal:host-gateway"] for the alias)
-      # EMBEDDING_MODEL: nomic-embed-text
+      # container. Point at the host (or a LAN Ollama) for memory_add etc.:
+      EMBEDDING_URL: http://host.docker.internal:11434
+      EMBEDDING_MODEL: nomic-embed-text
       # Persist the runtime log beside the data (docker logs holds stdout):
       # LOG_FILE: /data/ibis.log
       # Move off the root/root defaults (applied to the embedded SurrealDB):

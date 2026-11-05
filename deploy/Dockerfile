@@ -71,8 +71,14 @@ RUN set -eu; \
 
 # Real sources (includes the ibis-settings assets/web directory that
 # `include_dir!` embeds) over the stubs; only the workspace crates rebuild.
+# Touch sources after COPY: bind-mount/WSL host mtimes can be older than the
+# stub artifacts above, so cargo would otherwise report "Finished" in <1s and
+# ship the empty stub binary (R7 compose gate).
 COPY crates ./crates
-RUN cargo build --release -p ibis-server
+RUN set -eu; \
+    find crates -type f -exec touch {} +; \
+    rm -f target/release/ibis target/release/deps/ibis*; \
+    cargo build --release -p ibis-server
 
 # ---------------------------------------------------------------------------
 # ast-grep sidecar (pinned): the release zip ships `sg` + `ast-grep`; the
@@ -135,7 +141,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build   /build/target/release/ibis /opt/ibis/ibis
-COPY --from=surreal /surreal                    /opt/ibis/surreal
+COPY --from=surreal /out/surreal                /opt/ibis/surreal
 COPY --from=sg      /out/sg                     /opt/ibis/sg
 COPY --from=sg      /out/ast-grep               /opt/ibis/ast-grep
 # ast-grep rule assets: the chunkers resolve `sgconfig.yml` + `rules/` beside
