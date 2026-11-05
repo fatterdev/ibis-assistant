@@ -107,6 +107,33 @@ Note ambientali: server SurrealDB 3.3.5 (binario locale) contro crate 3.3.4 —
 compatibilità ws verificata in questa sessione (live test del workspace verdi);
 immagine CI pinnata `surrealdb/surrealdb:v3.3.5`.
 
+## Baseline WQ-7 (misurata 05/11/2026 — SurrealDB sidecar 4.0.0, crate 4.0.0, DiskANN + canale lessicale)
+
+La baseline 3.3.5 non è più il contratto: WQ-7 ha migrato il datastore a
+greenfield 4.0 (DiskANN, `array<f16>`, canale full-text, finestra candidati 50)
+e ripubblicato la baseline. Report committato:
+[baseline-4.0.0-offline-additive.json](../../evaluations/retrieval/baseline-4.0.0-offline-additive.json).
+
+| Embedder | Fusione | MRR | recall@5 | recall@15 | case ok |
+|---|---|---|---|---|---|
+| `offline-hash-768` | additive | **0.917** | **0.958** | **1.000** | 12/12 |
+| `offline-hash-768` | rrf (k=60) | 0.917 | 0.958 | 1.000 | 12/12 |
+| `ollama` (`nomic-embed-text`) | additive | **0.917** | **1.000** | **1.000** | 12/12 |
+| `ollama` | rrf (k=60) | 0.875 | 0.958 | 1.000 | 12/12 |
+
+Il retune RRF su 4.0 (k ∈ {60, 10, 1}) non supera additive: parità offline e
+regressione ollama stabile. **Verdetto fusione (A2 chiuso in WQ-7): il default
+`search.fusion` resta `additive`, ora per misura e non per inerzia** — see
+[nota accanto alla validazione A2](./2026-11-05-wq7-fusion-verdict.md).
+Per-channel (offline additive): file_chunk 5, memory 5, commit_chunk 1,
+reasoning 1. Punti deboli: `r05_spawn_threads`/`r08_rrf_decision` al rank 2 con
+rrf; `r11` recall@5 0.5 (secondo expected al rank 9, come su 3.3.5).
+**Soglia CI `--min-recall-5 0.75` resta il pavimento onesto** (marginata sulla
+baseline nuova identica alla vecchia; da rialzare quando A3/C9 spostano il
+pavimento). Ambientali: binario GitHub `surreal-v4.0.0.windows-amd64.exe`
+(spawn `surreal start` + `surrealkv://`, probe `version --json`), immagine CI
+pinnata `surrealdb/surrealdb:v4.0.0`, live test workspace verdi su 4.0.0.
+
 ## Esito accettazione (02/11/2026)
 
 - Dataset 12 case (≥10) con validazione rigida — `eval::tests::dataset_validation_matrix`.

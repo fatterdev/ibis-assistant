@@ -4,6 +4,7 @@
 **Registrato in:** [master work queue](./2026-11-02-master-work-queue.md) come WQ-7.
 **Stato:** spec approvata. Nessun codice in questo commit. L'esecuzione è lo stream WQ-7, prima del gate R7 e prima di C9.
 **Fonti:** [SurrealDB 4.0.0](https://surrealdb.com/releases/4.0) (3 novembre 2026), [post di rilascio](https://surrealdb.com/blog/surrealdb-4-the-database-and-memory-for-every-agent).
+**Esito esecuzione (05/11):** implementato — crate/sidecar/immagine `4.0.0`, schema level 4 (DiskANN `array<f16>`, `DEFINE TYPE`, id array su `source_file`/`file_chunk`, canale lessicale FULLTEXT, archi `REFERENCE … MATERIALIZE INTO`), canali `ORDER BY vector::distance::cosine` con decay come rescore Rust, finestra candidati `search.candidates` (50), LIMIT/ORDER BY fixati, verdetto fusione (default `additive`, [nota](./2026-11-05-wq7-fusion-verdict.md)), baseline 4.0 nel piano A1. Live test workspace verdi su binario 4.0.0; eval gate 0.75 passa. Note di esecuzione sotto.
 
 ## Perché ora, e perché da zero
 
@@ -95,3 +96,55 @@ Sul client WebSocket, risultati shaped (`application/vnd.surrealdb.shaped` o sub
 | D10–D13 | Nessun aggancio all’engine. |
 | WQ-4 D1 / D3 | D1 pinna l’immagine 4.0. D3 confronta l’agente con la baseline A1 di questo stream. |
 | WQ-6 Track B | Le tabelle Beacon, quando B3 viene promossa, copiano id array dove la chiave è composta, DiskANN, full-text, `DEFINE TYPE` e archi materializzati. |
+
+## Note di esecuzione (05/11) — dove la spec incontra la 4.0 reale
+
+Verificato live sul binario GitHub `surreal-v4.0.0.windows-amd64.exe`:
+
+1. **Il binario GitHub non ha il subcommand `db`.** `surreal db start` /
+   `surreal db version` rispondono `unrecognized subcommand 'db'` — quello è
+   il CLI wrapper dell'installer, non la release. Lo spawn resta `surreal
+   start` e il probe versione è **`surreal version --json`** (JSON:
+   `{"arch":…,"os":…,"version":"4.0.0"}`); `parse_version_json` sostituisce
+   `parse_version_output`. La forma `surreal db start` resta corretta solo
+   per l'installazione da installer, che non usiamo.
+2. **`MATERIALIZE INTO` rifiuta i campi union.** Live probe: `MATERIALIZE
+   INTO t.f requires field … to reference records of table t only`. Per gli
+   archi con endpoint union (`contains` entrambi i lati; `authored`,
+   `related_to`, `derived_from` sul lato out) la materializzazione è
+   limitata al lato single-typed; `contains` resta arco non materializzato
+   (C7 potrà sdoppiarlo). Tutti gli altri archi della lista spec
+   materializzano entrambi i lati.
+3. **Le letture filtrate restano traversal.** `array[WHERE …]` su una lista
+   materializzata deref (`related_to_edges.*.out[WHERE …]`) non filtra sui
+   campi del record puntato (probe). `recent_failures` usa la lista per i
+   conteggi (`is_type_of_edges`, `related_to_edges.*.out`) e la traversal per
+   la condizione filtrata per project; blast radius usa le liste per gli hop
+   diretti e la traversal per il secondo hop.
+4. **Id array: uguaglianza su componente record con id array = TableScan.**
+   `file_id = srcf:[…]` non prende la KeyRangeScan (che funziona per componenti
+   string/int/record scalare, anche con range sul secondo componente, e per la
+   lettura diretta per chiave `file_chunk:[srcf:[…], 42]` e gli id-range
+   `[a,1]..[a,100]`). I chunk per file restano fetch per campo `file` come
+   oggi; C7/C8 possono usare gli id-range per chiave.
+5. **Le chiavi ⟨⟩ si canonicalizzano in backtick.** `repo:⟨golden⟩` crea
+   ``repo:`golden` `` (chiave stringa preservata, anche per chiavi tutte
+   cifre). Le id costruite dal client usano la forma `⟨⟩` (che la 4.0 parsa
+   ancora); le id decodificate e rirenderizzate (`format_record`, `to_sql`)
+   escono in forma canonica bare/backtick — semanticamente lo stesso record.
+6. **`search::score()` senza numero è rifiutato** (`index_ref argument must
+   be a literal integer in range 0..255`): le query full-text usano la forma
+   numerata `@1@` + `search::score(1)`. `OR` tra due indici FULLTEXT diversi
+   non è servito dagli indici: il canale lessicale sono due query (title,
+   content) fuse come liste di rango separate.
+7. **Shaped results e trace non sono esposti dal Rust SDK 4.0.0.** Il
+   subprotocol `shaped` esiste lato server, il crate non lo opta; `query`
+   con `trace` è nel protocollo RPC, l'SDK scarta l'opzione
+   (`method/query.rs`: "A query run through the SDK asks for no trace").
+   E15 e la trace di grafo attendono un client RPC raw o una versione SDK
+   che li esponga.
+8. **`OR` full-text, `LIMIT` senza `ORDER BY`, decay**: vedi
+   [verdetto fusione](./2026-11-05-wq7-fusion-verdict.md) e il piano A1 per i
+   numeri; il decay è un rescore Rust sulla finestra (la 4.0 serve
+   `ORDER BY vector::distance::cosine` dall'indice — probe EXPLAIN:
+   `KnnScan` su DiskANN).
