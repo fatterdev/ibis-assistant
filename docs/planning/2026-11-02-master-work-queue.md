@@ -16,7 +16,7 @@
 |---|---|---|---|---|---|---|
 | WQ-1 | **R3/R4 gate** — VSIX 1.0.11 + plugin agent (Parte B) | [review-r3r4-checklist.md](./review-r3r4-checklist.md), [runbook R3.3](./2026-11-03-r33-closure-runbook.md), [analisi tempi S1.3](./2026-11-03-s13-timing-analysis.md) | **CHIUSO (03/11)**: Parte A 26/26 PASS; Parte B completa (R3.1–R3.8 + P4.1–P4.6 PASS) — run interattivo con evidenza da log; cold target chiuso dal pre-warm (prima fetch 12–30ms dopo boot pagato all'attivazione, 3.3–4.7s con Ollama su); note: P4.1 UX (status in chat), P4.5 tool-ref fix + superficie = mode picker, noise hook da estensione Azure Tools (checklist §Esito) | **push differito (decisione owner 03/11)** — a fine sviluppo: riscrittura dell'intera storia in pochi commit precisi (include rimozione claim/fact di test) → push | — | F4 (WQ-3) sbloccata |
 | WQ-2 | **Publish gate** (azioni ② ③ ⑤ + `publish-vscode.yml`) | [review-r3r4-checklist.md §Publish gate](./review-r3r4-checklist.md) | **Differito (decisione owner 03/11)**: publish a sviluppo concluso, non a R3/R4 — vedi §3.6 | azioni manuali ②③ (Trusted Publishing OIDC, Open VSX token) al momento del publish | fine sviluppo (decisione owner su timing) | WQ-4 (D-CLAIMS gate pre-publishing) |
-| WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | **F4-A4 done (04/11, `822e007`)** — Workstreams view VSIX: seconda TreeView `ibis.workstreamExplorer` nello stesso container activity-bar (roots `memory_workstreams`, name + `current_count` in description; children `memory_list({workstream})` con status filter condiviso; stessi entry rows/detail editor/error degradation) + curation menu A.4 su entrambe le viste (Share `memory_share`, Archive `memory_update status=archived` confermato, Supersede… `memory_add supersedes` con kind/visibility prefill + conferma, Update Content… `memory_update content` gated su `ibisMemoryEntryUpdatable` — owner `unknown` o match `ibis.identity.actor`/`IBIS_ACTOR`; governance error → offerta "superseding memory instead") + refresh on focus A.5 (kind badges refetch + fire element-scoped su kind roots identity-stabili; search roots mai auto-refresh — `memory_search` quotato solo nel fetch esplicito, smoke-pinned). VSIX **1.0.14**, smoke-plugin 42/42 (9 check nuovi), vsce package verde; Milestone A resta A5 | **F4-A5** — actor identity setting + header injection + claims knob (`feat(vscode): actor identity header and claims mode knob`) | — (publish differito, §3.6) | Milestone A completa → gate R7 → F3 docs → Track D |
+| WQ-3 | **F4 — Memory view + team server** (VSIX 1.1.0 / runtime 0.3.0) | [2026-11-01-memory-view-team-server-design.md](../superpowers/2026-11-01-memory-view-team-server-design.md) | **F4-A5 done (05/11, `6d24e72`) — Milestone A completa** — actor identity header + claims mode knob: setting `ibis.identity.actor` (+ env `IBIS_ACTOR`, precedenza setting>env condivisa col guard A4), il backend http VSIX porta `actor` e ogni richiesta ide-host `postJsonRpc` (initialize incluso) manda `X-Ibis-Actor`; bridge http (`ibis-mcp-host`) forwarda `IBIS_ACTOR`; setting `ibis.claims.personalMode` (stub default \| db_only) forwardata come `IBIS_CLAIMS_PERSONAL_MODE` solo se esplicita (spawn + Start Daemon; prereq runtime `feat(server)` `24e799e`); Status riporta actor + claims mode. VSIX **1.0.15**, smoke-plugin 47/47 (4 check nuovi), nuovo `http_actor_test.mjs` nel job CI ide-host, cargo workspace verde (unico fallimento: finding pre-esistente ibis-ai/Ollama) | **gate R7** (manuale owner: prima build immagine reale + scenario compose su LAN, 2+ client attaccati, attribution actor visibile, zero consolidamenti duplicati — checklist §8 runbook team_server) | — (F4-A1..A5 + F4-B1..B4 atterrati) | R7 → F3 docs → Track D |
 | WQ-4 | **Track D** — benchmark DevAX/Scope (D1–D5) | [PLAN.md §9](./PLAN.md), [evaluations/scope/README.md](../evaluations/scope/README.md) | Pianificato (scaffold presente; profili con placeholder `TODO-verify-*` by design, pre-D2) | D1 — pin immagine compose + seed su istanza Scope live | WQ-3 (gate R7), azione D1 | D2–D5, R6 close |
 | WQ-5 | **Miglioramenti ddofds** — fasi 0–5 (eval, retrieval, costi, memoria) | [analisi L1](./2026-11-01-dailydoseofds-improvement-analysis.md) → [L2](./2026-11-01-dailydoseofds-improvement-analysis-l2-flussi-funzionali.md) → [L3](./2026-11-01-dailydoseofds-improvement-analysis-l3-punti-di-aggancio.md); [piano A1](./2026-11-02-a1-retrieval-eval-plan.md); [validazione A2](./2026-11-03-a2-rrf-validation.md) | **Fase 0 (A1) done** (commit `9fb53da` 03/11): dataset 12 case + runner + CLI `ibis eval retrieval` + job CI `retrieval-eval`; baseline offline MRR 0.917 / r@5 0.958 / r@15 1.0, baseline ollama (additive) MRR 0.917 / r@5 1.0 / r@15 1.0. **Fase 1 (A2) implementata 03/11**: `rrf_fuse` + `FusionMode` + config `search.fusion` (default **additive**) + eval `--fusion` + campo `fusion` nel report; validazione: offline parità, ollama **regressione** (MRR 0.875, r@5 0.958 — perdita margine r05/r11). **Decisione owner A2 (03/11): opzione 2 — tuning RRF prima di decidere** (default resta additive) | **tuning RRF** (k più piccolo / ibride rank+cosine normalizzate, fuori scope A2) + re-run eval offline+ollama, poi decisione default | — | tuning A2; fasi 1–3 (C9/D13/B6); baseline per Track D D3 |
 | WQ-6 | **Track B** — ingest tracce Beacon (B0–B4, B3 se promossa) | [PLAN.md §9-bis](./PLAN.md) | Pianificato (approvato 03/11; solo piano, nessun codice) | B0 — installazione endpoint Beacon (azione manuale ⑥) + campionamento `runtime.jsonl` → nota `evaluations/beacon/campionamento.md` | azione manuale ⑥ (owner) | B1–B4, R8, B3 (se promossa) |
@@ -338,7 +338,43 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   registrati+menù, guard updatable, focus-refresh senza search, refresh
   workstream nel title), `node --check`, `vsce package` 1.0.14. Nessuna
   modifica runtime: la superficie 58 di F4-A3 è già sufficiente.
-- Prossimo commit previsto: `feat(vscode): actor identity header and claims mode knob` (F4-A5 — setting `ibis.identity.actor` + header `X-Ibis-Actor` su `postJsonRpc` in attach mode + `ibis.claims.personalMode` stub/db_only via `IBIS_CLAIMS_PERSONAL_MODE`; il curation guard `ownedByMe` di A4 legge già l'actor setting).
+- **F4-A5 atterrata (05/11, `6d24e72`) — Milestone A completa** — actor
+  identity header + claims mode knob (F4 §B.4/§B.7): setting
+  `ibis.identity.actor` (string, default vuoto) + env `IBIS_ACTOR` con la
+  stessa precedenza setting>env del guard A4 — l'helper `configuredActor`
+  (memory-tree, ora esportato) è condiviso fra extension.js e il guard.
+  `resolveBackend` attacca `actor` al backend http (attach, daemon e
+  auto-attach), quindi ogni `callMcpTool` lo thread fino a `postJsonRpc`,
+  che manda `X-Ibis-Actor` su tutte e tre le richieste (initialize incluso);
+  senza actor nessun header (semantica anonymous local invariata).
+  `resolveBackend(env)` di ide-host mappa `IBIS_ACTOR` sul backend http e
+  `runHttpStdioBridge` lo inietta anche sul path bridge (`ibis-mcp-host` —
+  il plugin http variant attribuisce); stdio invariato (l'argomento `actor`
+  resta la via). Knob claims: setting `ibis.claims.personalMode` (enum
+  `stub` default | `db_only`) forwardata in `buildSpawnEnv` come
+  `IBIS_CLAIMS_PERSONAL_MODE` **solo quando il setting è esplicito** (mai il
+  default — non deve clobberare un `config.json` `in_repo`); in attach mode
+  l'env arriva al daemon tramite Start Daemon (`ibis start` eredita l'env
+  nel run detached); un daemon avviato fuori dalla VSIX mantiene la sua
+  policy di boot. Prereq runtime separato come da pattern F4-A2:
+  `feat(server)` `24e799e` (override env su `memory.git_store.personal_claims`,
+  db_only/stub/in_repo case-tolerant, junk warnato su stderr e ignorato).
+  Evidenza: righe Status `Actor identity:` / `Claims personal mode:` e log
+  verbose `backend: … actor=`. ide-host: nuovo `http_actor_test.mjs` (fake
+  MCP http: header presente su initialize/initialized/tools-call, assente
+  senza actor) dentro il job CI ide-host; resolve_test esteso
+  (`IBIS_ACTOR` → `backend.actor`). VSIX **1.0.15** (iterazione patch per
+  build debug, `1.1.0` resta riservato al publish — §3.5/§3.6). Verifica:
+  smoke-plugin 47/47 (4 check nuovi), `node --check`, `vsce package`
+  1.0.15, cargo workspace verde con `--no-fail-fast` (unico fallimento:
+  finding pre-esistente ibis-ai/Ollama), clippy `-D warnings` verde. Docs:
+  VSIX README (tabella Identity and claims) + CHANGELOG, team_server.md §4
+  (client-side automation landed) + §5 + riga env, ide_host_and_lm_bridge.md.
+- Milestone A (A1..A5) e Milestone B (B1..B4) atterrati: il prossimo passo
+  è il **gate R7** (manuale, azione owner — build immagine reale e scenario
+  compose su LAN, 2+ client attaccati, attribution actor visibile sulle
+  righe condivise, nessun consolidamento duplicato, restart daemon pulisce
+  i sidecar stale — checklist §8 del runbook team_server).
 - Dipendenza interna da rispettare: B.6 (reconciliation) è precondizione strutturale del Milestone B — **soddisfatta**.
 
 ### WQ-4 — Track D
