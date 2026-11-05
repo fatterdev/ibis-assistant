@@ -4,6 +4,13 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(server): personal claims mode env override** - F4-A5 prerequisite
+  (F4 §B.7): the runtime honors `IBIS_CLAIMS_PERSONAL_MODE` as the highest
+  priority override for `memory.git_store.personal_claims` (`db_only` /
+  `stub` / `in_repo`, case- and whitespace-tolerant; junk values are warned
+  on stderr and ignored so the config choice survives). This is the channel
+  the VSIX knob `ibis.claims.personalMode` uses to reach spawned children
+  and daemons started via the extension.
 - **feat(server): workstream browse (memory_workstreams, list filter)** -
   F4-A3 (F4 §A.3): `memory_list` gains an optional `workstream` arg (name or
   id) that filters rows through the `part_of_workstream` edge (`in` =

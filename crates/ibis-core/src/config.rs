@@ -1136,6 +1136,21 @@ impl Config {
             cfg.db_auto_update = v == "true";
         }
 
+        // Memory claims (F4 §B.7): the VSIX knob `ibis.claims.personalMode`
+        // reaches spawned children and `ibis start` daemons as this override.
+        if let Some(v) = env_str("IBIS_CLAIMS_PERSONAL_MODE") {
+            match normalize_personal_claims_level(&v) {
+                Some(mode) => cfg.memory.git_store.personal_claims = mode,
+                None => {
+                    let mut stderr = std::io::stderr();
+                    let _ = writeln!(
+                        stderr,
+                        "Ignoring IBIS_CLAIMS_PERSONAL_MODE={v}: expected db_only, stub, or in_repo"
+                    );
+                }
+            }
+        }
+
         if cfg.is_plugin() || env_looks_like_plugin() {
             cfg.runtime_mode = "plugin".into();
             apply_plugin_isolation(&mut cfg);
@@ -1149,6 +1164,14 @@ impl Config {
 
 fn env_str(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.is_empty())
+}
+
+/// Normalizes an `IBIS_CLAIMS_PERSONAL_MODE` value to a personal-claims
+/// policy level (`db_only` | `stub` | `in_repo`, case-insensitive). Anything
+/// else is rejected so a typo never silently flips the policy.
+fn normalize_personal_claims_level(value: &str) -> Option<String> {
+    let v = value.trim().to_lowercase();
+    matches!(v.as_str(), "db_only" | "stub" | "in_repo").then_some(v)
 }
 
 fn env_parse<T: std::str::FromStr>(key: &str) -> Option<T> {
@@ -1214,6 +1237,24 @@ mod tests {
                 .unwrap();
         assert!(cfg.memory.projection_enabled);
         assert_eq!(cfg.memory.git_store.personal_claims, "in_repo");
+    }
+
+    #[test]
+    fn personal_claims_env_level_normalization() {
+        assert_eq!(
+            normalize_personal_claims_level("DB_ONLY").as_deref(),
+            Some("db_only")
+        );
+        assert_eq!(
+            normalize_personal_claims_level(" stub ").as_deref(),
+            Some("stub")
+        );
+        assert_eq!(
+            normalize_personal_claims_level("in_repo").as_deref(),
+            Some("in_repo")
+        );
+        assert_eq!(normalize_personal_claims_level("bogus"), None);
+        assert_eq!(normalize_personal_claims_level(""), None);
     }
 
     #[test]

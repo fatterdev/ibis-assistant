@@ -134,6 +134,7 @@ and config choices win over the profile.
 | `EMBEDDING_URL` / `EMBEDDING_MODEL` / `EMBEDDING_PROVIDER` | AI embedding endpoint (Ollama host on the LAN) |
 | `GIT_TOKEN` | credential fallback for git-backed ingest |
 | `DISCOVERY_ROOT`, `LOGS_ROOT` | discovery/ingest roots |
+| `IBIS_CLAIMS_PERSONAL_MODE` | personal-claims policy override: `db_only` / `stub` / `in_repo` (the VSIX knob `ibis.claims.personalMode` forwards here for spawned children and Start Daemon) |
 
 ## 4. Actor identity (F4 §B.4)
 
