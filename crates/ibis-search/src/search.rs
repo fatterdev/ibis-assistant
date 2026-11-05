@@ -129,6 +129,9 @@ pub struct SearchService {
     /// Channel fusion mode (`search.fusion`: additive|rrf — A2; default
     /// additive until the WQ-7 retune re-decides on the 4.0 baseline).
     pub fusion_mode: FusionMode,
+    /// RRF smoothing constant k (A2 default 60; the eval sweeps k to pick
+    /// the fusion winner — remediation plan section 9).
+    pub rrf_k: f64,
     /// Candidate window (`search.candidates`, WQ-7): fetch size of every
     /// channel above the final [`VECTOR_CHANNEL_LIMIT`] cut, shared by the
     /// temporal rescore and the future A3 reranker.
@@ -148,6 +151,7 @@ impl Default for SearchService {
             personal_claims_policy: String::new(),
             hot_ref_cache_disabled: false,
             fusion_mode: FusionMode::default(),
+            rrf_k: RRF_K,
             candidate_window: DEFAULT_CANDIDATE_WINDOW,
             ancestor_cache: std::sync::OnceLock::new(),
         }
@@ -523,8 +527,8 @@ impl SearchService {
                 .collect(),
             FusionMode::Rrf => {
                 let channels_with_hits = rank_lists.iter().filter(|c| !c.is_empty()).count();
-                let fused = rrf_fuse(&rank_lists, RRF_K);
-                let rrf_max = rrf_max_score(channels_with_hits, RRF_K);
+                let fused = rrf_fuse(&rank_lists, self.rrf_k);
+                let rrf_max = rrf_max_score(channels_with_hits, self.rrf_k);
                 chunks
                     .iter()
                     .enumerate()

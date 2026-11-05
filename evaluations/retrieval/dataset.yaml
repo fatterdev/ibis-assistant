@@ -48,3 +48,38 @@ cases:
     query: "sidecar lifecycle guarantees and spawn constraints"
     expected_ids: ["file_chunk:[source_file:[repo:golden, 'crates/ibis-core/src/process_tree.rs'], 0]", "memory:g_mem_spawn_thread"]
     note: "multi-expected su canali code+memory"
+  # ── Remediation plan section 9: full-text observable cases ──────────────
+  - id: r13_lex_title_only
+    query: "Zephyr bootstrap catalog regression"
+    expected_ids: ["memory:g_mem_lextitle"]
+    note: "case 1: memory senza embedding, match solo nel titolo"
+  - id: r14_lex_content_only
+    query: "Larkspur kiln calibration schedule"
+    expected_ids: ["memory:g_mem_lexcontent"]
+    note: "case 2: memory senza embedding, match solo nel contenuto"
+  - id: r15_lex_file_chunk
+    query: "Mangrove export pipeline flushes dusk"
+    expected_ids: ["file_chunk:[source_file:[repo:golden, 'src/lex_notes.rs'], 0]"]
+    note: "case 3: file chunk senza embedding, canale file_chunk_text"
+  - id: r16_dual_presence
+    query: "Wisteria scheduler fairness window"
+    expected_ids: ["memory:g_mem_dual"]
+    note: "case 4: documento in vector + title + content (i canali del report lo mostrano)"
+  - id: r17_conflict
+    query: "alpha beta gamma delta epsilon"
+    expected_ids: ["memory:g_mem_vecstrong", "memory:g_mem_lexstrong"]
+    note: "case 5: alta similarita' vettoriale vs alto BM25 — entrambi attesi, i canali distinguono il contributo"
+  - id: r18_personal_excluded
+    query: "Juniper quota ledger nightly spend"
+    expected_ids: ["memory:g_mem_teamquota"]
+    absent_ids: ["memory:g_mem_personal"]
+    note: "case 6: memory personale di altro attore non deve emergere"
+  - id: r19_superseded_excluded
+    query: "Cypress retry ladder caps attempts"
+    expected_ids: ["memory:g_mem_currentladder"]
+    absent_ids: ["memory:g_mem_superseded"]
+    note: "case 7: memory superseded esclusa dal currentness filter"
+  - id: r20_special_path
+    query: "Baobab cache reindex warms midnight"
+    expected_ids: ["file_chunk:[source_file:[repo:golden, 'src/special path,file.rs'], 0]"]
+    note: "case 8: path con caratteri speciali — expected ID raw round-trip"

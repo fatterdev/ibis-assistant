@@ -46,6 +46,10 @@ pub struct EvalCase {
     /// `memory:g_*`, `commit_chunk:g_*`, `reasoning:g_*`). Both the plain
     /// `table:key` and the `table:⟨key⟩` spellings are accepted.
     pub expected_ids: Vec<String>,
+    /// Record ids that must NOT appear on the board (personal memories of
+    /// other actors, superseded rows, … — remediation plan section 9).
+    #[serde(default)]
+    pub absent_ids: Vec<String>,
     /// Free-form provenance note (which scenario the case pins).
     #[serde(default)]
     pub note: String,
@@ -149,6 +153,13 @@ pub struct CaseResult {
     pub first_rank: Option<usize>,
     /// `source_kind` of the best-ranked expected hit (channel attribution).
     pub top_channel: Option<String>,
+    /// Internal fusion channels of the expected hits, best-rank order
+    /// (remediation plan section 9: `top_channel='memory'` does not
+    /// distinguish the vector, title and content channels).
+    pub channels: Vec<String>,
+    /// Absent-id violations: ids listed in `absent_ids` that surfaced on the
+    /// board anyway (empty = the case's exclusion assertions hold).
+    pub absent_leaks: Vec<String>,
     /// Ranks (1-based) of every expected hit found.
     pub hits: Vec<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -185,6 +196,10 @@ pub struct EvalReport {
     pub embedder: String,
     /// Channel fusion under test (`additive` | `rrf` — A2 validation).
     pub fusion: String,
+    /// RRF k under test (`Some` only for rrf runs — sweep provenance,
+    /// remediation plan section 9).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rrf_k: Option<f64>,
     /// Whether the golden estate was seeded in this run.
     pub seeded: bool,
     pub aggregate: EvalAggregate,
@@ -230,6 +245,7 @@ pub fn build_report(
         version: version.to_string(),
         embedder: embedder.to_string(),
         fusion: fusion.to_string(),
+        rrf_k: None,
         seeded,
         aggregate: EvalAggregate {
             cases: cases.len(),
@@ -275,6 +291,8 @@ impl RetrievalEvalRunner {
                 recall_at_15: 0.0,
                 first_rank: None,
                 top_channel: None,
+                channels: Vec::new(),
+                absent_leaks: Vec::new(),
                 hits: Vec::new(),
                 error: Some(e.to_string()),
             },
@@ -294,9 +312,12 @@ impl RetrievalEvalRunner {
 
 /// Pure scorer: ranks of the expected ids inside the returned board.
 fn score_case(case: &EvalCase, results: &[SearchResult]) -> CaseResult {
-    let mut ranks: HashMap<String, (usize, &str)> = HashMap::new();
+    let mut ranks: HashMap<String, (usize, &str, &str)> = HashMap::new();
     for (i, r) in results.iter().enumerate() {
-        ranks.insert(normalize_record_id(&r.id), (i + 1, r.source_kind.as_str()));
+        ranks.insert(
+            normalize_record_id(&r.id),
+            (i + 1, r.source_kind.as_str(), r.channel.as_str()),
+        );
     }
     let expected: Vec<String> = case
         .expected_ids
@@ -307,23 +328,31 @@ fn score_case(case: &EvalCase, results: &[SearchResult]) -> CaseResult {
     let mut best_rank = usize::MAX;
     let mut top_channel: Option<String> = None;
     let mut hits = Vec::new();
+    let mut channels: Vec<String> = Vec::new();
     for exp in &expected {
-        if let Some((rank, channel)) = ranks.get(exp.as_str()) {
+        if let Some((rank, channel_kind, channel)) = ranks.get(exp.as_str()) {
             hits.push(*rank);
+            channels.push(channel.to_string());
             if *rank < best_rank {
                 best_rank = *rank;
                 first_rank = Some(*rank);
-                top_channel = Some((*channel).to_string());
+                top_channel = Some((*channel_kind).to_string());
             }
         }
     }
     let in_top = |k: usize| -> f64 {
         let found = expected
             .iter()
-            .filter(|e| ranks.get(e.as_str()).is_some_and(|(r, _)| *r <= k))
+            .filter(|e| ranks.get(e.as_str()).is_some_and(|(r, _, _)| *r <= k))
             .count();
         found as f64 / expected.len() as f64
     };
+    let absent_leaks: Vec<String> = case
+        .absent_ids
+        .iter()
+        .map(|a| normalize_record_id(a))
+        .filter(|a| ranks.contains_key(a))
+        .collect();
     CaseResult {
         id: case.id.clone(),
         status: CaseStatus::Ok,
@@ -332,6 +361,8 @@ fn score_case(case: &EvalCase, results: &[SearchResult]) -> CaseResult {
         recall_at_15: in_top(15),
         first_rank,
         top_channel,
+        channels,
+        absent_leaks,
         hits,
         error: None,
     }
@@ -391,6 +422,9 @@ struct GoldenFile {
     id: &'static str,
     path: &'static str,
     content: &'static str,
+    /// `false` seeds the chunk WITHOUT an embedding (lexical-only channel —
+    /// remediation plan section 9 case 3/8).
+    embed: bool,
 }
 
 struct GoldenMemory {
@@ -398,6 +432,14 @@ struct GoldenMemory {
     kind: &'static str,
     title: &'static str,
     content: &'static str,
+    /// Visibility (`team` | `personal`); personal rows of another owner must
+    /// never surface (section 9 case 6).
+    visibility: &'static str,
+    /// `current` | `superseded`; superseded rows are excluded by the
+    /// currentness filter (section 9 case 7).
+    status: &'static str,
+    owner: &'static str,
+    embed: bool,
 }
 
 struct GoldenCommit {
@@ -422,21 +464,41 @@ const GOLDEN_FILES: &[GoldenFile] = &[
         id: "g_fc_price",
         path: "src/billing/price_calculator.rs",
         content: "The PriceCalculatorService applies volume discounts per annual spend tier and rounds tax totals to whole cents before the invoice is emitted.",
+        embed: true,
     },
     GoldenFile {
         id: "g_fc_sidecar",
         path: "crates/ibis-core/src/process_tree.rs",
         content: "The kernel job object guarantees that sidecar children die with the parent process: every spawned child joins the job and the kernel kills the whole tree when the last job handle closes.",
+        embed: true,
     },
     GoldenFile {
         id: "g_fc_eval",
         path: "crates/ibis-optimization/src/eval.rs",
         content: "The retrieval eval runner scores golden dataset cases with mean reciprocal rank and recall at five and fifteen, then aggregates per-channel ranking statistics into the baseline report.",
+        embed: true,
     },
     GoldenFile {
         id: "g_fc_palette",
         path: "web/ui/palette.ts",
         content: "The palette module parses hex color strings into RGB channels and clamps invalid components to the nearest sRGB boundary.",
+        embed: true,
+    },
+    // Lexical-only file chunk (section 9 case 3): no embedding — only the
+    // file_chunk_text channel can retrieve it.
+    GoldenFile {
+        id: "g_fc_lex",
+        path: "src/lex_notes.rs",
+        content: "The Mangrove export pipeline flushes every dusk before the tide table rotates.",
+        embed: false,
+    },
+    // Special-character path (section 9 case 8): the expected id carries the
+    // raw path (comma + space) — id round-trip through retrieval.
+    GoldenFile {
+        id: "g_fc_special",
+        path: "src/special path,file.rs",
+        content: "The Baobab cache reindex warms at midnight to dodge the migration storm.",
+        embed: false,
     },
 ];
 
@@ -446,30 +508,148 @@ const GOLDEN_MEMORIES: &[GoldenMemory] = &[
         kind: "fix",
         title: "MCP response timeout during plugin store init",
         content: "Timeout waiting for MCP response id=1 during plugin store init: the ide-host response timeout was raised from 15 to 60 seconds.",
+        visibility: "team",
+        status: "current",
+        owner: "",
+        embed: true,
     },
     GoldenMemory {
         id: "g_mem_spawn_thread",
         kind: "rule",
         title: "Spawn sidecars only from long-lived threads",
         content: "Spawn sidecar children only from long-lived runtime worker threads, never from spawn_blocking: the PDEATHSIG parent is the creating thread.",
+        visibility: "team",
+        status: "current",
+        owner: "",
+        embed: true,
     },
     GoldenMemory {
         id: "g_mem_mathmax",
         kind: "gotcha",
         title: "math::max arity on SurrealDB 3.x",
         content: "math::max takes a single array on SurrealDB 3.x; the two-argument form from the 2.x era fails live.",
+        visibility: "team",
+        status: "current",
+        owner: "",
+        embed: true,
     },
     GoldenMemory {
         id: "g_mem_rrf",
         kind: "decision",
         title: "Reciprocal rank fusion",
         content: "Reciprocal rank fusion replaces the additive channel merge once the retrieval baseline confirms the gain over the additive scores.",
+        visibility: "team",
+        status: "current",
+        owner: "",
+        embed: true,
     },
     GoldenMemory {
         id: "g_mem_surreal_url",
         kind: "fact",
         title: "Test sidecar url",
         content: "Test spikes connect to the SurrealDB sidecar url ws://127.0.0.1:38000 with root credentials.",
+        visibility: "team",
+        status: "current",
+        owner: "",
+        embed: true,
+    },
+    // Title-only lexical memory (section 9 case 1): no embedding.
+    GoldenMemory {
+        id: "g_mem_lextitle",
+        kind: "decision",
+        title: "Zephyr bootstrap catalog regression",
+        content: "unrelated body text about pipelines",
+        visibility: "team",
+        status: "current",
+        owner: "",
+        embed: false,
+    },
+    // Content-only lexical memory (section 9 case 2): no embedding.
+    GoldenMemory {
+        id: "g_mem_lexcontent",
+        kind: "fact",
+        title: "pipeline notes",
+        content: "the Larkspur kiln calibration schedule changed after the audit",
+        visibility: "team",
+        status: "current",
+        owner: "",
+        embed: false,
+    },
+    // Dual-presence memory (section 9 case 4): the query hits its vector
+    // channel AND both lexical channels.
+    GoldenMemory {
+        id: "g_mem_dual",
+        kind: "design",
+        title: "Wisteria scheduler fairness window",
+        content: "the Wisteria scheduler fairness window avoids starvation across repos",
+        visibility: "team",
+        status: "current",
+        owner: "",
+        embed: true,
+    },
+    // Conflict pair (section 9 case 5): high vector similarity vs high BM25.
+    GoldenMemory {
+        id: "g_mem_vecstrong",
+        kind: "fact",
+        title: "alpha vector doc",
+        content: "alpha beta gamma delta epsilon",
+        visibility: "team",
+        status: "current",
+        owner: "",
+        embed: true,
+    },
+    GoldenMemory {
+        id: "g_mem_lexstrong",
+        kind: "fact",
+        title: "alpha lexical doc",
+        content: "alpha beta gamma delta epsilon alpha beta gamma delta epsilon alpha beta gamma delta epsilon filler filler filler",
+        visibility: "team",
+        status: "current",
+        owner: "",
+        embed: true,
+    },
+    // Personal memory of ANOTHER actor (section 9 case 6): must never surface.
+    GoldenMemory {
+        id: "g_mem_personal",
+        kind: "fact",
+        title: "Juniper quota ledger",
+        content: "the Juniper quota ledger tracks nightly spend per key",
+        visibility: "personal",
+        status: "current",
+        owner: "someoneelse",
+        embed: true,
+    },
+    // Team counterpart of the personal memory (the expected hit of case 6).
+    GoldenMemory {
+        id: "g_mem_teamquota",
+        kind: "fact",
+        title: "Juniper quota ledger team",
+        content: "the Juniper quota ledger tracks nightly spend per key",
+        visibility: "team",
+        status: "current",
+        owner: "",
+        embed: true,
+    },
+    // Superseded memory (section 9 case 7): excluded by currentness.
+    GoldenMemory {
+        id: "g_mem_superseded",
+        kind: "rule",
+        title: "Cypress retry ladder old",
+        content: "the Cypress retry ladder caps at three attempts",
+        visibility: "team",
+        status: "superseded",
+        owner: "",
+        embed: true,
+    },
+    GoldenMemory {
+        id: "g_mem_currentladder",
+        kind: "rule",
+        title: "Cypress retry ladder new",
+        content: "the Cypress retry ladder caps at five attempts now",
+        visibility: "team",
+        status: "current",
+        owner: "",
+        embed: true,
     },
 ];
 
@@ -529,11 +709,10 @@ pub async fn seed_golden_estate(
     for f in GOLDEN_FILES {
         let sf_id = ibis_db::ids::source_file_id(&golden_repo_ref, f.path);
         let chunk_id = ibis_db::ids::file_chunk_id(&sf_id, 0);
-        let emb = embed_of(ai, f.content).await?;
         db.smart_query(
             &format!(
                 "CREATE {sf_id} SET path = $path, rel_path = $path, \
-                 hash = $hash, is_head = true;"
+                 hash = $hash, is_head = true, repo_name = 'golden';"
             ),
             vars_of(vec![
                 ("path", Value::from_t(f.path)),
@@ -542,16 +721,27 @@ pub async fn seed_golden_estate(
         )
         .await
         .map_err(|e| format!("seed {}: {e}", sf_id))?;
+        // `embed = false` seeds a lexical-only chunk: no embedding field at
+        // all (the vector channel skips it, file_chunk_text carries it).
+        let mut chunk_vars = vars_of(vec![
+            ("content", Value::from_t(f.content)),
+            ("hash", Value::from_t(f.id)),
+        ]);
+        let embedding_set = if f.embed {
+            chunk_vars.insert(
+                "embedding".into(),
+                Value::from_t(Embedding(embed_of(ai, f.content).await?)),
+            );
+            ", embedding = $embedding"
+        } else {
+            ""
+        };
         db.smart_query(
             &format!(
                 "CREATE {chunk_id} SET file = {sf_id}, \
-                 content = $content, hash = $hash, start_line = 0, embedding = $embedding;"
+                 content = $content, hash = $hash, start_line = 0{embedding_set};"
             ),
-            vars_of(vec![
-                ("content", Value::from_t(f.content)),
-                ("hash", Value::from_t(f.id)),
-                ("embedding", Value::from_t(Embedding(emb))),
-            ]),
+            chunk_vars,
         )
         .await
         .map_err(|e| format!("seed {chunk_id}: {e}"))?;
@@ -559,17 +749,31 @@ pub async fn seed_golden_estate(
     }
 
     for m in GOLDEN_MEMORIES {
-        let emb = embed_of(ai, m.content).await?;
+        let embedding_set = if m.embed {
+            ", embedding = $embedding"
+        } else {
+            ""
+        };
+        let mut mem_vars = vars_of(vec![
+            ("content", Value::from_t(m.content)),
+            ("kind", Value::from_t(m.kind)),
+            ("title", Value::from_t(m.title)),
+            ("status", Value::from_t(m.status)),
+            ("visibility", Value::from_t(m.visibility)),
+            ("owner", Value::from_t(m.owner)),
+        ]);
+        if m.embed {
+            mem_vars.insert(
+                "embedding".into(),
+                Value::from_t(Embedding(embed_of(ai, m.content).await?)),
+            );
+        }
         db.smart_query(
-            &format!("CREATE memory:⟨{}⟩ SET content = $content, kind = $kind, title = $title, status = $status, visibility = $visibility, embedding = $embedding;", m.id),
-            vars_of(vec![
-                ("content", Value::from_t(m.content)),
-                ("kind", Value::from_t(m.kind)),
-                ("title", Value::from_t(m.title)),
-                ("status", Value::from_t("current")),
-                ("visibility", Value::from_t("team")),
-                ("embedding", Value::from_t(Embedding(emb))),
-            ]),
+            &format!(
+                "CREATE memory:⟨{}⟩ SET content = $content, kind = $kind, title = $title, status = $status, visibility = $visibility, owner = $owner{embedding_set};",
+                m.id
+            ),
+            mem_vars,
         )
         .await
         .map_err(|e| format!("seed {}: {e}", m.id))?;
@@ -735,6 +939,7 @@ mod tests {
             id: id.to_string(),
             query: query.to_string(),
             expected_ids: expected.iter().map(|s| s.to_string()).collect(),
+            absent_ids: Vec::new(),
             note: String::new(),
         }
     }
@@ -960,6 +1165,8 @@ mod tests {
             recall_at_15: r15,
             first_rank: if mrr > 0.0 { Some(1) } else { None },
             top_channel: channel.map(|s| s.to_string()),
+            channels: channel.map(|s| vec![s.to_string()]).unwrap_or_default(),
+            absent_leaks: Vec::new(),
             hits: vec![],
             error: None,
         }
@@ -979,6 +1186,8 @@ mod tests {
                 recall_at_15: 0.0,
                 first_rank: None,
                 top_channel: None,
+                channels: Vec::new(),
+                absent_leaks: Vec::new(),
                 hits: vec![],
                 error: Some("degraded".to_string()),
             },
@@ -1005,6 +1214,8 @@ mod tests {
             recall_at_15: 0.0,
             first_rank: None,
             top_channel: None,
+            channels: Vec::new(),
+            absent_leaks: Vec::new(),
             hits: vec![],
             error: Some("x".to_string()),
         }];
@@ -1029,8 +1240,8 @@ mod tests {
         let rows = seed_golden_estate(&(db.clone() as Arc<dyn Executor>), &ai)
             .await
             .expect("seed");
-        // 4 files × (source_file + file_chunk) + 5 memories + 1 commit + 1 reasoning
-        assert_eq!(rows, 15);
+        // 6 files × (source_file + file_chunk) + 14 memories + 1 commit + 1 reasoning
+        assert_eq!(rows, 28);
         let calls = db.calls();
         for table in [
             "DELETE source_file;",

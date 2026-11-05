@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use surrealdb::types::{RecordId, SurrealValue, Value};
+use surrealdb::types::SurrealValue;
 
 use ibis_ai::{ChunkStore, CommitChunkWrite, CommitTxn};
 use ibis_db::executor::{Executor, SurrealDbExecutor, Vars};

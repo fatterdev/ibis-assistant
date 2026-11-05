@@ -33,6 +33,8 @@ pub struct EvalParams {
     ollama_url: String,
     /// Channel fusion under test (additive|rrf — A2 validation).
     fusion: String,
+    /// RRF smoothing constant k (A2 default 60; the eval sweeps it).
+    rrf_k: f64,
     seed: bool,
     out: Option<String>,
 }
@@ -56,6 +58,7 @@ fn parse_args(args: &[String]) -> Result<EvalParams, String> {
         embedder: "auto".to_string(),
         ollama_url: DEFAULT_OLLAMA_URL.to_string(),
         fusion: "additive".to_string(),
+        rrf_k: 60.0,
         seed: true,
         out: None,
     };
@@ -95,6 +98,15 @@ fn parse_args(args: &[String]) -> Result<EvalParams, String> {
                     return Err("--fusion must be additive|rrf".to_string());
                 }
                 params.fusion = v;
+            }
+            "--rrf-k" => {
+                params.rrf_k = value(&mut i, "--rrf-k")?
+                    .trim()
+                    .parse::<f64>()
+                    .map_err(|_| "--rrf-k must be a positive number".to_string())?;
+                if params.rrf_k <= 0.0 {
+                    return Err("--rrf-k must be a positive number".to_string());
+                }
             }
             "--no-seed" => params.seed = false,
             "--out" => params.out = Some(value(&mut i, "--out")?),
@@ -164,10 +176,11 @@ async fn run_async(p: EvalParams) -> Result<i32, String> {
     let dataset = load_dataset(&p.dataset)?;
     let mut service = SearchService::new(Some(db), Some(ai.clone()));
     service.fusion_mode = ibis_search::retrieval_boost::FusionMode::resolve(&p.fusion);
+    service.rrf_k = p.rrf_k;
     let service = Arc::new(service);
     let runner = RetrievalEvalRunner::new(service);
     let cases = runner.run(&dataset).await;
-    let report = build_report(
+    let mut report = build_report(
         &p.dataset,
         &dataset.version,
         ai.name(),
@@ -175,6 +188,10 @@ async fn run_async(p: EvalParams) -> Result<i32, String> {
         seeded,
         cases,
     );
+    // Sweep provenance: the k under test belongs in the report.
+    if report.fusion == "rrf" {
+        report.rrf_k = Some(p.rrf_k);
+    }
 
     let json = serde_json::to_string_pretty(&report).map_err(|e| format!("report: {e}"))?;
     println!("{json}");
