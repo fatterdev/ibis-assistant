@@ -315,11 +315,13 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   governance error sull'update → toast con azione "Create a superseding
   memory instead" che apre il flusso Supersede. Ogni azione: toast compact +
   riga full nel canale Output + refresh di entrambe le viste. **Residual
-  (nota in §A.4 design)**: `memory_list` non proietta `store`, quindi le
-  righe git-owned non sono pre-rilevabili lato VSIX — le azioni su di esse
-  fanno surface del messaggio runtime ("repo is SoT"); il pre-disable con
-  tooltip richiederebbe `store` nella proiezione (candidato follow-up server
-  separato o polish R7). **Refresh on focus (A.5)**: `onDidChangeTreeView
+  CHIUSO (04/11, `bfa86ea` + `7437c61`)**: `memory_list` proietta ora il
+  marker `store` (additivo, `Memory` lo aveva già, nessun cambio di
+  contratto) e l'entryNode mappa `store === "git"` su contextValue
+  `ibisMemoryEntryGit` — escluso dai when-clause curation
+  (`viewItem =~ /^ibisMemoryEntry(Updatable)?$/`), badge `git` in
+  description e tooltip "repo is source of truth — supersede via
+  `.ibis/claims/` commit"; smoke-plugin 43/43. **Refresh on focus (A.5)**: `onDidChangeTreeView
   Visibility` su entrambe le viste, solo quando diventano visibili — il
   Memory tree refetcha i kind badge (`refreshCounts`, 8× `memory_list`
   embedding-free) e firea element-scoped i kind roots **identity-stabili**
