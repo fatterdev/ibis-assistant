@@ -4,7 +4,7 @@
 **Registrato in:** [master work queue](./2026-11-02-master-work-queue.md) come WQ-7.
 **Stato:** spec approvata. Nessun codice in questo commit. L'esecuzione è lo stream WQ-7, prima del gate R7 e prima di C9.
 **Fonti:** [SurrealDB 4.0.0](https://surrealdb.com/releases/4.0) (3 novembre 2026), [post di rilascio](https://surrealdb.com/blog/surrealdb-4-the-database-and-memory-for-every-agent).
-**Esito esecuzione (05/11):** implementato — crate/sidecar/immagine `4.0.0`, schema level 4 (DiskANN `array<f16>`, `DEFINE TYPE`, id array su `source_file`/`file_chunk`, canale lessicale FULLTEXT, archi `REFERENCE … MATERIALIZE INTO`), canali `ORDER BY vector::distance::cosine` con decay come rescore Rust, finestra candidati `search.candidates` (50), LIMIT/ORDER BY fixati, verdetto fusione (default `additive`, [nota](./2026-11-05-wq7-fusion-verdict.md)), baseline 4.0 nel piano A1. Live test workspace verdi su binario 4.0.0; eval gate 0.75 passa. Note di esecuzione sotto.
+**Esito esecuzione (05/11):** implementato — crate/sidecar/immagine `4.0.0`, schema level 4 (DiskANN `array<f16>`, `DEFINE TYPE`, id array su `source_file`/`file_chunk`, canale lessicale FULLTEXT, archi `REFERENCE … MATERIALIZE INTO`), canali `ORDER BY vector::distance::cosine` con decay come rescore Rust, finestra candidati `search.candidates` (50), LIMIT/ORDER BY fixati, verdetto fusione (default `additive`, [nota](./2026-11-05-wq7-fusion-verdict.md)), baseline 4.0 nel piano A1. Live test workspace verdi su binario 4.0.0; eval gate 0.75 passa. Note di esecuzione sotto. Fix post-gate (05/11): lo scope di progetto esce dallo statement DiskANN e filtra la finestra in Rust (item 9).
 
 ## Perché ora, e perché da zero
 
@@ -148,3 +148,37 @@ Verificato live sul binario GitHub `surreal-v4.0.0.windows-amd64.exe`:
    numeri; il decay è un rescore Rust sulla finestra (la 4.0 serve
    `ORDER BY vector::distance::cosine` dall'indice — probe EXPLAIN:
    `KnnScan` su DiskANN).
+
+## Da correggere
+
+9. **`load_session_context` rompe il piano KNN quando c'è il filtro di
+   progetto** (visto 05/11 sul gate R7, workspace `rpt-studio`, SurrealDB
+   4.0.0 nel container). `search_memory` con `project_name` non vuoto aggiunge
+   `(project = repo OR id IN repo->has_memory->memory)` e, da WQ-7
+   (`ad00490`), ordina con `ORDER BY vector::distance::cosine(embedding, $vec)`
+   al posto di `ORDER BY score DESC`. Quella combinazione risponde
+   `Internal database error: IR verification failed: Legality: a conversion
+   created an op outside the physical target`. Probe sullo stesso binario:
+   il filtro grafo con l'ordine vecchio `score DESC` esegue; `string::slice`
+   con l'ordine KNN e senza filtro grafo esegue; filtro grafo più ordine KNN
+   fallisce anche senza `string::slice`. Il messaggio di log cita
+   `string::slice` solo perché tronca la `SELECT`. Il filtro di progetto è
+   precedente (29/10); l'ordine KNN è la modifica della migrazione. Da
+   correggere nel piano della query (finestra DiskANN senza il predicato
+   grafo nello stesso statement, filtro dopo), non nei dati.
+
+   **Corretto (05/11).** `search_memory`
+   (`crates/ibis-search/src/memory/mod.rs`) non mette più il predicato grafo
+   nello statement DiskANN: la finestra KNN esce senza `project` né
+   `has_memory`, la finestra si allarga (×2, cap 90) per assorbire le righe
+   filtrate dopo, e lo scope si risolve in uno statement proprio —
+   `SELECT VALUE id FROM memory WHERE (project = … OR id IN …->has_memory->memory)`
+   — che filtra la finestra in Rust per appartenenza all'insieme degli id.
+   Live probe sul binario 4.0.0: la combinazione vecchia riproduce l'errore
+   IR; la finestra senza predicato grafo e lo statement di scope eseguono, e
+   lo scope restituisce gli id nella stessa forma canonica delle righe della
+   finestra (stesso binario, stesso rendering: il confronto Rust è
+   affidabile). Regression test FakeDb nel crate
+   (`search_memory_project_scope_*`). Le combinazioni "uguaglianza su campo +
+   ordine KNN" (`askref.rs`, `memory_consolidate.rs`) restano legali e non
+   sono toccate.
