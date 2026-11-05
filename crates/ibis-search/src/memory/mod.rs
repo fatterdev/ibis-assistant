@@ -668,13 +668,18 @@ impl crate::search::SearchService {
             where_parts.push(filter);
             bindings.extend(more);
         }
+        // R7 gate (05/11): the graph scope predicate cannot ride the DiskANN
+        // statement — `ORDER BY vector::distance::cosine` plus
+        // `id IN repo->has_memory->memory` makes the 4.0 engine fail IR
+        // verification ("a conversion created an op outside the physical
+        // target"). The window runs without the graph predicate; the scope
+        // resolves in its own statement and filters the window in Rust.
         let project = params.project_name.trim();
-        if !project.is_empty() {
-            let repo_id = repo_record_id(project);
-            where_parts.push(format!(
-                "(project = {repo_id} OR id IN {repo_id}->{ES_HAS_MEMORY}->{TABLE_MEMORY})"
-            ));
-        }
+        let project_repo_id = if project.is_empty() {
+            None
+        } else {
+            Some(repo_record_id(project))
+        };
         let actor = actor_ctx.resolve_trusted_actor(&params.actor);
         let (vis_filter, vis_bindings) = memory_visibility_filter(&params.visibility, &actor)?;
         where_parts.push(vis_filter);
@@ -688,7 +693,31 @@ impl crate::search::SearchService {
 
         // WQ-7: the fetch is a candidate window ranked by the DiskANN index; the
         // keyword/entity re-ranking rescores inside the window.
-        let fetch_limit = (limit * 3).min(45).max(limit);
+        let mut fetch_limit = (limit * 3).min(45).max(limit);
+        if project_repo_id.is_some() {
+            // The scope filter runs after the window, so the window widens
+            // once more to keep the in-scope pool comparable.
+            fetch_limit = (fetch_limit * 2).min(90).max(limit);
+        }
+        let scope_ids: std::collections::HashSet<String> = if let Some(repo_id) = &project_repo_id
+        {
+            let scope_sql = format!(
+                "SELECT VALUE id FROM {TABLE_MEMORY} WHERE (project = {repo_id} OR id IN {repo_id}->{ES_HAS_MEMORY}->{TABLE_MEMORY});"
+            );
+            let scope_outcome = db
+                .execute(&scope_sql)
+                .await
+                .map_err(|e| SearchError::other(format!("search memory scope: {e}")))?;
+            let scope_ids: std::collections::HashSet<String> = rows::normalize_rows(&scope_outcome)
+                .unwrap_or_default()
+                .iter()
+                .map(rows::record_id)
+                .filter(|id| !id.is_empty())
+                .collect();
+            scope_ids
+        } else {
+            std::collections::HashSet::new()
+        };
 
         let sql = format!(
             "SELECT id, kind, title, string::slice(content, 0, {MEMORY_SEARCH_SUMMARY_RUNES}) AS content, status, confidence, visibility, owner, tags, branch, valid_from, valid_until, created_at, updated_at, vector::similarity::cosine(embedding, $vec) AS score FROM memory WHERE {} ORDER BY vector::distance::cosine(embedding, $vec) LIMIT {fetch_limit};",
@@ -707,6 +736,10 @@ impl crate::search::SearchService {
         tracing::debug!("memory_search: db query returned in {:?}", t0.elapsed());
         let rows_values = rows::normalize_rows(&outcome).unwrap_or_default();
         let mut memories = memories_from_rows(&rows_values);
+        if project_repo_id.is_some() {
+            memories.retain(|mem| scope_ids.contains(&mem.id));
+            tracing::debug!("memory_search: project scope kept={}", memories.len());
+        }
         tracing::debug!(
             "memory_search: rows={} elapsed={:?}",
             memories.len(),
@@ -1197,6 +1230,122 @@ mod tests {
         assert!(
             sql.contains("LIMIT 15"),
             "expected 3x widening below the cap: {sql}"
+        );
+    }
+
+    /// R7 gate regression (WQ-7 "da correggere" #9): the project scope
+    /// predicate must not ride the DiskANN statement — on 4.0 the mix fails
+    /// IR verification ("a conversion created an op outside the physical
+    /// target"). The window stays graph-free and the scope resolves in its
+    /// own statement, filtering the window in Rust.
+    #[tokio::test]
+    async fn search_memory_project_scope_keeps_the_knn_statement_graph_free() {
+        use crate::test_support::{fake_ai, obj, rows_of, FakeDb};
+        use ibis_db::value::Value;
+
+        let fake = std::sync::Arc::new(FakeDb::new(vec![
+            (
+                "SELECT VALUE id FROM memory",
+                rows_of(vec![Value::from_t("memory:1")]),
+            ),
+            (
+                "FROM memory",
+                rows_of(vec![obj(vec![
+                    ("id", Value::from_t("memory:1")),
+                    ("kind", Value::from_t("fact")),
+                    ("title", Value::from_t("clamp cap")),
+                    ("content", Value::from_t("regression row")),
+                    ("status", Value::from_t("current")),
+                    ("visibility", Value::from_t("team")),
+                    ("score", Value::from_t(0.9f64)),
+                ])]),
+            ),
+        ]));
+        let svc = crate::search::SearchService::new(Some(fake.clone()), Some(fake_ai()));
+        let hits = svc
+            .search_memory(
+                &crate::ActorContext::LOCAL,
+                MemorySearchParams {
+                    project_name: "Ibis Assistant".into(),
+                    query: "regression".into(),
+                    limit: 5,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("project-scoped search must not fail IR verification");
+        assert_eq!(hits.len(), 1, "the in-scope window row must survive");
+
+        let scope_sql = fake
+            .execute_calls
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|q| q.contains("SELECT VALUE id FROM memory"))
+            .cloned()
+            .expect("scope statement");
+        assert!(
+            scope_sql.contains("project = repo:⟨ibis_assistant⟩")
+                && scope_sql.contains("id IN repo:⟨ibis_assistant⟩->has_memory->memory"),
+            "the scope statement keeps the graph predicate: {scope_sql}"
+        );
+
+        let window_sql = fake
+            .smart_calls
+            .lock()
+            .unwrap()
+            .clone()
+            .iter()
+            .find(|q| q.contains("ORDER BY vector::distance::cosine"))
+            .cloned()
+            .expect("DiskANN window statement");
+        assert!(
+            !window_sql.contains("has_memory") && !window_sql.contains("project ="),
+            "the DiskANN window must not carry the graph predicate: {window_sql}"
+        );
+        assert!(
+            window_sql.contains("LIMIT 30"),
+            "the window widens once more to absorb the post-filter: {window_sql}"
+        );
+    }
+
+    /// The Rust-side scope filter drops window rows outside the project —
+    /// an empty scope yields zero hits even when the window is populated.
+    #[tokio::test]
+    async fn search_memory_project_scope_drops_out_of_scope_window_rows() {
+        use crate::test_support::{fake_ai, obj, rows_of, FakeDb};
+        use ibis_db::value::Value;
+
+        let fake = std::sync::Arc::new(FakeDb::new(vec![
+            ("SELECT VALUE id FROM memory", rows_of(vec![])),
+            (
+                "FROM memory",
+                rows_of(vec![obj(vec![
+                    ("id", Value::from_t("memory:other")),
+                    ("kind", Value::from_t("fact")),
+                    ("title", Value::from_t("clamp cap")),
+                    ("content", Value::from_t("regression row")),
+                    ("status", Value::from_t("current")),
+                    ("visibility", Value::from_t("team")),
+                    ("score", Value::from_t(0.9f64)),
+                ])]),
+            ),
+        ]));
+        let svc = crate::search::SearchService::new(Some(fake.clone()), Some(fake_ai()));
+        let hits = svc
+            .search_memory(
+                &crate::ActorContext::LOCAL,
+                MemorySearchParams {
+                    project_name: "Ibis Assistant".into(),
+                    query: "regression".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("scoped search");
+        assert!(
+            hits.is_empty(),
+            "out-of-scope window rows must be dropped: {hits:?}"
         );
     }
 
