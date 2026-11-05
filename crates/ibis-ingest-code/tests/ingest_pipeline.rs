@@ -453,31 +453,30 @@ fn revert_rebuilds_full_manifest_per_chunk() {
         "resume chunk with current hash must be left untouched: {calls:?}"
     );
     // The file hash advances only after the manifest was fully queued, and
-    // the stale-chunk cleanup runs.
+    // the stale-chunk cleanup shares its transaction (atomic finalize: a
+    // hash advanced without the cleanup would pin stale chunks forever via
+    // the next-pass early return).
+    let finalize = calls.iter().find(|sql| {
+        sql.contains("BEGIN TRANSACTION;")
+            && sql.contains(&format!("UPSERT {file_id} SET hash"))
+            && sql.contains("DELETE file_chunk WHERE file =")
+            && sql.contains("hash != $hash")
+    });
     assert!(
-        calls
-            .iter()
-            .any(|sql| sql.starts_with(&format!("UPSERT {file_id} SET hash"))),
-        "source_file hash must be persisted: {calls:?}"
+        finalize.is_some(),
+        "hash UPSERT and stale-chunk cleanup must share one transaction: {calls:?}"
     );
-    assert!(
-        calls
-            .iter()
-            .any(|sql| sql.contains("DELETE file_chunk WHERE file =")
-                && sql.contains("hash != $hash")),
-        "stale-version chunks must be cleaned up: {calls:?}"
-    );
-    // Ordering: every chunk write precedes the file-hash UPSERT.
+    // Ordering: every chunk write precedes the finalize transaction.
     let last_chunk_write = calls
         .iter()
         .position(|sql| sql.contains("UPSERT file_chunk:["))
         .unwrap();
-    let file_upsert = calls
+    let finalize_pos = calls
         .iter()
-        .position(|sql| sql.starts_with(&format!("UPSERT {file_id} SET hash")))
+        .position(|sql| sql.contains(&format!("UPSERT {file_id} SET hash")))
         .unwrap();
     assert!(
-        last_chunk_write < file_upsert,
+        last_chunk_write < finalize_pos,
         "file hash must advance after chunk queuing, not before"
     );
 }
@@ -548,6 +547,61 @@ fn prune_transaction_is_atomic_and_propagates() {
     );
 }
 
+/// The file-hash UPSERT and the stale-chunk cleanup share one transaction
+/// (crash-window fix): a failure on the cleanup part fails the whole
+/// finalize — the hash must never advance without the cleanup, or the next
+/// pass would early-return on the matching hash and leave stale chunks
+/// served forever.
+#[test]
+fn finalize_transaction_is_atomic_and_propagates() {
+    let tmp_dir = temp_repo("repo_finalize_atomic");
+    let file_path = tmp_dir.join("main.go");
+    std::fs::write(&file_path, "package main\nfunc main() {}").unwrap();
+
+    let file_id = ibis_db::ids::source_file_id(
+        &format_record_id("repo", &sanitize_id("test-repo")),
+        "main.go",
+    );
+
+    // Failure on the stale-chunk DELETE inside the finalize transaction.
+    // Per-file failures are logged by the worker (the pipeline keeps going),
+    // so the atomicity is verified from the captured statements.
+    let mut mock_db = Arc::new(MockDb::new(vec![]));
+    Arc::get_mut(&mut mock_db).unwrap().fail_on = Some("hash != $hash".to_string());
+    ingest(mock_db.clone(), &tmp_dir, None).expect("walk completes");
+    let calls = mock_db.calls();
+    // The finalize was attempted as ONE statement (hash UPSERT + cleanup
+    // inside BEGIN/COMMIT) — no hash UPSERT may have gone out without the
+    // cleanup in the same statement (pre-fix the UPSERT ran alone first).
+    assert!(
+        calls.iter().any(|sql| sql.contains("BEGIN TRANSACTION;")
+            && sql.contains(&format!("UPSERT {file_id} SET hash"))
+            && sql.contains("hash != $hash")),
+        "hash UPSERT + cleanup were submitted together: {calls:?}"
+    );
+    assert!(
+        !calls
+            .iter()
+            .any(|sql| sql.contains(&format!("UPSERT {file_id} SET hash"))
+                && !sql.contains("hash != $hash")),
+        "no hash UPSERT outside the atomic finalize transaction: {calls:?}"
+    );
+
+    // Retry with the failure cleared: the whole transaction completes.
+    let mock_db = Arc::new(MockDb::new(vec![]));
+    ingest(mock_db.clone(), &tmp_dir, None).expect("retry succeeds");
+    assert!(
+        mock_db
+            .calls()
+            .iter()
+            .any(|sql| sql.contains("BEGIN TRANSACTION;")
+                && sql.contains(&format!("UPSERT {file_id} SET hash"))
+                && sql.contains("COMMIT TRANSACTION;")),
+        "retry finalizes the file version atomically: {:?}",
+        mock_db.calls()
+    );
+}
+
 #[test]
 fn ingest_codebase_batching() {
     let tmp_dir = temp_repo("repo_batching");
@@ -560,14 +614,16 @@ fn ingest_codebase_batching() {
     let mock_db = Arc::new(MockDb::new(vec![]));
     ingest(mock_db.clone(), &tmp_dir, None).expect("Error");
 
+    // Chunk-batch transactions only: the finalize transaction (hash UPSERT +
+    // stale cleanup) is expected on top of the chunk batches.
     let insert_count = mock_db
         .calls()
         .iter()
-        .filter(|sql| sql.contains("BEGIN TRANSACTION;"))
+        .filter(|sql| sql.contains("BEGIN TRANSACTION;") && sql.contains("UPSERT file_chunk:["))
         .count();
     assert_eq!(
         insert_count, 1,
-        "expected 1 batched TRANSACTION, got {insert_count}"
+        "expected 1 batched chunk TRANSACTION, got {insert_count}"
     );
 }
 

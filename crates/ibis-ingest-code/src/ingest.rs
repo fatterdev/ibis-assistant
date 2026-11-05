@@ -807,12 +807,23 @@ async fn process_file(
     // now that every chunk batch was queued. One row per (repo, rel_path);
     // no older-version rows to demote (the legacy "clear is_head" sweep is
     // gone with the composite key).
-    let upsert_sql = format!(
-        "UPSERT {file_id} SET hash = $hash, path = $path, rel_path = $rel, repo_name = $repo, is_head = true, updated_at = time::now();"
+    //
+    // The stale-chunk cleanup shares the same transaction: with the hash
+    // UPSERT and the DELETE in separate statements, a crash or failure in
+    // between would advance the hash with stale chunks still on disk — the
+    // next pass would then early-return on the matching hash and those stale
+    // duplicates would be served forever. One transaction makes
+    // "hash = coherent version" atomic.
+    let finalize_sql = format!(
+        "BEGIN TRANSACTION; \
+         UPSERT {file_id} SET hash = $hash, path = $path, rel_path = $rel, repo_name = $repo, is_head = true, updated_at = time::now(); \
+         DELETE {} WHERE file = {file_id} AND hash != $hash; \
+         COMMIT TRANSACTION;",
+        t::FILE_CHUNK
     );
     smart_query_retry(
         db,
-        &upsert_sql,
+        &finalize_sql,
         vars_of([
             ("hash", hash.clone().into_value()),
             ("path", path_str(abs_path).into_value()),
@@ -821,24 +832,7 @@ async fn process_file(
         ]),
     )
     .await
-    .map_err(|e| CodeIngestError::other(format!("db update error: {e}")))?;
-
-    // F10/B3: the array-id key space `[file, start_line]` carries no version
-    // dimension — chunks of older versions left on keys the current manifest
-    // does not reclaim are stale duplicates, not history. Drop them once the
-    // current version is fully queued, so the file's chunk set is exactly
-    // its current version.
-    let cleanup_sql = format!(
-        "DELETE {} WHERE file = {file_id} AND hash != $hash;",
-        t::FILE_CHUNK
-    );
-    smart_query_retry(
-        db,
-        &cleanup_sql,
-        vars_of([("hash", hash.clone().into_value())]),
-    )
-    .await
-    .map_err(|e| CodeIngestError::other(format!("stale chunk cleanup failed: {e}")))?;
+    .map_err(|e| CodeIngestError::other(format!("file version finalize failed: {e}")))?;
 
     Ok(())
 }
