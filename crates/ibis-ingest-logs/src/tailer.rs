@@ -12,6 +12,7 @@
 //! (finding G-A09). The custom reader caps per-line bytes (G-A08) and bounds
 //! the per-poll read.
 
+use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -80,6 +81,12 @@ impl Tailer {
 
     /// Runs the tail loop until `shutdown` fires, then flushes the pending
     /// batch, emits a final report and returns.
+    ///
+    /// C3/F11: read offset and **confirmed** offset are separate. Every batch
+    /// carries the byte offset its last line ends at; batches queue in order and
+    /// the persisted offset advances only after a batch analysis SUCCEEDS. A
+    /// failed batch blocks the queue (later batches cannot make the skip
+    /// permanent) and is retried on the next tick/poll.
     pub async fn run(self: Arc<Self>, mut shutdown: watch::Receiver<bool>) {
         // Retrieve the last processed position to ensure idempotency across
         // restarts.
@@ -89,7 +96,9 @@ impl Tailer {
             self.path
         );
 
-        let mut batch: Vec<String> = Vec::new();
+        // (line, end_offset after consuming that line).
+        let mut batch: Vec<(String, i64)> = Vec::new();
+        let mut pending: VecDeque<PendingBatch> = VecDeque::new();
         let mut all_anomalies: Vec<crate::analyzer::SemanticError> = Vec::new();
         let mut discovery_done = false;
         let mut chunk_regex: Option<Regex> = None;
@@ -103,9 +112,13 @@ impl Tailer {
             tokio::select! {
                 _ = ticker.tick() => {
                     if !batch.is_empty() {
-                        let to_flush = std::mem::take(&mut batch);
-                        self.flush(&to_flush, &mut all_anomalies, offset).await;
+                        let taken = std::mem::take(&mut batch);
+                        pending.push_back(PendingBatch {
+                            lines: taken.iter().map(|(l, _)| l.clone()).collect(),
+                            end_offset: taken.last().map(|(_, e)| *e).unwrap_or(0),
+                        });
                     }
+                    self.drain_pending(&mut pending, &mut all_anomalies).await;
                 }
                 changed = shutdown.changed() => {
                     if changed.is_err() {
@@ -114,9 +127,13 @@ impl Tailer {
                         continue;
                     }
                     if !batch.is_empty() {
-                        let to_flush = std::mem::take(&mut batch);
-                        self.flush(&to_flush, &mut all_anomalies, offset).await;
+                        let taken = std::mem::take(&mut batch);
+                        pending.push_back(PendingBatch {
+                            lines: taken.iter().map(|(l, _)| l.clone()).collect(),
+                            end_offset: taken.last().map(|(_, e)| *e).unwrap_or(0),
+                        });
                     }
+                    self.drain_pending(&mut pending, &mut all_anomalies).await;
                     self.finalize(&all_anomalies).await;
                     tracing::info!("Context cancelled, stopping tail on: {}", self.path);
                     return;
@@ -129,7 +146,9 @@ impl Tailer {
 
                                 // Format discovery after 50 lines ( loop body).
                                 if !discovery_done && batch.len() >= 50 {
-                                    let regex_str = self.analyzer.discover_format(&batch).await;
+                                    let joined: Vec<String> =
+                                        batch.iter().map(|(l, _)| l.clone()).collect();
+                                    let regex_str = self.analyzer.discover_format(&joined).await;
                                     if !regex_str.is_empty() {
                                         if let Ok(r) = Regex::new(&regex_str) {
                                             tracing::info!("Discovered log chunk delimiter: {regex_str}");
@@ -143,7 +162,7 @@ impl Tailer {
                                 let mut should_process = false;
                                 if batch.len() >= 100 {
                                     if let Some(re) = &chunk_regex {
-                                        if re.is_match(&text) || batch.len() >= 500 {
+                                        if re.is_match(text.0.as_str()) || batch.len() >= 500 {
                                             should_process = true;
                                         }
                                     } else {
@@ -155,15 +174,30 @@ impl Tailer {
                                     // A line matching the entry regex starts a
                                     // new entry: process everything before it and
                                     // keep it as the next batch seed.
-                                    let process_batch: Vec<String> =
-                                        if chunk_regex.as_ref().map(|re| re.is_match(&text)).unwrap_or(false) {
-                                            let head = batch[..batch.len() - 1].to_vec();
-                                            batch = vec![text.clone()];
-                                            head
-                                        } else {
-                                            std::mem::take(&mut batch)
-                                        };
-                                    self.flush(&process_batch, &mut all_anomalies, offset).await;
+                                    let end_offset = if chunk_regex.as_ref().map(|re| re.is_match(text.0.as_str())).unwrap_or(false) {
+                                        // Head = everything before the seed line:
+                                        // its last line is batch[n-2].
+                                        let head_end = batch.len()
+                                            .checked_sub(2)
+                                            .map(|i| batch[i].1)
+                                            .unwrap_or(0);
+                                        let head: Vec<(String, i64)> =
+                                            batch[..batch.len() - 1].to_vec();
+                                        batch = vec![text.clone()];
+                                        PendingBatch {
+                                            lines: head.iter().map(|(l, _)| l.clone()).collect(),
+                                            end_offset: head_end,
+                                        }
+                                    } else {
+                                        let taken = std::mem::take(&mut batch);
+                                        batch = Vec::new();
+                                        PendingBatch {
+                                            lines: taken.iter().map(|(l, _)| l.clone()).collect(),
+                                            end_offset: taken.last().map(|(_, e)| *e).unwrap_or(0),
+                                        }
+                                    };
+                                    pending.push_back(end_offset);
+                                    self.drain_pending(&mut pending, &mut all_anomalies).await;
                                 }
                             }
                         }
@@ -177,31 +211,42 @@ impl Tailer {
             }
         }
     }
+}
 
-    /// Flushes one batch: analysis → anomalies → report → notification →
-    /// offset update (`flush closure). Analysis failures drop the batch
-    /// without advancing the offset (re-analysis happens on the next run) —
-    /// partial anomalies ride along on the error but are discarded here,
-    /// identically.
-    async fn flush(
+/// One queued batch with the byte offset its last line ends at (C3/F11).
+struct PendingBatch {
+    lines: Vec<String>,
+    end_offset: i64,
+}
+
+impl Tailer {
+    /// Processes queued batches strictly in order. A failed batch stops the
+    /// drain (it is retried on the next tick/poll and later batches stay
+    /// queued behind it) and never advances the persisted offset.
+    async fn drain_pending(
         &self,
-        lines: &[String],
+        pending: &mut VecDeque<PendingBatch>,
         all_anomalies: &mut Vec<crate::analyzer::SemanticError>,
-        offset: i64,
     ) {
-        if lines.is_empty() {
-            return;
+        while let Some(front) = pending.front() {
+            let end = front.end_offset;
+            let lines = front.lines.clone();
+            let (anomalies, err) = self.analyzer.process_batch_sync(&lines).await;
+            if let Some(err) = err {
+                tracing::error!(
+                    "Log batch analysis failed for {} (retry queued at offset {end}): {err}",
+                    self.path
+                );
+                break;
+            }
+            if !anomalies.is_empty() {
+                all_anomalies.extend(anomalies.iter().cloned());
+                self.emit_report(all_anomalies).await;
+            }
+            // Success only now: persist the confirmed offset.
+            self.analyzer.update_offset(end).await;
+            pending.pop_front();
         }
-        let (anomalies, err) = self.analyzer.process_batch_sync(lines).await;
-        if let Some(err) = err {
-            tracing::error!("Log batch analysis failed for {}: {err}", self.path);
-            return;
-        }
-        if !anomalies.is_empty() {
-            all_anomalies.extend(anomalies.iter().cloned());
-            self.emit_report(all_anomalies).await;
-        }
-        self.analyzer.update_offset(offset).await;
     }
 
     /// Writes the sidecar markdown report and queues/sends the notification
@@ -241,15 +286,16 @@ impl Tailer {
         self.emit_report(anomalies).await;
     }
 
-    /// Reads newly appended bytes, returning complete lines (trimmed and
-    /// capped). Advances `offset` only past complete lines; a partial trailing
-    /// line stays buffered for the next poll. Handles rotation/truncation
-    /// (size below the resume offset → restart from 0).
+    /// Reads newly appended bytes, returning complete lines with the byte
+    /// offset each line ends at (trimmed and capped). Advances `offset` only
+    /// past complete lines; a partial trailing line stays buffered for the next
+    /// poll. Handles rotation/truncation (size below the resume offset →
+    /// restart from 0).
     async fn read_new_lines(
         &self,
         offset: &mut i64,
         partial: &mut Vec<u8>,
-        batch: &mut Vec<String>,
+        batch: &mut Vec<(String, i64)>,
         oversized_logged: &mut bool,
         missing_logged: &mut bool,
     ) -> ReadOutcome {
@@ -296,8 +342,9 @@ impl Tailer {
         }
         partial.extend_from_slice(&buf[..n]);
 
-        // Split complete lines; keep the trailing partial in the buffer.
-        let mut lines = Vec::new();
+        // Split complete lines; keep the trailing partial in the buffer. Each
+        // line carries the byte offset it ends at (C3/F11).
+        let mut lines: Vec<(String, i64)> = Vec::new();
         let mut consumed = 0usize;
         let mut start = 0usize;
         for (i, b) in partial.iter().enumerate() {
@@ -310,6 +357,7 @@ impl Tailer {
             }
             consumed = i + 1;
             start = i + 1;
+            let line_end = *offset + consumed as i64;
             let text = String::from_utf8_lossy(line_bytes);
             let text = text.trim().to_string();
             if text.is_empty() {
@@ -326,10 +374,10 @@ impl Tailer {
                 }
                 let capped: String =
                     String::from_utf8_lossy(&line_bytes[..self.max_line_bytes]).into_owned();
-                lines.push(capped.trim().to_string());
+                lines.push((capped.trim().to_string(), line_end));
                 continue;
             }
-            lines.push(text);
+            lines.push((text, line_end));
         }
         partial.drain(..consumed);
         *offset += consumed as i64;
@@ -338,7 +386,7 @@ impl Tailer {
 }
 
 enum ReadOutcome {
-    Lines(Vec<String>),
+    Lines(Vec<(String, i64)>),
     Idle,
     Gone,
 }
@@ -351,7 +399,9 @@ mod tests {
 
     /// Fake AI provider: functional, replies `[]` (no anomalies) so batch
     /// analysis succeeds and offsets advance without network access.
-    struct FakeAI;
+    struct FakeAI {
+        reply: String,
+    }
 
     #[async_trait::async_trait]
     impl ibis_ai::AIProvider for FakeAI {
@@ -368,7 +418,9 @@ mod tests {
         ) -> std::result::Result<ibis_ai::types::Candidate, ibis_ai::AiError> {
             Ok(ibis_ai::types::Candidate {
                 content: ibis_ai::types::Content {
-                    parts: vec![ibis_ai::types::Part { text: "[]".into() }],
+                    parts: vec![ibis_ai::types::Part {
+                        text: self.reply.clone(),
+                    }],
                     ..Default::default()
                 },
                 ..Default::default()
@@ -377,7 +429,13 @@ mod tests {
     }
 
     fn fake_ai() -> Arc<ibis_ai::Client> {
-        let provider = Arc::new(FakeAI) as Arc<dyn ibis_ai::AIProvider>;
+        fake_ai_with_reply("[]")
+    }
+
+    fn fake_ai_with_reply(reply: &str) -> Arc<ibis_ai::Client> {
+        let provider = Arc::new(FakeAI {
+            reply: reply.to_string(),
+        }) as Arc<dyn ibis_ai::AIProvider>;
         Arc::new(ibis_ai::Client::new(
             Some(provider.clone()),
             Some(provider),
@@ -626,5 +684,279 @@ mod tests {
         // The oversized line was capped and the loop survived (offset advanced
         // past the full oversized line).
         assert_eq!(db.last_offset(), big_line.len() as i64);
+    }
+
+    /// Fails the first N `UPSERT error_type` persists, then recovers — the
+    /// C3/F11 injection seam on top of CountingDb.
+    struct FlakyDb {
+        inner: CountingDb,
+        remaining_failures: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl ibis_db::executor::Executor for FlakyDb {
+        async fn execute(
+            &self,
+            sql: &str,
+        ) -> std::result::Result<ibis_db::executor::QueryOutcome, ibis_db::DbError> {
+            self.inner.execute(sql).await
+        }
+
+        async fn smart_query(
+            &self,
+            sql: &str,
+            v: ibis_db::executor::Vars,
+        ) -> std::result::Result<ibis_db::executor::QueryOutcome, ibis_db::DbError> {
+            if sql.contains("UPSERT error_type") {
+                let left = self
+                    .remaining_failures
+                    .load(std::sync::atomic::Ordering::SeqCst);
+                if left > 0 {
+                    self.remaining_failures
+                        .store(left - 1, std::sync::atomic::Ordering::SeqCst);
+                    return Err(ibis_db::DbError::Query {
+                        message: "injected flaky failure".into(),
+                        duration_ms: 0,
+                    });
+                }
+            }
+            self.inner.smart_query(sql, v).await
+        }
+    }
+
+    /// C3/F11: a restart while the batch is still failed persists nothing —
+    /// the next run re-reads from the old offset and processes the batch.
+    #[tokio::test]
+    async fn restart_before_retry_does_not_skip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("restart.log");
+        let first = "ERROR restart batch line\n";
+        std::fs::write(&log, first).unwrap();
+
+        let db = Arc::new(FlakyDb {
+            inner: CountingDb::new(),
+            // Fail "forever" during the first run (u64-scale budget).
+            remaining_failures: AtomicUsize::new(usize::MAX / 2),
+        });
+        let build_tailer = |analyzer_db: Arc<dyn ibis_db::executor::Executor>,
+                            ai: Arc<ibis_ai::Client>|
+         -> Arc<Tailer> {
+            let mut analyzer = LogAnalyzer::bare("restart-test");
+            analyzer.path = log.to_str().unwrap().to_string();
+            analyzer.log_file_id = "log_file:⟨restart_log⟩".into();
+            analyzer.db = Some(analyzer_db);
+            analyzer.progress = Some(Arc::new(NoopReporter));
+            analyzer.ai = Some(ai);
+            Arc::new(Tailer {
+                path: log.to_str().unwrap().to_string(),
+                cfg: None,
+                db: None,
+                ai: None,
+                analyzer: Arc::new(analyzer),
+                poll_interval: Duration::from_millis(20),
+                ticker_interval: Duration::from_millis(120),
+                max_line_bytes: DEFAULT_MAX_LINE_BYTES,
+            })
+        };
+
+        // Run 1: failing persist → shutdown before any retry succeeds.
+        {
+            let ai = fake_ai_with_reply(
+                r#"[{"category":"RESTART","stack_trace":"boom","file":"","line":0,"symbol":"","cause":"c","severity":5,"template":"boom <VAR>","supersedes":[]}]"#,
+            );
+            let tailer = build_tailer(db.clone() as Arc<dyn ibis_db::executor::Executor>, ai);
+            let (tx, rx) = watch::channel(false);
+            let runner = tailer.clone();
+            let task = tokio::spawn(async move { runner.run(rx).await });
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            tx.send(true).ok();
+            tokio::time::sleep(Duration::from_millis(120)).await;
+            assert!(task.is_finished(), "tailer must stop after shutdown");
+            let offsets = db.inner.offsets.lock().unwrap();
+            assert!(
+                offsets.is_empty(),
+                "a restart before the retry persists no offset: {offsets:?}"
+            );
+        }
+
+        // Run 2: fresh tailer on the (now healthy) DB — the batch is
+        // re-processed from the unadvanced offset and the offset lands on
+        // its end.
+        {
+            let mut db = db;
+            if let Some(inner) = Arc::get_mut(&mut db) {
+                inner
+                    .remaining_failures
+                    .store(0, std::sync::atomic::Ordering::SeqCst);
+            } else {
+                panic!("run 1's tailer must have dropped its Arc before run 2");
+            }
+            let ai = fake_ai_with_reply(
+                r#"[{"category":"RESTART","stack_trace":"boom","file":"","line":0,"symbol":"","cause":"c","severity":5,"template":"boom <VAR>","supersedes":[]}]"#,
+            );
+            let tailer = build_tailer(db.clone() as Arc<dyn ibis_db::executor::Executor>, ai);
+            let (tx, rx) = watch::channel(false);
+            let runner = tailer.clone();
+            let task = tokio::spawn(async move { runner.run(rx).await });
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                let done = {
+                    let offsets = db.inner.offsets.lock().unwrap();
+                    offsets.iter().any(|o| *o >= first.len() as i64)
+                };
+                if done || tokio::time::Instant::now() > deadline {
+                    break;
+                }
+            }
+            tx.send(true).ok();
+            tokio::time::sleep(Duration::from_millis(120)).await;
+            assert!(task.is_finished(), "tailer must stop after shutdown");
+            let offsets = db.inner.offsets.lock().unwrap();
+            assert!(
+                offsets.contains(&(first.len() as i64)),
+                "the restarted run re-processes the batch and persists its exact end offset: {offsets:?}"
+            );
+            assert!(
+                offsets.iter().all(|o| *o <= first.len() as i64),
+                "nothing beyond the batch was persisted: {offsets:?}"
+            );
+        }
+    }
+    #[tokio::test]
+    async fn failed_batch_retries_before_offset_advances() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("flaky.log");
+        let first = "ERROR first batch line\n";
+        std::fs::write(&log, first).unwrap();
+
+        let db = Arc::new(FlakyDb {
+            inner: CountingDb::new(),
+            remaining_failures: AtomicUsize::new(2), // fail the first 2 attempts
+        });
+        let mut analyzer = LogAnalyzer::bare("flaky-test");
+        analyzer.path = log.to_str().unwrap().to_string();
+        analyzer.log_file_id = format!(
+            "log_file:⟨{}⟩",
+            ibis_db::ids::sanitize_id(
+                Path::new(&log)
+                    .file_name()
+                    .map(|s| s.to_string_lossy())
+                    .unwrap_or_default()
+                    .as_ref()
+            )
+        );
+        analyzer.db = Some(db.clone() as Arc<dyn ibis_db::executor::Executor>);
+        analyzer.progress = Some(Arc::new(NoopReporter));
+        // The AI classifies an anomaly so the persist path (and the flaky
+        // failure) actually runs — an empty classification would succeed
+        // without touching error_type.
+        let ai = fake_ai_with_reply(
+            r#"[{"category":"FLAKY","stack_trace":"boom","file":"","line":0,"symbol":"","cause":"c","severity":5,"template":"boom <VAR>","supersedes":[]}]"#,
+        );
+        analyzer.ai = Some(ai.clone());
+        let tailer = Arc::new(Tailer {
+            path: log.to_str().unwrap().to_string(),
+            cfg: None,
+            db: Some(db.clone() as Arc<dyn ibis_db::executor::Executor>),
+            ai: Some(ai),
+            analyzer: Arc::new(analyzer),
+            poll_interval: Duration::from_millis(20),
+            ticker_interval: Duration::from_millis(120),
+            max_line_bytes: DEFAULT_MAX_LINE_BYTES,
+        });
+
+        let (tx, rx) = watch::channel(false);
+        let runner = tailer.clone();
+        let task = tokio::spawn(async move { runner.run(rx).await });
+
+        // Phase 1: wait for the two injected failures to be consumed. While
+        // the batch keeps failing, no offset may persist.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            let consumed = db
+                .remaining_failures
+                .load(std::sync::atomic::Ordering::SeqCst)
+                == 0;
+            if consumed || tokio::time::Instant::now() > deadline {
+                break;
+            }
+        }
+        assert!(
+            db.remaining_failures
+                .load(std::sync::atomic::Ordering::SeqCst)
+                == 0,
+            "the two injected failures must have been attempted"
+        );
+        {
+            let offsets = db.inner.offsets.lock().unwrap();
+            assert!(
+                offsets.is_empty(),
+                "no offset may persist while the batch fails: {offsets:?}"
+            );
+        }
+
+        // Phase 2: recover (failures exhausted) → the queued batch 1 retries
+        // on the next tick and succeeds; the offset lands exactly at the end
+        // of the FIRST batch, and nothing beyond it.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            let saved = {
+                let offsets = db.inner.offsets.lock().unwrap();
+                offsets.contains(&(first.len() as i64))
+            };
+            if saved || tokio::time::Instant::now() > deadline {
+                break;
+            }
+        }
+        {
+            let offsets = db.inner.offsets.lock().unwrap();
+            assert!(
+                offsets.contains(&(first.len() as i64)),
+                "the failed batch must be retried and its exact end offset saved: {offsets:?}"
+            );
+            assert!(
+                offsets.iter().all(|o| *o <= first.len() as i64),
+                "no offset beyond the first batch may be saved before it succeeded: {offsets:?}"
+            );
+        }
+
+        // Phase 3: append a second batch; its offset persists only after the
+        // first one is confirmed.
+        let second = "ERROR second batch line\n";
+        std::fs::write(&log, format!("{first}{second}")).unwrap();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            let done = {
+                let offsets = db.inner.offsets.lock().unwrap();
+                offsets
+                    .last()
+                    .map(|o| *o >= (first.len() + second.len()) as i64)
+                    .unwrap_or(false)
+            };
+            if done || tokio::time::Instant::now() > deadline {
+                break;
+            }
+        }
+
+        tx.send(true).ok();
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        assert!(task.is_finished(), "tailer must stop after shutdown");
+        {
+            let offsets = db.inner.offsets.lock().unwrap();
+            let full = (first.len() + second.len()) as i64;
+            assert!(
+                offsets.last().map(|o| *o >= full).unwrap_or(false),
+                "final offset covers both batches: {offsets:?}"
+            );
+            // Monotonic persistence: every save advances, none skips a
+            // failed batch.
+            for w in offsets.windows(2) {
+                assert!(w[1] >= w[0], "offsets must be monotonic: {offsets:?}");
+            }
+        }
     }
 }

@@ -2002,6 +2002,7 @@ dependencies = [
  "ibis-core",
  "ibis-db",
  "ibis-git",
+ "ibis-search",
  "notify",
  "regex",
  "russh",

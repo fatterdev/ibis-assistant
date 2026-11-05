@@ -250,7 +250,10 @@ impl ServerHandler for IbisServer {
             }
             Ok(_) => tracing::info!("MCP Tool Done: {tool_name} ok in {elapsed:?}"),
             Err(err) => {
-                tracing::warn!("MCP Tool Done: {tool_name} ERROR in {elapsed:?}: {}", err.message);
+                tracing::warn!(
+                    "MCP Tool Done: {tool_name} ERROR in {elapsed:?}: {}",
+                    err.message
+                );
             }
         }
         response

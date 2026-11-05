@@ -138,7 +138,9 @@ async fn run_async(p: EvalParams) -> Result<i32, String> {
             match probe.embed_text("ibis eval probe").await {
                 Ok(_) => Arc::new(probe),
                 Err(e) => {
-                    eprintln!("eval: ollama probe failed ({e}); falling back to the offline embedder");
+                    eprintln!(
+                        "eval: ollama probe failed ({e}); falling back to the offline embedder"
+                    );
                     Arc::new(OfflineEmbedder)
                 }
             }
@@ -179,7 +181,8 @@ async fn run_async(p: EvalParams) -> Result<i32, String> {
     if let Some(out) = &p.out {
         if let Some(parent) = std::path::Path::new(out).parent() {
             if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
             }
         }
         std::fs::write(out, format!("{json}\n"))
@@ -187,7 +190,10 @@ async fn run_async(p: EvalParams) -> Result<i32, String> {
     }
 
     if report.aggregate.cases_ok == 0 {
-        eprintln!("eval: all {} cases errored (degraded DB/AI?)", report.aggregate.cases);
+        eprintln!(
+            "eval: all {} cases errored (degraded DB/AI?)",
+            report.aggregate.cases
+        );
         return Ok(1);
     }
     if report.below_threshold(p.min_recall_5) {
@@ -212,7 +218,9 @@ mod tests {
     fn parse_requires_target_and_dataset() {
         assert_eq!(
             parse_args(&args(&[])).err(),
-            Some("unknown eval target (expected: ibis eval retrieval --dataset <path>)".to_string())
+            Some(
+                "unknown eval target (expected: ibis eval retrieval --dataset <path>)".to_string()
+            )
         );
         assert!(parse_args(&args(&["retrieval"])).is_err());
         assert!(parse_args(&args(&["retrieval", "--dataset", "d.yaml"])).is_ok());

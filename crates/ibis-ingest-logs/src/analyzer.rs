@@ -497,6 +497,7 @@ impl LogAnalyzer {
         }
 
         let mut results: Vec<SemanticError> = Vec::new();
+        let mut persist_failures: Vec<String> = Vec::new();
 
         // Phase 1: deterministic LogAlign matching (AST/static templates —
         // bypasses AI). Prefer longer format strings when multiple patterns
@@ -537,15 +538,19 @@ impl LogAnalyzer {
                     ),
                     ..Default::default()
                 };
-                self.ingest_error(
-                    &se.category,
-                    &se.stack_trace,
-                    &se.file,
-                    se.severity,
-                    &se.template,
-                    &[],
-                )
-                .await;
+                if let Err(persist_err) = self
+                    .ingest_error(
+                        &se.category,
+                        &se.stack_trace,
+                        &se.file,
+                        se.severity,
+                        &se.template,
+                        &[],
+                    )
+                    .await
+                {
+                    persist_failures.push(format!("{}: {persist_err}", se.category));
+                }
                 results.push(se);
                 matched = true;
             }
@@ -712,15 +717,22 @@ Log text:
             if !e.template.is_empty() {
                 let _ = self.add_known_pattern(&e.category, &e.template);
             }
-            self.ingest_error(
-                &e.category,
-                &e.stack_trace,
-                &e.file,
-                e.severity,
-                &e.template,
-                &e.supersedes,
-            )
-            .await;
+            // C2: a DB persist failure must not be interpreted as a
+            // successful analysis — the batch reports it (the tailer retries
+            // instead of advancing past the batch).
+            if let Err(persist_err) = self
+                .ingest_error(
+                    &e.category,
+                    &e.stack_trace,
+                    &e.file,
+                    e.severity,
+                    &e.template,
+                    &e.supersedes,
+                )
+                .await
+            {
+                persist_failures.push(format!("{}: {persist_err}", e.category));
+            }
             results.push(e);
         }
 
@@ -734,7 +746,15 @@ Log text:
             results = merged;
         }
 
-        (results, None)
+        let err = if persist_failures.is_empty() {
+            None
+        } else {
+            Some(LogsError::other(format!(
+                "anomaly persist failed: {}",
+                persist_failures.join("; ")
+            )))
+        };
+        (results, err)
     }
 
     /// Replaces every known-pattern match with a `[KNOWN_ERROR: category]`
@@ -816,6 +836,10 @@ Log sample:
 
     /// Upserts an `error_type` row + `log_entry` edge + embedding + related
     /// file edge. Bound variables everywhere (F-002).
+    ///
+    /// C2/F09: persist failures propagate to the caller — a DB error must not
+    /// be interpreted as a successful analysis (the tailer then retries the
+    /// batch instead of advancing past it).
     pub(crate) async fn ingest_error(
         &self,
         category: &str,
@@ -824,14 +848,14 @@ Log sample:
         severity: i64,
         template: &str,
         supersedes: &[String],
-    ) {
+    ) -> Result<()> {
         let Some(db) = &self.db else {
-            return;
+            return Ok(());
         };
 
         let msg = format!("{category}{stack}");
         if msg.is_empty() {
-            return;
+            return Ok(());
         }
         let hash: String = Sha256::digest(msg.as_bytes())
             .iter()
@@ -868,7 +892,7 @@ Log sample:
             .await;
         if let Err(e) = result {
             tracing::error!("Failed to upsert ErrorType: {e}");
-            return;
+            return Err(LogsError::other(format!("error_type upsert failed: {e}")));
         }
 
         for sup in supersedes {
@@ -893,6 +917,7 @@ Log sample:
             .await
         {
             tracing::warn!("Failed to persist log entry: {e}");
+            return Err(LogsError::other(format!("log_entry persist failed: {e}")));
         }
 
         if let Err(e) = db
@@ -905,6 +930,7 @@ Log sample:
             .await
         {
             tracing::warn!("Failed to relate log entry: {e}");
+            return Err(LogsError::other(format!("log_entry relate failed: {e}")));
         }
 
         let embedding = match &self.ai {
@@ -922,13 +948,20 @@ Log sample:
         }
 
         if !file.is_empty() {
-            let file_id = format_record_id(schema::SOURCE_FILE, &sanitize_id(file));
+            // F09: the anomaly's file link must point at the SAME canonical
+            // `source_file:[repo, file_path]` record code/git ingest writes —
+            // the old scalar `source_file:⟨sanitized⟩` id is rejected by the
+            // typed id field and siloed log errors away from the code graph.
+            let repo_ref = format_record_id(schema::REPO, &sanitize_id(&self.project));
+            let file_id = ibis_db::ids::source_file_id(&repo_ref, file);
             // 3.x: endpoints must exist — persist the source_file record with
-            // its rel_path before linking ( 2.x implicit-created it empty).
+            // its rel_path and repo_name (recent_failures filters the
+            // related_to traversal on repo_name) before linking
+            // ( 2.x implicit-created it empty).
             if let Err(e) = db
                 .smart_query(
-                    &format!("UPSERT {file_id} SET rel_path = $rel_path;"),
-                    vars([("rel_path", file)]),
+                    &format!("UPSERT {file_id} SET rel_path = $rel_path, repo_name = $repo_name;"),
+                    vars([("rel_path", file), ("repo_name", self.project.as_str())]),
                 )
                 .await
             {
@@ -944,8 +977,10 @@ Log sample:
                 .await
             {
                 tracing::warn!("Failed to relate error to file: {e}");
+                return Err(LogsError::other(format!("related_to file failed: {e}")));
             }
         }
+        Ok(())
     }
 
     /// Persists the tail resume offset on the log_file record.
@@ -1164,6 +1199,167 @@ mod tests {
     use super::*;
     use std::io::Cursor;
     use std::sync::atomic::AtomicUsize;
+
+    /// Capturing executor for the C2/F09 canonical-id contract: records the
+    /// SQL it receives and optionally fails matching statements.
+    struct CapturingDb {
+        sqls: std::sync::Mutex<Vec<String>>,
+        fail_on: Option<String>,
+    }
+
+    impl CapturingDb {
+        fn new() -> Self {
+            CapturingDb {
+                sqls: std::sync::Mutex::new(Vec::new()),
+                fail_on: None,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ibis_db::executor::Executor for CapturingDb {
+        async fn execute(
+            &self,
+            sql: &str,
+        ) -> std::result::Result<ibis_db::executor::QueryOutcome, ibis_db::DbError> {
+            self.sqls.lock().unwrap().push(sql.to_string());
+            if let Some(fail) = &self.fail_on {
+                if sql.contains(fail.as_str()) {
+                    return Err(ibis_db::DbError::Query {
+                        message: format!("injected failure on {fail}"),
+                        duration_ms: 0,
+                    });
+                }
+            }
+            Ok(ibis_db::executor::QueryOutcome::Single(
+                ibis_db::value::Value::None,
+            ))
+        }
+
+        async fn smart_query(
+            &self,
+            sql: &str,
+            _v: ibis_db::executor::Vars,
+        ) -> std::result::Result<ibis_db::executor::QueryOutcome, ibis_db::DbError> {
+            self.execute(sql).await
+        }
+    }
+
+    /// C2/F09: the anomaly's file link uses the canonical
+    /// `source_file:[repo, file_path]` id — the same record code/git ingest
+    /// writes — with rel_path AND repo_name set, and the RELATE targets it.
+    #[tokio::test]
+    async fn ingest_error_links_canonical_source_file() {
+        let db = Arc::new(CapturingDb::new());
+        let mut analyzer = LogAnalyzer::bare("proj-with spaces");
+        analyzer.db = Some(db.clone() as Arc<dyn ibis_db::executor::Executor>);
+
+        analyzer
+            .ingest_error("CAT", "stack", "src/lib.rs", 5, "template", &[])
+            .await
+            .expect("persist");
+
+        let sqls = db.sqls.lock().unwrap();
+        let want = ibis_db::ids::source_file_id("repo:⟨proj_with_spaces⟩", "src/lib.rs");
+        let upsert = sqls
+            .iter()
+            .find(|s| s.contains("UPSERT") && s.contains("rel_path"))
+            .expect("source_file upsert");
+        assert!(
+            upsert.contains(&want),
+            "canonical array id expected {want}, got: {upsert}"
+        );
+        assert!(
+            upsert.contains("repo_name"),
+            "repo_name must be set (recent_failures traversal filter): {upsert}"
+        );
+        assert!(
+            !sqls.iter().any(|s| s.contains("source_file:⟨src_lib_rs⟩")),
+            "no scalar legacy id may be written: {sqls:?}"
+        );
+        let relate = sqls
+            .iter()
+            .find(|s| s.contains(&format!("->{}->", schema::RELATED_TO)))
+            .expect("related_to relate");
+        assert!(
+            relate.contains(&want),
+            "related_to must point at the canonical record: {relate}"
+        );
+    }
+
+    /// C2: paths that collided under `sanitize_id` coexist as distinct
+    /// canonical records.
+    #[tokio::test]
+    async fn ingest_error_collision_free_paths() {
+        let db = Arc::new(CapturingDb::new());
+        let mut analyzer = LogAnalyzer::bare("p");
+        analyzer.db = Some(db.clone() as Arc<dyn ibis_db::executor::Executor>);
+
+        for file in [
+            "src/a-b.rs",
+            "src/a/b.rs",
+            "Foo.rs",
+            "foo.rs",
+            "with space's.rs",
+        ] {
+            analyzer
+                .ingest_error("CAT", "stack", file, 5, "template", &[])
+                .await
+                .expect("persist");
+        }
+        let sqls = db.sqls.lock().unwrap();
+        for file in [
+            "src/a-b.rs",
+            "src/a/b.rs",
+            "Foo.rs",
+            "foo.rs",
+            "with space's.rs",
+        ] {
+            let want = ibis_db::ids::source_file_id("repo:⟨p⟩", file);
+            assert!(
+                sqls.iter().any(|s| s.contains(&want)),
+                "canonical id for {file} expected: {want}"
+            );
+        }
+        // Distinct canonical ids (no collapse onto one sanitized suffix).
+        let a_b = ibis_db::ids::source_file_id("repo:⟨p⟩", "src/a-b.rs");
+        let a_slash_b = ibis_db::ids::source_file_id("repo:⟨p⟩", "src/a/b.rs");
+        assert_ne!(a_b, a_slash_b);
+    }
+
+    /// C2: a DB persist failure surfaces as the batch error — the analysis
+    /// must not be reported as successful when the write failed.
+    #[tokio::test]
+    async fn ingest_error_failure_surfaces_as_batch_error() {
+        let mut db = Arc::new(CapturingDb::new());
+        Arc::get_mut(&mut db).unwrap().fail_on = Some("UPSERT error_type".to_string());
+        let mut analyzer = LogAnalyzer::bare("p");
+        analyzer.db = Some(db.clone() as Arc<dyn ibis_db::executor::Executor>);
+
+        let result = analyzer
+            .ingest_error("CAT", "stack", "src/lib.rs", 5, "template", &[])
+            .await;
+        assert!(result.is_err(), "ingest_error must propagate the failure");
+
+        // End-to-end: process_batch_sync reports the persist failure (AI path —
+        // the static LogAlign path is promoted patterns only).
+        let mut err_db = Arc::new(CapturingDb::new());
+        Arc::get_mut(&mut err_db).unwrap().fail_on = Some("UPSERT error_type".to_string());
+        let mut err_analyzer = LogAnalyzer::bare("p");
+        err_analyzer.db = Some(err_db as Arc<dyn ibis_db::executor::Executor>);
+        let (ai, _calls) = counting_ai(
+            r#"[{"category":"CAT","stack_trace":"stack","file":"src/lib.rs","line":1,"symbol":"","cause":"c","severity":5,"template":"t","supersedes":[]}]"#,
+        );
+        err_analyzer.ai = Some(ai);
+        let (results, err) = err_analyzer
+            .process_batch_sync(&["ERROR thing 42".to_string()])
+            .await;
+        assert!(!results.is_empty(), "anomalies still surface: {results:?}");
+        assert!(
+            err.is_some(),
+            "a failed persist must surface as the batch error: {err:?}"
+        );
+    }
 
     struct CountingReporter {
         calls: AtomicUsize,

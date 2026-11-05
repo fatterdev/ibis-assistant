@@ -50,8 +50,7 @@ pub fn start(state: &Arc<AppState>, shutdown: CancellationToken) {
         );
         return;
     }
-    let interval =
-        Duration::from_secs(cfg.ai.consolidation.interval_secs.max(MIN_INTERVAL_SECS));
+    let interval = Duration::from_secs(cfg.ai.consolidation.interval_secs.max(MIN_INTERVAL_SECS));
     tracing::info!(
         "Consolidation loop started (daemon-owned, interval {}s, up to {MAX_ITEMS_PER_PROJECT} observations per project pass)",
         interval.as_secs()
@@ -95,7 +94,10 @@ async fn run_pass(state: &Arc<AppState>) {
     }
     tracing::info!("ConsolidationLoop: pass over {} project(s)", projects.len());
     for project in projects {
-        match optimizer.consolidate_loop(&project, MAX_ITEMS_PER_PROJECT).await {
+        match optimizer
+            .consolidate_loop(&project, MAX_ITEMS_PER_PROJECT)
+            .await
+        {
             Err(err) => tracing::warn!("ConsolidationLoop: pass for {project} failed: {err}"),
             Ok(()) => {
                 tracing::info!("ConsolidationLoop: pass for {project} completed");

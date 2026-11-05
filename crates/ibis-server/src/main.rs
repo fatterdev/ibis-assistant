@@ -743,8 +743,8 @@ fn build_search_service(
         );
     service.hot_ref_cache_disabled = cfg.world_state.code_cache_disabled;
     service.fusion_mode = ibis_search::retrieval_boost::FusionMode::resolve(&cfg.search.fusion);
-    service.candidate_window = (cfg.search.candidates as usize)
-        .max(ibis_search::search::VECTOR_CHANNEL_LIMIT);
+    service.candidate_window =
+        (cfg.search.candidates as usize).max(ibis_search::search::VECTOR_CHANNEL_LIMIT);
     Arc::new(service)
 }
 

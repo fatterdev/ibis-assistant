@@ -39,5 +39,6 @@ rustls-pki-types.workspace = true
 webpki-roots.workspace = true
 
 [dev-dependencies]
+ibis-search = { version = "0.2.0", path = "../ibis-search" }
 tempfile.workspace = true
 uuid.workspace = true

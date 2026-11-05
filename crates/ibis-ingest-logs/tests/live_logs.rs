@@ -238,6 +238,123 @@ async fn offset_roundtrip_on_log_file_record() {
     cleanup(&db, &db_name).await;
 }
 
+/// C2/F09 live: the anomaly's file link lands on the canonical
+/// `source_file:[repo, file_path]` record (the same one code/git ingest
+/// writes), with repo_name set so the recent_failures traversal filters it,
+/// and colliding paths coexist — no scalar duplicate rows.
+#[tokio::test]
+async fn anomaly_links_canonical_source_file() {
+    let Some((db, db_name)) = connect_scratch().await else {
+        return;
+    };
+
+    let analyzer = ibis_ingest_logs::LogAnalyzer::new_with_project(
+        "logs/live-proj/link.log",
+        "live-proj",
+        None,
+        Some(db.clone()),
+        Some(fake_ai(
+            r#"[{"category":"CANON_LINK","stack_trace":"boom in lib","file":"src/lib.rs","line":3,"symbol":"","cause":"c","severity":6,"template":"boom in lib <VAR>","supersedes":[]},
+                {"category":"CANON_LINK","stack_trace":"boom in spaced","file":"my dir/my file.rs","line":9,"symbol":"","cause":"c","severity":6,"template":"boom in spaced <VAR>","supersedes":[]}]"#,
+        )),
+    )
+    .await;
+
+    let (out, err) = analyzer
+        .process_batch_sync(&["boom in lib 7".to_string(), "boom in spaced 11".to_string()])
+        .await;
+    assert!(err.is_none(), "batch must not error: {err:?}");
+    assert_eq!(out.len(), 2, "two classified anomalies: {out:?}");
+
+    // Canonical records exist with rel_path + repo_name; no scalar legacy row.
+    for (file, rel) in [
+        ("src/lib.rs", "src/lib.rs"),
+        ("my dir/my file.rs", "my dir/my file.rs"),
+    ] {
+        let id = ibis_db::ids::source_file_id("repo:⟨live_proj⟩", file);
+        let sql = format!("SELECT rel_path, repo_name FROM {id};");
+        let outcome = db
+            .smart_query(&sql, ibis_db::executor::Vars::new())
+            .await
+            .unwrap_or_else(|e| panic!("canonical record {id}: {e}"));
+        let text = format!("{:?}", outcome.first());
+        assert!(text.contains(rel), "{id} carries rel_path: {text}");
+        assert!(text.contains("live-proj"), "{id} carries repo_name: {text}");
+    }
+    // No scalar legacy rows: exactly the two canonical records exist.
+    let scalar = db
+        .execute("SELECT count() FROM source_file GROUP ALL;")
+        .await
+        .expect("count source_file");
+    let scalar_text = format!("{:?}", scalar.first());
+    assert!(
+        scalar_text.contains("2"),
+        "exactly two canonical source_file rows (no scalar duplicates): {scalar_text}"
+    );
+
+    // The related_to edge from the error_type to the canonical record.
+    let edges = db
+        .execute("SELECT in, out FROM related_to;")
+        .await
+        .expect("related_to edges");
+    let text = format!("{:?}", edges.first());
+    assert!(
+        text.contains("src/lib.rs") && text.contains("my dir/my file.rs"),
+        "both canonical files are related_to targets: {text}"
+    );
+
+    // The failures surface through the recent_failures traversal
+    // (project filter reads repo_name).
+    let service = ibis_search::search::SearchService::new(Some(db.clone()), None);
+    let failures = service
+        .recent_failures(&ibis_search::memory::queries::RecentFailuresParams {
+            project_name: "live-proj".into(),
+            area: String::new(),
+            kinds: vec!["gotcha".into()],
+            since: "1w".into(),
+            limit: 10,
+        })
+        .await
+        .expect("recent failures");
+    assert!(
+        failures
+            .iter()
+            .any(|m| m.title.contains("CANON_LINK") || m.content.contains("boom in lib")),
+        "log failure present in recent_failures(live-proj): {failures:?}"
+    );
+    // Personal-style area filter: the spaced path matches through rel_path.
+    let failures = service
+        .recent_failures(&ibis_search::memory::queries::RecentFailuresParams {
+            project_name: "live-proj".into(),
+            area: "my dir".into(),
+            kinds: vec!["gotcha".into()],
+            since: "1w".into(),
+            limit: 10,
+        })
+        .await
+        .expect("recent failures area");
+    assert!(
+        failures
+            .iter()
+            .any(|m| m.content.contains("boom in spaced")),
+        "area filter reaches the spaced-path record: {failures:?}"
+    );
+
+    // A second run classifies the same lines again (template learned): the
+    // canonical ids stay unique — no duplicate rows.
+    let _ = analyzer
+        .process_batch_sync(&["boom in lib 8".to_string()])
+        .await;
+    let count = db
+        .execute("SELECT count() FROM source_file GROUP ALL;")
+        .await
+        .expect("count files");
+    let text = format!("{:?}", count.first());
+    assert!(text.contains("2"), "exactly two source_file rows: {text}");
+
+    cleanup(&db, &db_name).await;
+}
+
 #[tokio::test]
 async fn logalign_promotion_persists_log_template_row() {
     let Some((db, db_name)) = connect_scratch().await else {
