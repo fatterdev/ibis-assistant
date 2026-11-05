@@ -23,8 +23,8 @@ use crate::error::{Result, SearchError};
 use crate::graph::{self, CommitSummary, GraphContext, IssueSummary};
 use crate::memory::temporal::{ask_memory_visibility_sql, memory_currentness_sql};
 use crate::retrieval_boost::{
-    apply_multi_signal_boost, apply_rrf_boost, resolve_linked_symbols, rrf_fuse, rrf_max_score,
-    tokenize_query, FusionMode, ScoredHit, CURRENT_EPSILON, RRF_K,
+    apply_multi_signal_boost, apply_rrf_boost, calibrate_lexical_score, resolve_linked_symbols,
+    rrf_fuse, rrf_max_score, tokenize_query, FusionMode, ScoredHit, CURRENT_EPSILON, RRF_K,
 };
 use crate::rows;
 use crate::ActorContext;
@@ -67,6 +67,12 @@ pub struct SearchResult {
     pub status: String,
     #[serde(rename = "kind", skip_serializing_if = "String::is_empty", default)]
     pub kind: String,
+    /// Internal fusion channel id of the best contribution (F03/D1: eval and
+    /// diagnostics need more than `source_kind` — `memory` does not
+    /// distinguish the vector, title and content channels). Empty for hits
+    /// without channel attribution.
+    #[serde(rename = "channel", skip_serializing_if = "String::is_empty", default)]
+    pub channel: String,
     /// Resolved ref for ask at_ref hits (the world-state spec).
     #[serde(
         rename = "as_of_ref",
@@ -224,6 +230,10 @@ struct ChunkResult {
     hash: String,
     current_hash: String,
     source_kind: String,
+    /// Fusion channel that produced this hit (F03/D1 — internal id: vector
+    /// channels are their table name, lexical channels carry a `_text`
+    /// suffix).
+    channel: String,
     commit_hash: String,
     status: String,
     kind: String,
@@ -236,10 +246,11 @@ struct ChunkResult {
 }
 
 impl ChunkResult {
-    fn from_row(row: &ibis_db::value::Object, source_kind: &str) -> Self {
+    fn from_row(row: &ibis_db::value::Object, source_kind: &str, channel: &str) -> Self {
         ChunkResult {
             id: rows::record_id(rows::field(row, "id")),
             source_kind: source_kind.to_string(),
+            channel: channel.to_string(),
             content: rows::scalar_string(rows::field(row, "content")),
             path: rows::scalar_string(rows::field(row, "path")),
             hash: rows::scalar_string(rows::field(row, "hash")),
@@ -307,22 +318,22 @@ impl SearchService {
             memory_visibility
         );
         // Lexical channel filter: currentness + visibility, no embedding clause.
-        let lexical_where = format!(
-            "{} AND {}",
-            memory_currentness_sql(),
-            memory_visibility
-        );
+        let lexical_where = format!("{} AND {}", memory_currentness_sql(), memory_visibility);
 
         struct TableQuery<'a> {
             name: &'a str,
+            /// Public `source_kind` of the hits (F03: the lexical channels of
+            /// a table keep the table's public kind).
+            kind: &'a str,
             sql: String,
             /// Vector channels get the Rust temporal rescore; lexical (BM25)
-            /// channels keep their raw score.
+            /// channels keep their calibrated score.
             temporal: bool,
         }
         let queries = [
             TableQuery {
                 name: "file_chunk",
+                kind: "file_chunk",
                 sql: format!(
                     "SELECT id, file.path as path, content, hash, file.hash as current_hash, {sim_expr} as score FROM file_chunk WHERE embedding != NONE ORDER BY {dist_expr} LIMIT {window};"
                 ),
@@ -330,11 +341,13 @@ impl SearchService {
             },
             TableQuery {
                 name: "commit_chunk",
+                kind: "commit_chunk",
                 sql: commit_meaning::commit_chunk_ask_query(window),
                 temporal: true,
             },
             TableQuery {
                 name: "memory",
+                kind: "memory",
                 sql: format!(
                     "SELECT id, NONE as path, content, status, kind, duration::days(time::now() - created_at) as age_days, NONE as hash, NONE as current_hash, {sim_expr} as score FROM memory WHERE {memory_where} ORDER BY {dist_expr} LIMIT {window};"
                 ),
@@ -342,16 +355,20 @@ impl SearchService {
             },
             TableQuery {
                 name: "reasoning",
+                kind: "reasoning",
                 sql: format!(
                     "SELECT id, NONE as path, string::concat(question OR '', '\n', outcome OR '') as content, NONE as hash, NONE as current_hash, NONE as age_days, {sim_expr} as score FROM reasoning WHERE embedding != NONE ORDER BY {dist_expr} LIMIT {window};"
                 ),
                 temporal: true,
             },
-            // Lexical channel (WQ-7): BM25 on memory.title / memory.content.
-            // Two separate queries — one FULLTEXT index per field — fused as
-            // independent rank lists.
+            // Lexical channels (WQ-7 + D3/F06): BM25 on memory.title,
+            // memory.content and file_chunk.content. Two separate queries per
+            // table — one FULLTEXT index per field — fused as independent
+            // rank lists; the file_chunk content channel feeds `ask_project`
+            // with id/path/hash/current_hash like the vector channel.
             TableQuery {
                 name: "memory_text_title",
+                kind: "memory",
                 sql: format!(
                     "SELECT id, NONE as path, content, status, kind, NONE as hash, NONE as current_hash, search::score(1) as score FROM memory WHERE title @1@ $q AND {lexical_where} ORDER BY search::score(1) DESC LIMIT {window};"
                 ),
@@ -359,18 +376,27 @@ impl SearchService {
             },
             TableQuery {
                 name: "memory_text_content",
+                kind: "memory",
                 sql: format!(
                     "SELECT id, NONE as path, content, status, kind, NONE as hash, NONE as current_hash, search::score(1) as score FROM memory WHERE content @1@ $q AND {lexical_where} ORDER BY search::score(1) DESC LIMIT {window};"
                 ),
                 temporal: false,
             },
+            TableQuery {
+                name: "file_chunk_text",
+                kind: "file_chunk",
+                sql: format!(
+                    "SELECT id, file.path as path, content, hash, file.hash as current_hash, search::score(1) as score FROM file_chunk WHERE content @1@ $q ORDER BY search::score(1) DESC LIMIT {window};"
+                ),
+                temporal: false,
+            },
         ];
 
-        let mut chunks: Vec<ChunkResult> = Vec::new();
-        let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let mut channel_chunks: Vec<Vec<usize>> = Vec::new();
+        // F03/D1: channels are collected independently — the same document
+        // MAY appear in several channels (each contributes to the fusion);
+        // only duplicates INSIDE one channel collapse (first rank wins).
+        let mut channels: Vec<Vec<ChunkResult>> = Vec::with_capacity(queries.len());
         for tq in &queries {
-            let start = chunks.len();
             let mut vars: Vars = memory_vars.iter().cloned().collect();
             vars.insert("vec".into(), vec_json.clone());
             vars.insert("q".into(), ibis_db::value::Value::from_t(query));
@@ -383,29 +409,57 @@ impl SearchService {
                     tq.name
                 )));
             };
+            let mut seen_in_channel = std::collections::HashSet::new();
             let mut channel_rows: Vec<ChunkResult> = Vec::new();
             for row in rows::object_rows(&rows_values) {
-                let mut c = ChunkResult::from_row(row, if tq.name.starts_with("memory_text") { "memory" } else { tq.name });
+                let mut c = ChunkResult::from_row(row, tq.kind, tq.name);
                 if c.id.is_empty() && c.content.is_empty() {
                     continue;
                 }
-                // Cross-channel dedupe by record id (a memory hit can arrive
-                // from both the vector and a lexical channel; first wins).
-                if !seen_ids.insert(c.id.clone()) {
+                if !seen_in_channel.insert(c.id.clone()) {
                     continue;
                 }
                 if tq.temporal {
                     c.score = apply_temporal_decay(c.score, c.age_days);
+                } else {
+                    // F04/D2: raw BM25 units are calibrated onto the blend
+                    // scale before they meet the cosine/decay scores.
+                    c.score = calibrate_lexical_score(c.score);
                 }
                 channel_rows.push(c);
             }
             if tq.temporal {
                 // Rescore may reorder within the window: ranks follow the
                 // decayed score, not the distance order.
-                channel_rows.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+                channel_rows.sort_by(|a, b| {
+                    b.score
+                        .partial_cmp(&a.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
             }
-            chunks.extend(channel_rows);
-            channel_chunks.push((start..chunks.len()).collect());
+            channels.push(channel_rows);
+        }
+
+        // Board of representative rows: one entry per document (first
+        // occurrence across channels); channel ranks are kept separately.
+        let mut chunks: Vec<ChunkResult> = Vec::new();
+        let mut rep_index: HashMap<String, usize> = HashMap::new();
+        let mut rank_lists: Vec<Vec<(usize, usize)>> = Vec::with_capacity(channels.len());
+        for channel in &channels {
+            let mut ranks: Vec<(usize, usize)> = Vec::with_capacity(channel.len());
+            for (rank, hit) in channel.iter().enumerate() {
+                let payload = match rep_index.get(&hit.id) {
+                    Some(idx) => *idx,
+                    None => {
+                        let idx = chunks.len();
+                        chunks.push(hit.clone());
+                        rep_index.insert(hit.id.clone(), idx);
+                        idx
+                    }
+                };
+                ranks.push((payload, rank + 1));
+            }
+            rank_lists.push(ranks);
         }
 
         // Resolve canonical HEAD hashes by path (hash-suffixed source_file
@@ -431,43 +485,45 @@ impl SearchService {
                     chunk.current_hash = head.clone();
                     if !chunk.hash.is_empty() && chunk.hash == *head {
                         chunk.at_head = true;
-                        // Additive mode keeps the legacy fraction-of-score
-                        // bump; RRF applies a constant epsilon after fusion.
-                        if self.fusion_mode == FusionMode::Additive {
-                            chunk.score += 0.05;
-                        }
                     }
                 }
             }
         }
 
+        // Fusion (F03/D1): the same document appearing in several channels
+        // sums its per-channel contributions; the board dedupes AFTER the
+        // fusion (one entry per document — `chunks` is already the
+        // representative board).
         let (keywords, entities) = tokenize_query(query);
         let linked_symbols = resolve_linked_symbols(self.db.as_ref(), &entities).await;
         let mut hits: Vec<ScoredHit> = match self.fusion_mode {
             FusionMode::Additive => chunks
                 .iter()
                 .enumerate()
-                .map(|(i, c)| ScoredHit {
-                    text: c.content.clone(),
-                    path: c.path.clone(),
-                    tags: Vec::new(),
-                    score: c.score,
-                    id: c.id.clone(),
-                    payload: i,
+                .map(|(i, c)| {
+                    // Sum the contributions of every channel that returned
+                    // this document (F03: cross-channel summing; the board
+                    // entry is only the representative metadata carrier).
+                    let mut total = 0.0;
+                    for channel in &channels {
+                        if let Some(hit) = channel.iter().find(|h| h.id == c.id) {
+                            total += hit.score;
+                        }
+                    }
+                    ScoredHit {
+                        text: c.content.clone(),
+                        path: c.path.clone(),
+                        tags: Vec::new(),
+                        score: total,
+                        id: c.id.clone(),
+                        payload: i,
+                        channel: c.channel.clone(),
+                    }
                 })
                 .collect(),
             FusionMode::Rrf => {
-                let rank_lists: Vec<Vec<(usize, usize)>> = channel_chunks
-                    .iter()
-                    .map(|idxs| {
-                        idxs.iter()
-                            .enumerate()
-                            .map(|(rank, idx)| (*idx, rank + 1))
-                            .collect()
-                    })
-                    .collect();
-                let fused = rrf_fuse(&rank_lists, RRF_K);
                 let channels_with_hits = rank_lists.iter().filter(|c| !c.is_empty()).count();
+                let fused = rrf_fuse(&rank_lists, RRF_K);
                 let rrf_max = rrf_max_score(channels_with_hits, RRF_K);
                 chunks
                     .iter()
@@ -482,18 +538,55 @@ impl SearchService {
                             score: base + epsilon,
                             id: c.id.clone(),
                             payload: i,
+                            channel: c.channel.clone(),
                         }
                     })
                     .collect()
             }
         };
+        // "is current" bump: once per document, after the fusion (additive
+        // keeps the legacy fraction-of-score bump; RRF applies a constant
+        // epsilon inside its branch above).
+        if self.fusion_mode == FusionMode::Additive {
+            for hit in hits.iter_mut() {
+                if chunks
+                    .get(hit.payload)
+                    .is_some_and(|c| c.at_head && c.source_kind == "file_chunk")
+                {
+                    hit.score += 0.05;
+                }
+            }
+        }
+        // Best-contributing channel per document (F03/D1 diagnostics): pick the
+        // channel whose contribution to this document is strongest.
+        for hit in hits.iter_mut() {
+            let Some(c) = chunks.get(hit.payload) else {
+                continue;
+            };
+            let strength_of = |h: &ChunkResult| match self.fusion_mode {
+                FusionMode::Additive => h.score,
+                // In RRF the contribution strength is the rank position
+                // (rank 1 = strongest).
+                FusionMode::Rrf => 1.0 / h.score.max(1.0),
+            };
+            let mut best: Option<(&str, f64)> = None;
+            for channel in &channels {
+                if let Some(h) = channel.iter().find(|h| h.id == c.id) {
+                    let strength = strength_of(h);
+                    if best.is_none_or(|(_, s)| strength > s) {
+                        best = Some((h.channel.as_str(), strength));
+                    }
+                }
+            }
+            if let Some((name, _)) = best {
+                hit.channel = name.to_string();
+            }
+        }
         match self.fusion_mode {
             FusionMode::Additive => {
                 apply_multi_signal_boost(&mut hits, &keywords, &entities, &linked_symbols)
             }
-            FusionMode::Rrf => {
-                apply_rrf_boost(&mut hits, &keywords, &entities, &linked_symbols)
-            }
+            FusionMode::Rrf => apply_rrf_boost(&mut hits, &keywords, &entities, &linked_symbols),
         }
         let boosted: Vec<ChunkResult> = hits
             .iter()
@@ -501,6 +594,7 @@ impl SearchService {
                 let c = chunks.get(hit.payload)?;
                 let mut c = c.clone();
                 c.score = hit.score;
+                c.channel = hit.channel.clone();
                 Some(c)
             })
             .collect();
@@ -566,6 +660,7 @@ impl SearchService {
                 content,
                 is_current,
                 source_kind: c.source_kind,
+                channel: c.channel,
                 commit_hash: c.commit_hash,
                 status: c.status,
                 kind: c.kind,
@@ -812,11 +907,13 @@ mod tests {
         );
     }
 
-    /// RRF fusion (A2): ranking follows per-channel ranks, not the channel
-/// score scale — a rank-1 memory hit ties a rank-1 file hit (id tie-break)
-/// and outranks a rank-2 file hit that has a much higher cosine score.
-#[tokio::test]
-    async fn ask_project_rrf_fusion_ranks_by_channel_rank() {
+    /// RRF fusion (A2 + F03/D1): ranking follows per-channel ranks and a
+    /// document present in MORE channels sums its contributions. The memory row
+    /// appears in both its vector channel and the lexical content channel, so it
+    /// outranks the file chunk that leads only its vector channel — while a
+    /// rank-2 file hit with a much higher cosine score stays below both.
+    #[tokio::test]
+    async fn ask_project_rrf_fusion_sums_cross_channel_ranks() {
         let file_rows = vec![
             obj(vec![
                 ("id", Value::from_t("file_chunk:a")),
@@ -839,25 +936,127 @@ mod tests {
             ("score", Value::from_t(0.4f64)),
         ])];
         let fake = Arc::new(FakeDb::new(vec![
-            ("FROM file_chunk", rows_of(file_rows)),
-            ("FROM memory", rows_of(memory_rows)),
+            // Channel-specific keys: only the intended query matches each
+            // registered response.
+            ("FROM file_chunk WHERE embedding", rows_of(file_rows)),
+            ("FROM memory WHERE embedding", rows_of(memory_rows.clone())),
+            (
+                "FROM memory WHERE content @1@",
+                rows_of(memory_rows.clone()),
+            ),
         ]));
-        let mut svc = service(fake, Some(fake_ai()));
+        let mut svc = service(fake.clone(), Some(fake_ai()));
         svc.fusion_mode = FusionMode::Rrf;
         let results = svc
             .ask_project(&ActorContext::LOCAL, "test query")
             .await
             .expect("ask_project");
 
-        assert_eq!(results.len(), 3);
+        assert_eq!(results.len(), 3, "one board entry per document");
         let ids: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
-        assert_eq!(ids, vec!["file_chunk:a", "memory:m1", "file_chunk:b"]);
-
-        // Rank-1 ties normalize to the same fused base (0.5*0.75, no boosts);
-        // rank-2 lands below despite its much higher cosine score.
+        // memory:m1 sums two channel contributions (vector + lexical) and
+        // lands first; file_chunk:a leads its single channel.
+        assert_eq!(ids, vec!["memory:m1", "file_chunk:a", "file_chunk:b"]);
         let score = |id: &str| results.iter().find(|r| r.id == id).unwrap().score;
-        assert!((score("file_chunk:a") - score("memory:m1")).abs() < 1e-9);
-        assert!(score("file_chunk:b") < score("file_chunk:a") - 1e-6);
+        assert!(
+            score("memory:m1") > score("file_chunk:a"),
+            "cross-channel sum outranks the single-channel lead"
+        );
+        assert!(
+            score("file_chunk:b") < score("file_chunk:a"),
+            "rank-2 stays below rank-1 despite its higher cosine score"
+        );
+        // The best-contributing channel attribution (F03/D1 diagnostics).
+        let channel = |id: &str| results.iter().find(|r| r.id == id).unwrap().channel.clone();
+        assert_eq!(channel("file_chunk:a"), "file_chunk");
+        // m1 leads with its vector channel (rank-1 tie with the lexical
+        // content channel resolves to the first channel in order).
+        assert_eq!(channel("memory:m1"), "memory");
+
+        // The file_chunk lexical channel ran too (F06/D3).
+        let all: Vec<String> = fake
+            .smart_calls
+            .lock()
+            .unwrap()
+            .iter()
+            .chain(fake.execute_calls.lock().unwrap().iter())
+            .cloned()
+            .collect();
+        assert!(
+            all.iter()
+                .any(|q| q.contains("FROM file_chunk WHERE content @1@")),
+            "file_chunk_text channel must be part of ask_project: {all:?}"
+        );
+    }
+
+    /// Additive fusion (F03/D1 + F04/D2): the same document in two channels
+    /// sums its calibrated channel scores; raw BM25 units are calibrated onto
+    /// the blend scale (bounded, monotone) so a weak lexical match cannot
+    /// ride a large unit and a strong one stays comparable to cosine scores.
+    #[tokio::test]
+    async fn ask_project_additive_sums_cross_channel_scores() {
+        let file_rows = vec![obj(vec![
+            ("id", Value::from_t("file_chunk:a")),
+            ("path", Value::from_t("/src/a.go")),
+            ("content", Value::from_t("func main()")),
+            ("score", Value::from_t(0.9f64)),
+        ])];
+        let lexical_rows = vec![
+            obj(vec![
+                ("id", Value::from_t("file_chunk:weak")),
+                ("path", Value::from_t("/src/weak.go")),
+                ("content", Value::from_t("weak lexical body")),
+                ("score", Value::from_t(0.3f64)), // weak raw BM25
+            ]),
+            obj(vec![
+                ("id", Value::from_t("file_chunk:strong")),
+                ("path", Value::from_t("/src/strong.go")),
+                ("content", Value::from_t("strong lexical body")),
+                ("score", Value::from_t(50.0f64)), // raw BM25 scale
+            ]),
+        ];
+        let fake = Arc::new(FakeDb::new(vec![
+            ("FROM file_chunk WHERE embedding", rows_of(file_rows)),
+            ("FROM file_chunk WHERE content @1@", rows_of(lexical_rows)),
+        ]));
+        let svc = service(fake, Some(fake_ai()));
+        let results = svc
+            .ask_project(&ActorContext::LOCAL, "test query")
+            .await
+            .expect("ask_project");
+
+        let score = |id: &str| {
+            results
+                .iter()
+                .find(|r| r.id == id)
+                .unwrap_or_else(|| panic!("{id} in board"))
+                .score
+        };
+        // Calibrated lexical scores stay bounded (raw BM25 50 ≈ 0.94).
+        assert!(
+            score("file_chunk:strong") <= 1.0 + 1e-9,
+            "calibrated lexical score stays bounded: {}",
+            score("file_chunk:strong")
+        );
+        // A weak lexical match rides no unit: it lands below the strong
+        // vector hit.
+        assert!(
+            score("file_chunk:weak") < score("file_chunk:a"),
+            "weak lexical ({}) must stay below the strong vector ({})",
+            score("file_chunk:weak"),
+            score("file_chunk:a")
+        );
+        // A strong lexical match outranks the weak one — order follows the
+        // calibrated scale, not the raw units.
+        assert!(score("file_chunk:strong") > score("file_chunk:weak"));
+        // Both lexical hits are one board entry each, with their own
+        // channels and the public kind unchanged.
+        let strong = results
+            .iter()
+            .find(|r| r.id == "file_chunk:strong")
+            .expect("strong lexical hit on the board");
+        assert_eq!(strong.source_kind, "file_chunk", "public kind unchanged");
+        assert_eq!(strong.channel, "file_chunk_text");
     }
 
     /// Degraded mode (D8): no DB → ask fails with the original sentinel message.

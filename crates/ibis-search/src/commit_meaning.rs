@@ -233,8 +233,6 @@ mod tests {
         assert!(q.contains("commit_date"));
         assert!(q.contains("age_days"));
         assert!(q.contains("FROM commit_chunk"));
-        assert!(q.contains(
-            "ORDER BY vector::distance::cosine(embedding, $vec) LIMIT 50"
-        ));
+        assert!(q.contains("ORDER BY vector::distance::cosine(embedding, $vec) LIMIT 50"));
     }
 }

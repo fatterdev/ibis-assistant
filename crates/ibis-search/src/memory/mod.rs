@@ -731,6 +731,7 @@ impl crate::search::SearchService {
                 score: mem.score,
                 id: mem.id.clone(),
                 payload: i,
+                channel: String::new(),
             })
             .collect();
         crate::retrieval_boost::apply_multi_signal_boost(
@@ -981,33 +982,59 @@ impl crate::search::SearchService {
             "subject".into(),
             ibis_db::value::Value::from_t(lowered.as_str()),
         );
-        let sql = format!(
-            // WQ-7 lexical channel: BM25 on the content index replaces the
-            // `string::contains` scan; best-ranked match wins.
-            "SELECT id FROM memory WHERE ({vis_filter}) AND content @1@ $subject ORDER BY search::score(1) DESC LIMIT 1;"
+        // F05/D4: the subject is searched on the TITLE index too (the WQ-7
+        // lexical rewrite dropped it) — one FULLTEXT index per field, so the
+        // two rank lists are fused client-side: best BM25 wins, ties break
+        // deterministically on the content match first, then by id.
+        let title_sql = format!(
+            "SELECT id, search::score(1) as score FROM memory WHERE ({vis_filter}) AND title @1@ $subject ORDER BY search::score(1) DESC LIMIT 1;"
         );
-        let outcome = db
-            .smart_query(&sql, bindings)
-            .await
-            .map_err(|e| SearchError::other(format!("find memory history subject: {e}")))?;
-        let Some(rows_values) = rows::normalize_rows(&outcome) else {
+        let content_sql = format!(
+            "SELECT id, search::score(1) as score FROM memory WHERE ({vis_filter}) AND content @1@ $subject ORDER BY search::score(1) DESC LIMIT 1;"
+        );
+        let mut candidates: Vec<(String, f64, &str)> = Vec::with_capacity(2);
+        for (sql, source) in [(content_sql, "content"), (title_sql, "title")] {
+            let outcome = db
+                .smart_query(&sql, bindings.clone())
+                .await
+                .map_err(|e| SearchError::other(format!("find memory history subject: {e}")))?;
+            let Some(rows_values) = rows::normalize_rows(&outcome) else {
+                continue;
+            };
+            if let Some(row) = rows::object_rows(&rows_values).first() {
+                let id = rows::record_id(rows::field(row, "id"));
+                if id.is_empty() {
+                    continue;
+                }
+                candidates.push((id, rows::numeric_float(rows::field(row, "score")), source));
+            }
+        }
+        candidates.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                // Deterministic tie-break: content match first, then id.
+                .then_with(|| source_rank(a.2).cmp(&source_rank(b.2)))
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        let Some((id, _, _)) = candidates.first() else {
             return Err(SearchError::other(format!(
                 "memory subject {subject:?} not found"
             )));
         };
-        let objects = rows::object_rows(&rows_values);
-        let id = objects
-            .first()
-            .map(|row| rows::record_id(rows::field(row, "id")))
-            .unwrap_or_default();
-        if id.is_empty() {
-            return Err(SearchError::other(format!(
-                "memory subject {subject:?} not found"
-            )));
-        }
+        let id = id.clone();
         require_memory_record_id(&id)
             .map_err(|_| SearchError::other("memory subject query returned invalid id"))?;
         Ok(id)
+    }
+}
+
+/// Deterministic tie-break order for the subject-search sources: a content
+/// match outranks an equal-scored title match.
+fn source_rank(source: &str) -> u8 {
+    if source == "content" {
+        0
+    } else {
+        1
     }
 }
 
@@ -1285,12 +1312,9 @@ mod tests {
     #[tokio::test]
     async fn list_memories_projects_the_store_marker() {
         let (fake, svc) = search_service_with_one_memory();
-        svc.list_memories(
-            &crate::ActorContext::LOCAL,
-            MemoryListParams::default(),
-        )
-        .await
-        .expect("browse");
+        svc.list_memories(&crate::ActorContext::LOCAL, MemoryListParams::default())
+            .await
+            .expect("browse");
         let sql = fake
             .smart_calls
             .lock()
@@ -1321,7 +1345,10 @@ mod tests {
             ),
             ("FROM memory", crate::test_support::rows_of(vec![])),
         ]));
-        let svc = crate::search::SearchService::new(Some(fake.clone()), Some(crate::test_support::fake_ai()));
+        let svc = crate::search::SearchService::new(
+            Some(fake.clone()),
+            Some(crate::test_support::fake_ai()),
+        );
         svc.list_memories(
             &crate::ActorContext::LOCAL,
             MemoryListParams {
@@ -1377,7 +1404,10 @@ mod tests {
             "FROM memory",
             crate::test_support::rows_of(vec![]),
         )]));
-        let svc = crate::search::SearchService::new(Some(fake.clone()), Some(crate::test_support::fake_ai()));
+        let svc = crate::search::SearchService::new(
+            Some(fake.clone()),
+            Some(crate::test_support::fake_ai()),
+        );
         svc.list_memories(
             &crate::ActorContext::LOCAL,
             MemoryListParams {
@@ -1418,7 +1448,8 @@ mod tests {
             "FROM workstream",
             crate::test_support::rows_of(vec![]),
         )]));
-        let svc = crate::search::SearchService::new(Some(fake), Some(crate::test_support::fake_ai()));
+        let svc =
+            crate::search::SearchService::new(Some(fake), Some(crate::test_support::fake_ai()));
         let err = svc
             .list_memories(
                 &crate::ActorContext::LOCAL,

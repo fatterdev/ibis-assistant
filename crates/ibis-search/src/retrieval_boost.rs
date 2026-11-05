@@ -15,6 +15,26 @@ pub(crate) const RRF_K: f64 = 60.0;
 /// "is current" bump applied to the fused base in RRF mode (A2 step 4:
 /// constant epsilon after fusion, no longer a fraction of the cosine score).
 pub(crate) const CURRENT_EPSILON: f64 = 0.05;
+/// BM25 saturation point of the bounded monotone calibration (F04/D2): a
+/// lexical score `s` enters the additive blend as `s / (s + K)`, mapping
+/// 0→0 and ∞→1 so raw BM25 units can never dominate cosine/decay scores
+/// through their scale alone. Monotone, so within-channel ranking is
+/// invariant to any constant rescaling of the raw scores. The value is the
+/// eval-pinned one (section 9 of the remediation plan): the score of a
+/// "strong" lexical hit saturates around half of the blend scale.
+pub(crate) const BM25_SATURATION_K: f64 = 3.0;
+
+/// Bounded monotone calibration for raw BM25/full-text scores (F04/D2).
+/// Raw BM25 units are unbounded and entered the additive blend next to
+/// calibrated cosine/decay scores; `s/(s+K)` removes the unit dependency
+/// while preserving order (monotone) — a strong lexical match lands near
+/// 1.0, a weak one near 0.
+pub(crate) fn calibrate_lexical_score(raw: f64) -> f64 {
+    if raw <= 0.0 {
+        return 0.0;
+    }
+    raw / (raw + BM25_SATURATION_K)
+}
 
 /// Channel fusion mode behind `search.fusion` (`additive` | `rrf` — A2).
 /// Default stays `additive` until the A1 eval validates RRF on the golden
@@ -101,7 +121,8 @@ pub fn split_camel_case(s: &str) -> Vec<String> {
 
 /// A generic re-rankable retrieval row; `payload` carries
 /// the index into the caller's row list and `id` is the chunk record id
-/// (deterministic tie-break in RRF mode).
+/// (deterministic tie-break in RRF mode). `channel` carries the fusion
+/// channel id of the best contribution (F03/D1 diagnostics).
 pub(crate) struct ScoredHit {
     pub text: String,
     pub path: String,
@@ -109,6 +130,7 @@ pub(crate) struct ScoredHit {
     pub score: f64,
     pub id: String,
     pub payload: usize,
+    pub channel: String,
 }
 
 /// Extracts lowercase keyword tokens and light entity candidates
@@ -294,7 +316,8 @@ pub(crate) async fn resolve_linked_symbols(
     if names_bind.is_empty() {
         return Vec::new();
     }
-    let ql = "SELECT name FROM symbol WHERE string::lowercase(name) IN $names ORDER BY name LIMIT 50;";
+    let ql =
+        "SELECT name FROM symbol WHERE string::lowercase(name) IN $names ORDER BY name LIMIT 50;";
     let mut vars = ibis_db::executor::Vars::new();
     vars.insert("names".into(), Value::from_t(names_bind));
     let Ok(outcome) = db.smart_query(ql, vars).await else {
@@ -418,6 +441,7 @@ mod tests {
                 score: 0.4,
                 id: "hit:1".into(),
                 payload: 0,
+                channel: String::new(),
             },
             ScoredHit {
                 text: "unrelated".into(),
@@ -426,6 +450,7 @@ mod tests {
                 score: 0.1,
                 id: "hit:2".into(),
                 payload: 1,
+                channel: String::new(),
             },
         ];
         let kws = vec!["auth".to_string()];
@@ -470,8 +495,57 @@ mod tests {
     fn combine_rrf_weights_and_clamp() {
         assert!((combine_rrf_score(1.0, 0.0, 0.0) - 0.75).abs() < 1e-9);
         assert!((combine_rrf_score(1.0, 1.0, 1.0) - 1.0).abs() < 1e-9);
-        assert!((combine_rrf_score(1.2, 0.0, 0.0) - 0.75).abs() < 1e-9, "base clamped to 1");
-        assert!((combine_rrf_score(-0.1, 0.0, 0.0) - 0.0).abs() < 1e-9, "base clamped to 0");
+        assert!(
+            (combine_rrf_score(1.2, 0.0, 0.0) - 0.75).abs() < 1e-9,
+            "base clamped to 1"
+        );
+        assert!(
+            (combine_rrf_score(-0.1, 0.0, 0.0) - 0.0).abs() < 1e-9,
+            "base clamped to 0"
+        );
+    }
+
+    #[test]
+    fn calibrate_lexical_is_bounded_monotone_and_scale_order_invariant() {
+        // F04/D2 properties.
+        // Bounded: no raw value can push past 1.0.
+        for raw in [0.0f64, 0.3, 1.0, 3.0, 50.0, 1000.0] {
+            let calibrated = calibrate_lexical_score(raw);
+            assert!(
+                (0.0..=1.0).contains(&calibrated),
+                "calibrate({raw}) = {calibrated} out of bounds"
+            );
+        }
+        assert_eq!(calibrate_lexical_score(0.0), 0.0);
+        assert_eq!(calibrate_lexical_score(-5.0), 0.0);
+
+        // Monotone: a stronger raw match never calibrates lower.
+        let mut prev = -1.0;
+        for raw in [0.01, 0.1, 1.0, 5.0, 20.0, 200.0] {
+            let c = calibrate_lexical_score(raw);
+            assert!(c > prev, "calibrate must be monotone in raw: {raw}");
+            prev = c;
+        }
+
+        // Scale-order invariance: multiplying ALL raw scores of a channel by
+        // a constant keeps their calibrated ORDER (the within-channel
+        // ranking does not depend on the BM25 unit).
+        let raws = [0.2f64, 1.0, 4.0, 30.0];
+        let order = |factor: f64| -> Vec<usize> {
+            let mut calibrated: Vec<(usize, f64)> = raws
+                .iter()
+                .enumerate()
+                .map(|(i, r)| (i, calibrate_lexical_score(r * factor)))
+                .collect();
+            calibrated.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            calibrated.into_iter().map(|(i, _)| i).collect()
+        };
+        assert_eq!(order(1.0), order(7.5), "order invariant to constant scale");
+
+        // A "strong" lexical hit saturates near the top of the blend scale;
+        // a weak one stays low.
+        assert!(calibrate_lexical_score(50.0) > 0.9);
+        assert!(calibrate_lexical_score(0.3) < 0.2);
     }
 
     #[test]
@@ -484,6 +558,7 @@ mod tests {
                 score: 0.5,
                 id: "hit:b".into(),
                 payload: 0,
+                channel: String::new(),
             },
             ScoredHit {
                 text: "alpha".into(),
@@ -492,6 +567,7 @@ mod tests {
                 score: 0.5,
                 id: "hit:a".into(),
                 payload: 1,
+                channel: String::new(),
             },
         ];
         apply_rrf_boost(&mut hits, &[], &[], &[]);
@@ -508,6 +584,7 @@ mod tests {
                 score: 0.5,
                 id: "hit:a".into(),
                 payload: 0,
+                channel: String::new(),
             },
             ScoredHit {
                 text: "auth flow".into(),
@@ -516,6 +593,7 @@ mod tests {
                 score: 0.4,
                 id: "hit:b".into(),
                 payload: 1,
+                channel: String::new(),
             },
         ];
         let kws = vec!["auth".to_string()];

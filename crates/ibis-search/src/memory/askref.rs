@@ -66,7 +66,9 @@ impl SearchService {
             .record_embedding_usage("system:search_vector", query)
             .await;
 
-        let window = self.candidate_window.max(crate::search::VECTOR_CHANNEL_LIMIT);
+        let window = self
+            .candidate_window
+            .max(crate::search::VECTOR_CHANNEL_LIMIT);
         let trusted_actor = actor_ctx.resolve_trusted_actor(actor);
         let mut results: Vec<SearchResult> = Vec::with_capacity(15);
 
@@ -132,7 +134,11 @@ impl SearchService {
                 ..Default::default()
             });
         }
-        claim_rows.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        claim_rows.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results.extend(claim_rows);
 
         // Claim store 4d union: tree(ref) claim files join the claims
@@ -177,7 +183,11 @@ impl SearchService {
                 ..Default::default()
             });
         }
-        commit_rows.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        commit_rows.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results.extend(commit_rows);
 
         // Reasoning channel: HEAD-contract utility signal (not git-bound).
@@ -206,7 +216,11 @@ impl SearchService {
                 ..Default::default()
             });
         }
-        reasoning_rows.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        reasoning_rows.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results.extend(reasoning_rows);
 
         // Code channel (phase 3d): honest hybrid — HEAD embeddings ∩ tree(R)

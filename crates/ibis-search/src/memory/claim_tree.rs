@@ -314,6 +314,7 @@ pub(crate) fn claim_file_result(
         score: 0.0,
         is_current: false,
         source_kind: "claim_file".to_string(),
+        channel: String::new(),
         status: entry.status.clone(),
         kind: entry.kind.clone(),
         as_of_ref: as_of_ref.to_string(),

@@ -233,7 +233,9 @@ impl SearchService {
 
         // Semantic channel: HEAD embeddings ∩ paths in tree(R), bytes at R.
         // WQ-7: index-served cosine ordering, Rust-side decay rescore.
-        let window = self.candidate_window.max(crate::search::VECTOR_CHANNEL_LIMIT);
+        let window = self
+            .candidate_window
+            .max(crate::search::VECTOR_CHANNEL_LIMIT);
         let sql = format!(
             "SELECT id, file.path as path, content, hash, file.hash as current_hash, NONE as age_days, vector::similarity::cosine(embedding, $vec) as score FROM file_chunk WHERE embedding != NONE ORDER BY vector::distance::cosine(embedding, $vec) LIMIT {window};"
         );

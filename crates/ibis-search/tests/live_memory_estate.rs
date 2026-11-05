@@ -1088,11 +1088,16 @@ async fn ask_ref_holdat_visibility_and_channels() {
     .expect("seed reasoning");
 
     // Code channel fixtures: f1's path exists in tree(c2), f2's only at c3.
-    exec.execute("CREATE source_file:⟨h03_sf1⟩ SET rel_path = 'src/h03_cached.txt', path = 'src/h03_cached.txt', hash = 'h1';")
+    // WQ-7 + F02: source_file/file_chunk ids are arrays with the raw path.
+    let h03_repo_ref = "repo:⟨h03ask⟩";
+    let h03_sf1 = ibis_db::ids::source_file_id(h03_repo_ref, "src/h03_cached.txt");
+    let h03_sf2 = ibis_db::ids::source_file_id(h03_repo_ref, "future/h03_new.txt");
+    exec.execute(&format!("CREATE {h03_sf1} SET rel_path = 'src/h03_cached.txt', path = 'src/h03_cached.txt', hash = 'h1', repo_name = 'h03ask';"))
         .await
         .expect("seed source file");
     exec.smart_query(
-        "CREATE file_chunk:⟨h03_fc1⟩ SET file = source_file:⟨h03_sf1⟩, content = $content, hash = 'h1', embedding = $embedding;",
+        &format!("CREATE {} SET file = {h03_sf1}, content = $content, hash = 'h1', embedding = $embedding;",
+            ibis_db::ids::file_chunk_id(&h03_sf1, 1)),
         vars_of(vec![
             ("content", Value::from_t("HEAD bytes")),
             ("embedding", emb("HEAD bytes")),
@@ -1100,11 +1105,12 @@ async fn ask_ref_holdat_visibility_and_channels() {
     )
     .await
     .expect("seed file chunk");
-    exec.execute("CREATE source_file:⟨h03_sf2⟩ SET rel_path = 'future/h03_new.txt', path = 'future/h03_new.txt', hash = 'h2';")
+    exec.execute(&format!("CREATE {h03_sf2} SET rel_path = 'future/h03_new.txt', path = 'future/h03_new.txt', hash = 'h2', repo_name = 'h03ask';"))
         .await
         .expect("seed source file 2");
     exec.smart_query(
-        "CREATE file_chunk:⟨h03_fc2⟩ SET file = source_file:⟨h03_sf2⟩, content = $content, hash = 'h2', embedding = $embedding;",
+        &format!("CREATE {} SET file = {h03_sf2}, content = $content, hash = 'h2', embedding = $embedding;",
+            ibis_db::ids::file_chunk_id(&h03_sf2, 1)),
         vars_of(vec![
             ("content", Value::from_t("HEAD bytes 2")),
             ("embedding", emb("HEAD bytes 2")),
@@ -1113,6 +1119,7 @@ async fn ask_ref_holdat_visibility_and_channels() {
     .await
     .expect("seed file chunk 2");
 
+    let h03_fc1_id = ibis_db::ids::file_chunk_id(&h03_sf1, 1);
     let (svc, _committer) = service(&exec, true);
 
     // --- ask at c2, anonymous actor ----------------------------------------
@@ -1173,7 +1180,7 @@ async fn ask_ref_holdat_visibility_and_channels() {
     // never masquerade); f2's path is absent at R → dropped.
     let fc1 = results
         .iter()
-        .find(|r| r.id == "file_chunk:h03_fc1")
+        .find(|r| r.id == h03_fc1_id)
         .expect("code hit for path in tree(R)");
     assert_eq!(fc1.content, "bytes at ref two\n");
     assert_eq!(fc1.content_source, "git_show");
@@ -1195,7 +1202,7 @@ async fn ask_ref_holdat_visibility_and_channels() {
     assert!(ids.contains(&"memory:h03_m2".to_string()), "{ids:?}");
     let fc1 = results
         .iter()
-        .find(|r| r.id == "file_chunk:h03_fc1")
+        .find(|r| r.id == h03_fc1_id)
         .expect("code hit at c1");
     assert_eq!(fc1.content, "bytes at ref one\n");
 
@@ -2002,6 +2009,197 @@ async fn ancestry_ttl_cache_and_service_level_equivalence() {
         .await
         .expect("post-invalidation as_of");
     assert_eq!(third, first, "recomputed bounds must not drift");
+
+    drop_scratch(exec.as_ref(), &db_name).await;
+}
+
+/// F05/D4 live: the subject phrase resolves when it appears ONLY in the
+/// memory title (the WQ-7 lexical rewrite dropped the title channel); with
+/// both a title and a content match, the fused lookup stays deterministic.
+#[tokio::test]
+async fn subject_lookup_finds_title_matches() {
+    let Some((exec, db_name)) = connect_scratch().await else {
+        return;
+    };
+    init_ddl(exec.as_ref()).await;
+    let (svc, _committer) = service(&exec, false);
+
+    // Title-only match: distinctive phrase in the title, unrelated content,
+    // NO embedding (the lexical channel must carry it alone).
+    seed_memory(
+        exec.as_ref(),
+        "d4_title_only",
+        "",
+        vec![
+            ("kind", Value::from_t("fix")),
+            (
+                "title",
+                Value::from_t("Zephyr bootstrap catalog regression"),
+            ),
+            (
+                "content",
+                Value::from_t("unrelated body text about pipelines"),
+            ),
+            ("status", Value::from_t("current")),
+            ("visibility", Value::from_t("team")),
+            ("embedding", Value::None),
+        ],
+    )
+    .await;
+
+    // Before F05 the subject lookup searched content only and errored
+    // "not found" here; the title channel resolves it.
+    let history = svc
+        .memory_history(
+            &ActorContext::LOCAL,
+            "Zephyr bootstrap catalog regression",
+            1,
+            "",
+        )
+        .await
+        .expect("history by title subject");
+    let ids: Vec<String> = history.iter().map(|m| m.id.clone()).collect();
+    assert!(
+        ids.iter().any(|id| id.contains("d4_title_only")),
+        "title-only subject must resolve: {ids:?}"
+    );
+
+    // Content match on the same phrase: the fused lookup picks by BM25 and
+    // stays deterministic across repeated calls.
+    seed_memory(
+        exec.as_ref(),
+        "d4_content_too",
+        "",
+        vec![
+            ("kind", Value::from_t("gotcha")),
+            ("title", Value::from_t("something else")),
+            (
+                "content",
+                Value::from_t("the Zephyr bootstrap catalog regression bites again"),
+            ),
+            ("status", Value::from_t("current")),
+            ("visibility", Value::from_t("team")),
+            ("embedding", Value::None),
+        ],
+    )
+    .await;
+    let first = svc
+        .memory_history(
+            &ActorContext::LOCAL,
+            "Zephyr bootstrap catalog regression",
+            1,
+            "",
+        )
+        .await
+        .expect("fused lookup");
+    let second = svc
+        .memory_history(
+            &ActorContext::LOCAL,
+            "Zephyr bootstrap catalog regression",
+            1,
+            "",
+        )
+        .await
+        .expect("fused lookup again");
+    assert_eq!(
+        first.first().map(|m| m.id.clone()),
+        second.first().map(|m| m.id.clone()),
+        "the fused subject lookup is deterministic"
+    );
+    assert!(
+        first
+            .first()
+            .is_some_and(|m| m.id.contains("d4_title_only") || m.id.contains("d4_content_too")),
+        "the resolved memory is one of the two matches: {:?}",
+        first.first().map(|m| m.id.clone())
+    );
+
+    drop_scratch(exec.as_ref(), &db_name).await;
+}
+
+/// F06/D3 live: a file_chunk WITHOUT an embedding is retrieved through the
+/// file_chunk_text lexical channel; the public source_kind stays
+/// `file_chunk` and the internal channel attribute names the lexical
+/// channel.
+#[tokio::test]
+async fn lexical_file_chunk_channel_reaches_ask_project() {
+    let Some((exec, db_name)) = connect_scratch().await else {
+        return;
+    };
+    init_ddl(exec.as_ref()).await;
+    let (svc, _committer) = service(&exec, true);
+
+    let repo_ref = "repo:⟨h03lex⟩";
+    let sf = ibis_db::ids::source_file_id(repo_ref, "src/quokka_mapper.rs");
+    exec.smart_query(
+        &format!("CREATE {sf} SET path = $p, rel_path = $r, hash = 'h1', repo_name = 'h03lex', is_head = true;"),
+        vars_of(vec![
+            ("p", Value::from_t("/repo/h03lex/src/quokka_mapper.rs")),
+            ("r", Value::from_t("src/quokka_mapper.rs")),
+        ]),
+    )
+    .await
+    .expect("seed source_file");
+
+    // Lexical-only chunk (no embedding): a distinctive term.
+    let chunk_lex = ibis_db::ids::file_chunk_id(&sf, 10);
+    exec.smart_query(
+        &format!("CREATE {chunk_lex} SET file = {sf}, content = $c, hash = 'h1', start_line = 10, end_line = 20;"),
+        vars_of(vec![(
+            "c",
+            Value::from_t("the quokka mapper aligns burrow offsets before dusk"),
+        )]),
+    )
+    .await
+    .expect("seed lexical chunk");
+
+    // Dual-presence chunk: distinctive embedding + the same term in content.
+    let chunk_dual = ibis_db::ids::file_chunk_id(&sf, 30);
+    exec.smart_query(
+        &format!("CREATE {chunk_dual} SET file = {sf}, content = $c, hash = 'h1', start_line = 30, end_line = 40, embedding = $e;"),
+        vars_of(vec![
+            (
+                "c",
+                Value::from_t("quokka mapper seasonal range checks run at dawn too"),
+            ),
+            ("e", Value::from_t(Embedding(h03_vec("quokka mapper seasonal range checks run at dawn too")))),
+        ]),
+    )
+    .await
+    .expect("seed dual chunk");
+
+    let results = svc
+        .ask_project(&ActorContext::LOCAL, "quokka mapper")
+        .await
+        .expect("ask");
+    let ids: Vec<String> = result_ids(&results);
+    assert!(
+        ids.iter().any(|id| id.contains("10]")),
+        "the lexical-only chunk must surface through file_chunk_text: {ids:?}"
+    );
+    assert!(
+        ids.iter().any(|id| id.contains("30]")),
+        "the dual-presence chunk must surface: {ids:?}"
+    );
+    let lex = results
+        .iter()
+        .find(|r| r.id.contains("10]"))
+        .expect("lexical hit");
+    assert_eq!(
+        lex.source_kind, "file_chunk",
+        "public source_kind unchanged for the lexical channel"
+    );
+    assert_eq!(lex.channel, "file_chunk_text");
+    assert!(lex.is_current, "lexical chunk carries its current hash");
+    let dual = results
+        .iter()
+        .find(|r| r.id.contains("30]"))
+        .expect("dual hit");
+    assert!(
+        dual.channel == "file_chunk" || dual.channel == "file_chunk_text",
+        "dual hit attributes its best channel: {}",
+        dual.channel
+    );
 
     drop_scratch(exec.as_ref(), &db_name).await;
 }

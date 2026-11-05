@@ -49,7 +49,10 @@ impl SearchService {
             });
         }
         if workstreams.is_empty() {
-            tracing::info!("memory_workstreams: done in {:?} workstreams=0", t0.elapsed());
+            tracing::info!(
+                "memory_workstreams: done in {:?} workstreams=0",
+                t0.elapsed()
+            );
             return Ok(workstreams);
         }
 
@@ -68,10 +71,7 @@ impl SearchService {
                 if workstream_id.is_empty() || require_memory_record_id(&memory_id).is_err() {
                     continue;
                 }
-                members_of
-                    .entry(memory_id)
-                    .or_default()
-                    .push(workstream_id);
+                members_of.entry(memory_id).or_default().push(workstream_id);
             }
         }
         let member_ids: Vec<String> = members_of
@@ -121,9 +121,8 @@ impl SearchService {
         }
 
         // Touch ordering: latest member update wins, superseded members too.
-        let touch_sql = format!(
-            "SELECT id, updated_at FROM memory WHERE id IN [{id_list}] AND {vis_filter};"
-        );
+        let touch_sql =
+            format!("SELECT id, updated_at FROM memory WHERE id IN [{id_list}] AND {vis_filter};");
         let touch_outcome = db
             .smart_query(&touch_sql, vis)
             .await
@@ -198,9 +197,7 @@ impl SearchService {
         if id.is_empty() {
             return Err(SearchError::other(format!("workstream not found: {arg:?}")));
         }
-        if !ibis_db::ids::is_safe_record_id(&id)
-            || id.split(':').next() != Some("workstream")
-        {
+        if !ibis_db::ids::is_safe_record_id(&id) || id.split(':').next() != Some("workstream") {
             return Err(SearchError::other(
                 "workstream lookup returned an invalid id",
             ));
@@ -332,10 +329,7 @@ mod tests {
     /// touching the edge or member queries.
     #[tokio::test]
     async fn list_workstreams_empty_store_returns_empty_without_member_queries() {
-        let fake = std::sync::Arc::new(FakeDb::new(vec![(
-            "FROM workstream",
-            rows_of(vec![]),
-        )]));
+        let fake = std::sync::Arc::new(FakeDb::new(vec![("FROM workstream", rows_of(vec![]))]));
         let svc = SearchService::new(Some(fake.clone()), Some(fake_ai()));
         let rows = svc
             .list_workstreams(&crate::ActorContext::LOCAL)
@@ -353,7 +347,10 @@ mod tests {
             .list_workstreams(&crate::ActorContext::LOCAL)
             .await
             .expect_err("database not connected");
-        assert!(matches!(err, crate::error::SearchError::DatabaseNotConnected));
+        assert!(matches!(
+            err,
+            crate::error::SearchError::DatabaseNotConnected
+        ));
     }
 
     /// The name lookup binds the lowercased name (F-002) and the returned
@@ -391,10 +388,7 @@ mod tests {
     /// silently filtering to zero rows.
     #[tokio::test]
     async fn resolve_workstream_id_unknown_name_errors() {
-        let fake = std::sync::Arc::new(FakeDb::new(vec![(
-            "FROM workstream",
-            rows_of(vec![]),
-        )]));
+        let fake = std::sync::Arc::new(FakeDb::new(vec![("FROM workstream", rows_of(vec![]))]));
         let svc = SearchService::new(Some(fake), Some(fake_ai()));
         let err = svc
             .resolve_workstream_id("nope")
