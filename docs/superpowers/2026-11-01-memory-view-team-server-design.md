@@ -129,7 +129,7 @@ At daemon/server startup, **before** spawning sidecars (per the sidecar lifecycl
 - **ide-host**: header-injection test on the http path; existing `session_test.mjs`/`bridge_framing_test.mjs` stay green (stdio machinery untouched).
 - **VSIX**: `node --check`; `smoke-plugin.mjs` updated for the second view + new commands + provider definition shape; `vsce package` green.
 - **Protocol**: `smoke-mcp.mjs` updated for the 58-tool surface (annotations + discovery fixture).
-- **Manual (gate R7)**: compose or `serve --team` on LAN, 2+ real clients attached (VSIX + plugin), actor attribution visible on shared rows, no duplicate consolidation runs, daemon restart cleans stale sidecars.
+- **Manual (gate R7)**: after WQ-7 — compose/`serve --team` on LAN against the SurrealDB **`v4.0.0`** image (greenfield data volume), 2+ real clients attached (VSIX + plugin), actor attribution visible on shared rows, no duplicate consolidation runs, daemon restart cleans stale sidecars. A `v3.3.5` pretest does not close the gate ([team_server.md §8](../team_server.md)).
 
 ## Proposed commits (1 per sub-phase, repo style)
 
@@ -145,7 +145,7 @@ At daemon/server startup, **before** spawning sidecars (per the sidecar lifecycl
 | F4-A4 | Workstreams view + curation menu + refresh on focus | `feat(vscode): workstreams view and inline curation menu` |
 | F4-A5 | actor identity setting + header injection + claims knob | `feat(vscode): actor identity header and claims mode knob` |
 
-Sequencing: `[S3 publish 1.0.0] → F4-B1..B4 ∥ F4-A1..A5 → R7 → F3 docs → Track D`.
+Sequencing: `[S3 publish 1.0.0] → F4-B1..B4 ∥ F4-A1..A5 → WQ-7 (SurrealDB 4 / v4.0.0) → R7 → F3 docs → Track D`.
 
 ## Risks
 

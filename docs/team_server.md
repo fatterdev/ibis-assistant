@@ -37,10 +37,13 @@ docker compose -f deploy/docker-compose.yml logs -f ibis
 What the image does:
 
 - builds `ibis` from source (release profile) on `rust:1-bookworm`;
-- ships the **pinned** SurrealDB `v3.3.5` sidecar (same pin as the CI
-  retrieval-eval job) and ast-grep `0.51.1` beside the binary, with
-  `DB_AUTO_UPDATE=false` — the image is the only version surface, the
-  runtime never downloads sidecars at boot;
+- ships the **pinned** SurrealDB sidecar (same pin as the CI retrieval-eval
+  job) and ast-grep `0.51.1` beside the binary, with `DB_AUTO_UPDATE=false` —
+  the image is the only version surface, the runtime never downloads sidecars
+  at boot. **Today** the pin in `deploy/Dockerfile` is still `v3.3.5`;
+  **WQ-7** moves crate + sidecar + image to `v4.0.0` on a greenfield
+  datastore. **Gate R7 certifies the `v4.0.0` image**, not a 3.3.5 pretest
+  (master work queue §3.8 / [WQ-7 spec](planning/2026-11-05-surrealdb-4-upgrade.md));
 - copies `sgconfig.yml` + `rules/` beside the executable (ast-grep chunkers
   resolve them there, same layout as the release distribution);
 - runs as non-root (`uid 10001`), with `/data` as the volume mount point and
@@ -223,13 +226,23 @@ the tool's `actor` argument, `"unknown"`.
 
 ## 8. Verification checklist (gate R7 manual scenario)
 
+**Prerequisite (05/11):** WQ-7 closed — the compose/image under test pins
+SurrealDB **`v4.0.0`** with a matching `surrealdb` crate client. Use a
+**greenfield** data volume (no migrated 3.x surrealkv file). A pretest on
+the current `v3.3.5` pin does **not** close this gate.
+
+0. Confirm SurrealDB **4.0.0** in the running image (`docker compose exec
+   ibis /opt/ibis/surreal version`, or equivalent on path B) and that the
+   discovery document / boot path is healthy against that sidecar.
 1. `docker compose logs ibis` (or `journalctl -u ibis-team`) shows the four
    `[TEAM]` banner lines and `Starting Streamable HTTP at <bind>:3030`.
-2. `curl http://<server>:3030/` returns the discovery document
-   (`"status": "online"`); the image healthcheck uses the same endpoint.
+2. `curl http://<server>:3030/` with `Accept: application/json` returns the
+   discovery document (`"status": "online"`); the image healthcheck uses
+   the same endpoint.
 3. Two real clients attach (VSIX attach mode + plugin http variant); a
    `memory_add` from each shows the intended attribution on the shared rows
-   (§4 semantics).
+   (§4 semantics). Point `EMBEDDING_URL` at a reachable team Ollama (container
+   `127.0.0.1:11434` is not the host).
 4. Exactly one consolidation loop runs (one daemon) — no duplicate passes
    from client surfaces.
 5. Restart the daemon: the ledger reconciliation cleans stale sidecars and

@@ -227,11 +227,14 @@ content, cap per sessione rispettato, unknown-rate documentato, guard B2 present
 
 ```
 F0.1 (rename) → R1 → F0.2..F0.7 → R2 → [F1 ∥ F2] → R3/R4 (publish 1.0.0)
-  → [F4-B (team server 0.3.0) ∥ F4-A (memory view VSIX 1.1.0)] → R7
-  → F3 → [D1..D3 ∥ B0..B2] → R6 (gate publish) → [D4/D5 ∥ B4] loop → B3 (se promossa)
+  → [F4-B (team server 0.3.0) ∥ F4-A (memory view VSIX 1.1.0)]
+  → WQ-7 (SurrealDB 4 greenfield, crate+sidecar+image v4.0.0)
+  → R7 → F3 → [D1..D3 ∥ B0..B2] → R6 (gate publish) → [D4/D5 ∥ B4] loop → B3 (se promossa)
 ```
 (F4: sezione §13 — decisioni 01/11/2026, sequencing e commit nella
-[spec F4](../superpowers/2026-11-01-memory-view-team-server-design.md).)
+[spec F4](../superpowers/2026-11-01-memory-view-team-server-design.md).
+WQ-7 davanti a R7: decisione owner 05/11, [master work queue §3.8](./2026-11-02-master-work-queue.md),
+[spec SurrealDB 4](./2026-11-05-surrealdb-4-upgrade.md).)
 - Runtime root: `0.2.0` a F0 completata (CHANGELOG `[Unreleased]` → `[0.2.0]`, tag); `0.3.0` a F4-B.
 - VSIX resta `1.0.0` fino al publish; `1.1.0` a F4-A; plugin `0.1.0`.
 - Effort stimato: F0.1 ½–1g · F0.2–0.7 2–4g · F1 2–4g · F2 1–2g · F4 2–3g ∥ 2–3g · F3 ½g · D 2–3g (+costi run agenti) · B 2–3½g (B0..B4) + 2g (B3, solo se promossa).
@@ -268,7 +271,9 @@ F0.1 (rename) → R1 → F0.2..F0.7 → R2 → [F1 ∥ F2] → R3/R4 (publish 1.
 > reconciliation Layer 3. Sub-fasi e commit-message nella spec (F4-B1..B4,
 > F4-A1..A5, 1 commit per sub-fase).
 
-**→ REVIEW R7**: team server (compose o `serve --team` su LAN) con 2+ client
-reali attaccati (VSIX + plugin), attribution actor visibile sulle righe
-condivise, nessun consolidamento duplicato, restart daemon pulisce i sidecar
-stale.
+**→ REVIEW R7** (dopo WQ-7): team server sull'immagine **SurrealDB `v4.0.0`**
+(compose o `serve --team` su LAN, volume greenfield) con 2+ client reali
+attaccati (VSIX + plugin), attribution actor visibile sulle righe condivise,
+nessun consolidamento duplicato, restart daemon pulisce i sidecar stale.
+Checklist: [team_server.md §8](../team_server.md). Un pretest sulla pin
+`v3.3.5` non chiude il gate.
