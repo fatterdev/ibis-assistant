@@ -231,6 +231,16 @@ SurrealDB **`v4.0.0`** with a matching `surrealdb` crate client. Use a
 **greenfield** data volume (no migrated 3.x surrealkv file). A pretest on
 the current `v3.3.5` pin does **not** close this gate.
 
+**Verified 05/11** — checklist green 0–5 on the certified `v4.0.0` image
+(greenfield volume), §8.3 with both real clients (VSIX attach + plugin http
+variant; actor attribution verified server-side on both surfaces) and a LAN
+multi-host extension (second-host write via the LAN IP, `owner=fabio-lan2`
+verified). Run evidence: `.r7-pretest/r7-gate-checklist.out.txt` (local
+workspace dir, gitignored). Fixes landed during the pass: VSIX 1.0.17
+(tree-view visibility guard), 1.0.18 (Remember sends `project_name`), 1.0.19
+(Remember/working-state send the `actor` tool argument — the header is
+ignored by non-loopback peers, §4).
+
 0. Confirm SurrealDB **4.0.0** in the running image (`docker compose exec
    ibis /opt/ibis/surreal version`, or equivalent on path B) and that the
    discovery document / boot path is healthy against that sidecar.

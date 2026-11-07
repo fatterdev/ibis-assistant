@@ -26,4 +26,5 @@ AGENTS.md
 .vscode/
 .mcp.json
 .r2-smoke-data/
+.r7-pretest/
 vscode-extension/LICENSE

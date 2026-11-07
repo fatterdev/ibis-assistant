@@ -235,6 +235,11 @@ F0.1 (rename) → R1 → F0.2..F0.7 → R2 → [F1 ∥ F2] → R3/R4 (publish 1.
 [spec F4](../superpowers/2026-11-01-memory-view-team-server-design.md).
 WQ-7 davanti a R7: decisione owner 05/11, [master work queue §3.8](./2026-11-02-master-work-queue.md),
 [spec SurrealDB 4](./2026-11-05-surrealdb-4-upgrade.md).)
+**R7 chiuso (05/11)**: checklist §8 del runbook scripted green 0–5 + pass
+interattivo owner su entrambi i client reali + estensione LAN multi-host
+(evidenza `.r7-pretest/r7-gate-checklist.out.txt`, dir locale gitignored).
+F3 atterrata 07/11 — il sequencing prosegue con Track D (WQ-4) e, lato
+runtime, C9 (WQ-5).
 - Runtime root: `0.2.0` a F0 completata (CHANGELOG `[Unreleased]` → `[0.2.0]`, tag); `0.3.0` a F4-B.
 - VSIX resta `1.0.0` fino al publish; `1.1.0` a F4-A; plugin `0.1.0`.
 - Effort stimato: F0.1 ½–1g · F0.2–0.7 2–4g · F1 2–4g · F2 1–2g · F4 2–3g ∥ 2–3g · F3 ½g · D 2–3g (+costi run agenti) · B 2–3½g (B0..B4) + 2g (B3, solo se promossa).
