@@ -86,7 +86,7 @@ async fn origin_gate_middleware(
 /// Builds the full HTTP router (`HandlerWithSettings).
 ///
 /// `mcp` is the injected Streamable HTTP service — wave-4 `ibis-server` wires
-/// the 56-tool rmcp registry via [`streamable_http_config`] +
+/// the 58-tool rmcp registry via [`streamable_http_config`] +
 /// `StreamableHttpService::new`; tests may pass a minimal handler.
 /// `tools` feeds the discovery `tools[]` list (registry provider; empty by
 /// default). `log_upload` mounts the upload endpoint; `settings_api` is

@@ -54,7 +54,7 @@ Restart Claude Desktop. You should see a green connection icon for "knowledge-gr
 
 ## Available tools reference
 
-Source of truth: the declarative tool registry `crates/ibis-server/src/registry.rs` (handlers in `crates/ibis-server/src/tools.rs`). Obsolete names (`ingest_git`, `reinforce_path`) are **not** registered.
+Source of truth: the declarative tool registry `crates/ibis-server/src/registry.rs` (handlers in `crates/ibis-server/src/tools.rs`, `tools_memory.rs`, `tools_ticket.rs`). Obsolete names (`ingest_git`, `reinforce_path`) are **not** registered.
 
 ### Knowledge and search
 

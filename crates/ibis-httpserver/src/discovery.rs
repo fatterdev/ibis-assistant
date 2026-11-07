@@ -6,7 +6,7 @@
 //!
 //! F-005/D11: the endpoints map no longer contains `sse_legacy` and the guide
 //! no longer advertises `/sse`. The `tools[]` list is an injected provider
-//! ([`ToolsProvider`]) — the 56-tool registry arrives with wave 4
+//! ([`ToolsProvider`]) — the 58-tool registry arrives with wave 4
 //! (`ibis-server`); the default provider returns an empty list.
 
 use axum::extract::State;

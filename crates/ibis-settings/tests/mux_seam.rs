@@ -17,7 +17,7 @@ use rmcp::ServerHandler;
 use tempfile::TempDir;
 use tower::ServiceExt;
 
-/// Minimal MCP handler standing in for the wave-4 56-tool registry
+/// Minimal MCP handler standing in for the wave-4 58-tool registry
 /// (mirrors the mux's own test seam).
 #[derive(Clone)]
 struct TestMcp;

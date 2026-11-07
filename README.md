@@ -30,7 +30,7 @@ Ibis Assistant is an MCP server for real codebases: it ingests git causality, as
 
 1. **Ingest** - git causality (`commit -> changed -> file`), polyglot AST chunks, logs, tickets.
 2. **Graph** - one SurrealDB, one truth: code, change meaning, issues, authors, memories.
-3. **Serve** - 56-tool MCP surface over Streamable HTTP (`/mcp`) + browser Settings UI.
+3. **Serve** - 58-tool MCP surface over Streamable HTTP (`/mcp`) + browser Settings UI.
 4. **Remember** - typed, sharing-first memory that keeps the graph useful across sessions.
 
 ## Feature matrix
@@ -43,10 +43,35 @@ Ibis Assistant is an MCP server for real codebases: it ingests git causality, as
 | **Log analysis** | Recursive watch; static + ast-grep first, AI residual; file/location/cause report; repeats promote back into rules | [docs/log_analysis_pipeline.md](docs/log_analysis_pipeline.md) |
 | **Commit-meaning temporal layer** | Per-commit message+patch embeddings (`commit_chunk`), as-of queries, currentness gates | [docs/commit_meaning_temporal.md](docs/commit_meaning_temporal.md) |
 | **Living memory** | Typed `memory_*` (decision/fix/constraint/rule/gotcha/...), supersession, working state, local-first consolidation | [docs/memory_layer.md](docs/memory_layer.md) |
+| **Memory views in the IDE** | VS Code tree views over typed memory + workstreams; inline curation (Share / Archive / Supersede / Update) with an owner guard | [vscode-extension/README.md](vscode-extension/README.md) |
 | **Tickets & PRs** | Redmine / Jira / Azure DevOps; `ticket_*`, `repo_pr_*` | [docs/TICKETING_CLIENT.md](docs/TICKETING_CLIENT.md) |
 | **Plug-and-play onboarding** | One binary; `config fast`/`full` wizard; SurrealDB, Ollama, `sg` sidecar auto-download/start; Settings in browser or IDE | [docs/ai_and_settings.md](docs/ai_and_settings.md) |
 | **Client-agnostic MCP** | Streamable HTTP at `/mcp`; Cursor plugin, VS Code extension, Claude Desktop, CLI | [docs/CLAUDE_INTEGRATION.md](docs/CLAUDE_INTEGRATION.md) |
 | **Three runtimes** | `personal` (live tree) / `plugin` (IDE stdio child) / `server` (shared host) | [docs/runtime_modes.md](docs/runtime_modes.md) |
+| **Team server** | One shared SurrealDB on your own infra: `ibis serve --team` or the compose image; actor attribution via `X-Ibis-Actor` / `actor` argument; `--bind` / `--data-dir` / `--consolidate` | [docs/team_server.md](docs/team_server.md) |
+
+## Ibis Assistant vs Copilot Memory
+
+VS Code ships **Copilot Memory**: cloud-stored *repository facts*
+(per-repo, shared) plus account-level *user preferences*, recalled into
+Copilot sessions - IDE/session-scoped memory inside the Copilot ecosystem,
+with a TTL on unused facts.
+
+Ibis Assistant is a different shape: **living project memory on a built
+knowledge graph**, not a fact cache for one vendor's chat.
+
+| | Copilot Memory | Ibis Assistant |
+|---|---|---|
+| What it remembers | Facts and preferences scoped to Copilot sessions/workspaces | The project itself: git causality, AST chunks, logs, tickets, typed memory - one SurrealDB graph |
+| Where it lives | Cloud (Copilot plan + GitHub repo) | Local-first; shared memory on **your own infra** via the team server - no SaaS ([team server](docs/team_server.md)) |
+| Memory model | Facts with vote/TTL lifecycle | Typed `memory_*` (decision/fix/rule/constraint/gotcha/...) with supersession and history; commit-bound temporal layers (`commit_chunk`) |
+| Who can use it | VS Code + Copilot harness | AI-client agnostic MCP: Cursor, VS Code, Claude Desktop, CLI |
+| Change questions | Out of scope | `why_changed`, blast radius, commit meaning - answered from the same graph the memory lives on |
+
+Even if Copilot adds more memory later, what stays different: Ibis owns the
+ingest loop (polyglot AST ingest, AI rule synthesis, log→rule promotion) and
+keeps provenance on the git graph - memory and code intelligence in one store
+([competitive landscape](docs/competitive_memory_landscape.md)).
 
 ## Quick start
 
@@ -91,7 +116,7 @@ crates/              Rust workspace (20+ crates)
   ibis-core            domain model + sidecar process-tree ownership (job object / PDEATHSIG / watchdog)
   ibis-ingest-*        git / code / logs / redmine / dynamic ingest lanes
   ibis-search          hybrid retrieval (vector + time + keywords + graph)
-  ibis-server          56-tool MCP surface over Streamable HTTP
+  ibis-server          58-tool MCP surface over Streamable HTTP
   ibis-db              SurrealDB persistence (schema-first, SCHEMAFULL)
   ibis-cli / ibis-wizard  CLI + onboarding wizard
   mcp-bridge           stdio MCP bridge for IDE hosts

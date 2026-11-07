@@ -71,7 +71,7 @@ check(
 );
 
 // ---------- skills ----------
-const expectedSkills = ["usage", "readiness", "status", "remember", "set-working-state"];
+const expectedSkills = ["usage", "readiness", "status", "remember", "set-working-state", "ibis-sync-copilot-memory"];
 for (const skill of expectedSkills) {
   let body = "";
   try {

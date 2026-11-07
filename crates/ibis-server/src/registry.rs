@@ -1,4 +1,4 @@
-//! The declarative 56-tool MCP registry (D3) — the 56 tool registrations,
+//! The declarative 58-tool MCP registry (D3) — the 58 tool registrations,
 //! reproduced byte-for-byte.
 //!
 //! Every tool is data: `name`, exact `description`, and an input schema
@@ -80,7 +80,7 @@ macro_rules! p {
     };
 }
 
-/// The authoritative 56-tool table. Descriptions are the exact
+/// The authoritative 58-tool table. Descriptions are the exact
 /// strings.
 pub static TOOL_SPECS: &[ToolSpec] = &[
     // ---- Project session & ingest (4) ----

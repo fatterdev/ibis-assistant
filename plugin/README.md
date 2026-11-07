@@ -42,6 +42,7 @@ Raccomandazione per team (nel repo del progetto):
 | `skills/status` | Stato backend/AI/ticketing via `settings_get` (+ `ticket_get_capabilities` solo in diagnosi) |
 | `skills/remember` | Cattura memoria tipizzata con `memory_add` (7 kind, visibilità team/personal) |
 | `skills/set-working-state` | Stato di lavoro corrente via `set_working_state` |
+| `skills/ibis-sync-copilot-memory` | Sperimentale: porting delle voci utili da Copilot Memory in `memory_add` tipizzata (sola lettura lato Copilot, provenance nella content) |
 | `com.github.copilot/hooks/hooks.json` | `sessionStart` → contratto; `agentStop` → promemoria `capture_observation` condizionale |
 | `com.github.copilot/agents/` | `ibis-forensics` (read-only: why_changed/blast radius/ask), `ibis-curator` (curation memoria) |
 | `automations/` | `nightly-ingest` (cron 03:00), `weekly-consolidate` (cron ven 10:30) |

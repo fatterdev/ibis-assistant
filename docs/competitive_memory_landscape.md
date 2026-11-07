@@ -9,7 +9,7 @@ Comparison used when deciding how Ibis should relate to the “agent memory” w
 ## Decision
 
 1. **Moat first:** polyglot **ast-grep** ingest, **AI-validated rule synthesis** for sparse/legacy languages, and a log pipeline that prefers static/AST matches and can **synthesize/promote rules** from residuals — none of the compared memory products own this loop.
-2. **Operability is part of the product:** one Go executable; wizard (`config fast` / `config full`); auto-download/start of SurrealDB, Ollama, and `sg`; Settings UI from browser **and** IDE (`settings_open_ui` / **Ibis: Open Settings**); keys in `config.json` rather than ENV-first; Windows service install in one UAC pass. Competitors that are “just an MCP memory server” or “just an SDK” leave this stack to the user.
+2. **Operability is part of the product:** one Rust executable; wizard (`config fast` / `config full`); auto-download/start of SurrealDB, Ollama, and `sg`; Settings UI from browser **and** IDE (`settings_open_ui` / **Ibis: Open Settings**); keys in `config.json` rather than ENV-first; Windows service install in one UAC pass. Competitors that are “just an MCP memory server” or “just an SDK” leave this stack to the user.
 3. **Then living memory** on the same SurrealDB graph (typed, sharing-first, session load, local-first consolidate) — absorb ideas from the memory wave; do not vendor them.
 4. **Refuse:** SaaS tenancy, blockchain attestation, second database, markdown-as-sync, becoming an agent OS (Letta-shaped).
 
@@ -23,7 +23,7 @@ Comparison used when deciding how Ibis should relate to the “agent memory” w
 | **agentmemory** | Deep Claude Code hooks / capture | Host-skewed memory; not shared graph + rule synthesis |
 | **Unibase / Membase** | Ledger / attestation narratives | Rejected: trust-through-blockchain out of DNA |
 | **Letta** | Stateful agents with editable memory blocks | Agent *runtime*; wrong shape for attach-MCP-to-existing-IDE |
-| **Ibis Assistant** | **Build the graph** (git, AST, logs, tickets) **then** remember on it; **one-exe** wizard + auto-runtime | One Go binary: personal / plugin / server |
+| **Ibis Assistant** | **Build the graph** (git, AST, logs, tickets) **then** remember on it; **one-exe** wizard + auto-runtime | One Rust binary: personal / plugin / server |
 
 ## Weighting (product importance)
 

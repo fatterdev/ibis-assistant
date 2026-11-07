@@ -21,7 +21,7 @@
 //!   live-update registry feeding `notifications/resources/updated`; both
 //!   the legacy `resources/subscribe` peers and the 2026-07-28
 //!   `subscriptions/listen` sinks are served)
-//! - the 56-tool registry from [`crate::registry`]
+//! - the 58-tool registry from [`crate::registry`]
 
 use std::sync::Arc;
 
