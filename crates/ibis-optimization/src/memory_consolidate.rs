@@ -17,6 +17,12 @@ use crate::store::DbCostStore;
 const DEFAULT_CONSOLIDATION_ITEMS: usize = 20;
 const NOISE_RETENTION: &str = "7d";
 
+/// Minimum cosine similarity for a duplicate candidate to reach the
+/// distillation prompt (C9): candidates scoring below it are dropped
+/// post-query, so irrelevant rows never push the model toward bad merges.
+/// Overridable via `ai.consolidation.dup_similarity_min`.
+pub(crate) const DUP_SIMILARITY_MIN: f64 = 0.80;
+
 const VALID_CONSOLIDATION_KINDS: [&str; 9] = [
     "decision",
     "fix",
@@ -52,6 +58,9 @@ pub struct ConsolidationDecision {
 #[derive(Debug, Clone, Default)]
 pub struct ConsolidationObservation {
     pub id: String,
+    /// Stored title (empty for raw `capture_observation` rows); the
+    /// deterministic pre-match falls back to the first content line (C9).
+    pub title: String,
     pub content: String,
     pub embedding: Option<Embedding>,
     pub confidence: f64,
@@ -70,11 +79,12 @@ pub struct DuplicateMemory {
     pub score: f64,
 }
 
-/// `SELECT id, content, embedding, confidence, owner, visibility FROM memory …`
+/// `SELECT id, title, content, embedding, confidence, owner, visibility FROM memory …`
 /// row projection.
 #[derive(Debug, Clone, SurrealValue)]
 struct ObservationRow {
     id: Option<RecordId>,
+    title: Option<String>,
     content: Option<String>,
     embedding: Option<Embedding>,
     confidence: Option<F64>,
@@ -150,15 +160,28 @@ impl Optimizer {
                     Vec::new()
                 }
             };
-            let decision = match self.distill_observation(observation, &duplicates).await {
-                Ok(d) => d,
-                Err(e) => {
-                    tracing::warn!(
-                        "ConsolidateLoop: distillation failed for {}: {e}",
-                        observation.id
+            // C9 deterministic pre-match: when the normalized observation
+            // title equals a candidate's, merge directly without an AI call
+            // (same persist flow as an LLM merge).
+            let decision = match deterministic_title_match(observation, &duplicates) {
+                Some(decision) => {
+                    tracing::info!(
+                        "ConsolidateLoop: deterministic duplicate match for {} -> {}",
+                        observation.id,
+                        decision.merge_with
                     );
-                    continue;
+                    decision
                 }
+                None => match self.distill_observation(observation, &duplicates).await {
+                    Ok(d) => d,
+                    Err(e) => {
+                        tracing::warn!(
+                            "ConsolidateLoop: distillation failed for {}: {e}",
+                            observation.id
+                        );
+                        continue;
+                    }
+                },
             };
             if decision.action == "noise" {
                 if let Err(e) = self.decay_noise(db, observation).await {
@@ -256,7 +279,7 @@ impl Optimizer {
             ));
         }
         let query = format!(
-            "SELECT id, content, embedding, confidence, owner, visibility FROM memory WHERE {} ORDER BY created_at ASC LIMIT {max_items};",
+            "SELECT id, title, content, embedding, confidence, owner, visibility FROM memory WHERE {} ORDER BY created_at ASC LIMIT {max_items};",
             where_parts.join(" AND ")
         );
         let outcome = db
@@ -281,6 +304,7 @@ impl Optimizer {
             }
             observations.push(ConsolidationObservation {
                 id,
+                title: row.title.unwrap_or_default(),
                 content,
                 embedding: row.embedding,
                 confidence: row.confidence.map(|c| c.get()).unwrap_or(0.5),
@@ -366,6 +390,11 @@ impl Optimizer {
                 score: row.score.map(|s| s.get()).unwrap_or(0.0),
             });
         }
+        // C9: the top-3 window is similarity-filtered — rows below the floor
+        // (including embedding-less rows, which score 0.0) never reach the
+        // distillation prompt.
+        let min = self.dup_similarity_min.clamp(0.0, 1.0);
+        result.retain(|duplicate| duplicate.score >= min);
         Ok(result)
     }
 
@@ -529,6 +558,81 @@ impl Optimizer {
         db.execute(&query).await.map_err(|e| e.to_string())?;
         Ok(())
     }
+}
+
+/// Normalizes a title for the deterministic duplicate pre-match (C9):
+/// lowercase, trimmed, path separators become spaces, whitespace collapsed,
+/// trailing sentence punctuation stripped.
+fn normalize_title(value: &str) -> String {
+    let lowered = value.trim().to_lowercase();
+    let spaced = lowered.replace(['\\', '/'], " ");
+    let mut out = String::with_capacity(spaced.len());
+    let mut previous_space = true;
+    for ch in spaced.chars() {
+        if ch.is_whitespace() {
+            if !previous_space {
+                out.push(' ');
+                previous_space = true;
+            }
+        } else {
+            out.push(ch);
+            previous_space = false;
+        }
+    }
+    if out.ends_with(' ') {
+        out.pop();
+    }
+    // A title never ends in sentence punctuation; the first-line fallback
+    // (sentence text) does. Strip it so "wizard discovery quirks." matches
+    // the "Wizard discovery quirks" title it restates (C9).
+    while out.ends_with(['.', '!', '?', ':', ';', ',']) {
+        out.pop();
+    }
+    out
+}
+
+/// The observation title used by the deterministic pre-match (C9): the
+/// stored title when present, otherwise the first content line capped at 80
+/// characters — the same derivation the git claim store applies to untitled
+/// rows.
+fn observation_title(observation: &ConsolidationObservation) -> String {
+    let stored = observation.title.trim();
+    if !stored.is_empty() {
+        return stored.to_string();
+    }
+    let first = observation
+        .content
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim();
+    first.chars().take(80).collect()
+}
+
+/// C9: when a duplicate candidate shares the observation's normalized title,
+/// the re-observation restates the same durable fact — merge into it without
+/// an AI call (entity resolution). Ties resolve to the nearest candidate,
+/// which is the first in the cosine-ordered window.
+fn deterministic_title_match(
+    observation: &ConsolidationObservation,
+    duplicates: &[DuplicateMemory],
+) -> Option<ConsolidationDecision> {
+    let normalized = normalize_title(&observation_title(observation));
+    if normalized.is_empty() {
+        return None;
+    }
+    let candidate = duplicates
+        .iter()
+        .find(|duplicate| normalize_title(&duplicate.title) == normalized)?;
+    Some(ConsolidationDecision {
+        action: "merge".to_string(),
+        kind: candidate.kind.clone(),
+        title: candidate.title.clone(),
+        content: candidate.content.clone(),
+        confidence: observation.confidence,
+        merge_with: candidate.id.clone(),
+        valid_until: String::new(),
+    })
 }
 
 /// Parses and validates the model's consolidation verdict
@@ -905,6 +1009,172 @@ mod tests {
                 "UPDATE memory:obs1 SET status = 'archived'",
             ],
         );
+    }
+
+    /// C9: candidates below `dup_similarity_min` never reach the prompt; the
+    /// config knob retains them when lowered. Zero-candidate observations
+    /// still distill, with `POSSIBLE DUPLICATES: []`.
+    #[tokio::test]
+    async fn find_duplicate_memories_applies_threshold() {
+        let make_rows = || {
+            (
+                vec![obj(vec![
+                    ("id", Value::from_t("memory:obs1")),
+                    ("content", Value::from_t("Wizard discovery quirks noted.")),
+                    ("embedding", Value::from_t(vec![0.1f64, 0.2])),
+                ])],
+                vec![obj(vec![
+                    ("id", Value::from_t("memory:fix1")),
+                    ("kind", Value::from_t("fix")),
+                    ("title", Value::from_t("Setup crash")),
+                    ("content", Value::from_t("Setup crashes on empty root.")),
+                    ("score", Value::from_t(0.5f64)),
+                ])],
+            )
+        };
+
+        // Default floor 0.80: the 0.5-scoring candidate is dropped; the
+        // distillation still runs, with an empty candidate list.
+        let (observations, duplicates) = make_rows();
+        let db = Arc::new(ConsolidateDb::new(observations, duplicates));
+        let ai = Arc::new(ConsolidateAi::new(vec![
+            r#"{"action":"create","kind":"fix","title":"Guard empty roots","content":"Validate discovery_root before scanning.","confidence":0.9}"#,
+        ]));
+        let opt = optimizer(db.clone(), ai.clone());
+        opt.consolidate_loop("repo", 10).await.expect("loop failed");
+        let prompts = ai.prompts.lock().unwrap().clone();
+        assert_eq!(prompts.len(), 1, "distillation still runs");
+        assert!(
+            prompts[0].contains("POSSIBLE DUPLICATES:\n[]"),
+            "below-threshold candidates must be dropped: {}",
+            prompts[0]
+        );
+        let calls = db.sql_calls();
+        assert_calls_missing(&calls, "supersedes->memory:fix1");
+
+        // The config knob (`Optimizer.dup_similarity_min`) retains the
+        // candidate when lowered to the candidate's score.
+        let (observations, duplicates) = make_rows();
+        let db = Arc::new(ConsolidateDb::new(observations, duplicates));
+        let ai = Arc::new(ConsolidateAi::new(vec![
+            r#"{"action":"merge","kind":"fix","title":"Guard empty setup roots","content":"Setup must validate that discovery_root is non-empty before scanning.","confidence":0.94,"merge_with":"memory:fix1"}"#,
+        ]));
+        let mut opt = optimizer(db.clone(), ai.clone());
+        opt.dup_similarity_min = 0.5;
+        opt.consolidate_loop("repo", 10).await.expect("loop failed");
+        let prompts = ai.prompts.lock().unwrap().clone();
+        assert!(
+            prompts[0].contains("memory:fix1"),
+            "candidate at the configured floor must be kept: {}",
+            prompts[0]
+        );
+        assert_calls_contain(
+            &db.sql_calls(),
+            &["RELATE $mem->supersedes->memory:fix1"],
+        );
+    }
+
+    /// C9: an observation whose normalized title equals a candidate's merges
+    /// deterministically — zero AI calls, same persist flow as an LLM merge.
+    #[tokio::test]
+    async fn deterministic_title_match_skips_llm() {
+        let db = Arc::new(ConsolidateDb::new(
+            vec![obj(vec![
+                ("id", Value::from_t("memory:obs1")),
+                ("title", Value::from_t("Setup  Crash")),
+                ("content", Value::from_t("Setup crashes when roots are empty.")),
+                ("embedding", Value::from_t(vec![0.1f64, 0.2])),
+                ("confidence", Value::from_t(0.5f64)),
+            ])],
+            vec![obj(vec![
+                ("id", Value::from_t("memory:fix1")),
+                ("kind", Value::from_t("fix")),
+                ("title", Value::from_t("setup/crash")),
+                ("content", Value::from_t("Setup crashes on empty root.")),
+                ("score", Value::from_t(0.9f64)),
+            ])],
+        ));
+        let ai = Arc::new(ConsolidateAi::new(vec![]));
+        let opt = optimizer(db.clone(), ai.clone());
+
+        opt.consolidate_loop("repo", 10)
+            .await
+            .expect("ConsolidateLoop failed");
+        assert!(
+            ai.prompts.lock().unwrap().is_empty() && ai.route_hints.lock().unwrap().is_empty(),
+            "a deterministic title match must not call the AI"
+        );
+        let calls = db.sql_calls();
+        assert_calls_contain(
+            &calls,
+            &[
+                "RELATE $mem->supersedes->memory:fix1",
+                "UPDATE memory:obs1 SET status = 'archived'",
+            ],
+        );
+        let add_vars = db.vars_of("CREATE memory:");
+        assert_eq!(add_vars.len(), 1, "one add_memory transaction: {calls:?}");
+        assert_eq!(
+            add_vars[0].get("kind").map(var_str).unwrap_or_default(),
+            "fix",
+            "deterministic merge keeps the candidate's kind"
+        );
+        assert_eq!(
+            add_vars[0].get("content").map(var_str).unwrap_or_default(),
+            "Setup crashes on empty root.",
+            "deterministic merge keeps the candidate's durable content"
+        );
+    }
+
+    /// C9: untitled observations fall back to the first content line (the
+    /// claim-store first_line convention) for the deterministic pre-match.
+    #[tokio::test]
+    async fn deterministic_title_match_falls_back_to_first_line() {
+        let db = Arc::new(ConsolidateDb::new(
+            vec![obj(vec![
+                ("id", Value::from_t("memory:obs1")),
+                ("content", Value::from_t("Wizard discovery quirks.")),
+                ("embedding", Value::from_t(vec![0.1f64, 0.2])),
+            ])],
+            vec![obj(vec![
+                ("id", Value::from_t("memory:fact1")),
+                ("kind", Value::from_t("fact")),
+                ("title", Value::from_t("WIZARD\\DISCOVERY  QUIRKS")),
+                ("content", Value::from_t("Discovery quirks are known.")),
+                ("score", Value::from_t(0.85f64)),
+            ])],
+        ));
+        let ai = Arc::new(ConsolidateAi::new(vec![]));
+        let opt = optimizer(db.clone(), ai.clone());
+
+        opt.consolidate_loop("repo", 10)
+            .await
+            .expect("ConsolidateLoop failed");
+        assert!(
+            ai.prompts.lock().unwrap().is_empty(),
+            "the first-line fallback must still match deterministically"
+        );
+        let add_vars = db.vars_of("CREATE memory:");
+        assert_eq!(add_vars.len(), 1, "one add_memory transaction");
+        assert_eq!(
+            add_vars[0].get("title").map(var_str).unwrap_or_default(),
+            "WIZARD\\DISCOVERY  QUIRKS",
+            "the candidate title is preserved verbatim"
+        );
+    }
+
+    /// C9: title normalization — lowercase, trim, path separators become
+    /// spaces, whitespace collapsed, trailing sentence punctuation stripped.
+    #[test]
+    fn normalize_title_collapses_separators_and_whitespace() {
+        assert_eq!(
+            normalize_title("  Path\\to/Thing   weird "),
+            "path to thing weird"
+        );
+        assert_eq!(normalize_title("Setup crashes."), "setup crashes");
+        assert_eq!(normalize_title(""), "");
+        assert_eq!(normalize_title("   "), "");
+        assert_eq!(normalize_title("..."), "");
     }
 
     /// Scenario: TestConsolidateLoopDecaysNoise.

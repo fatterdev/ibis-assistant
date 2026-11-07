@@ -27,6 +27,10 @@ pub struct Optimizer {
 
     /// Optional project → (repo root, anchor mode) resolver (claim store 4b).
     pub workspace: Option<WorkspaceResolver>,
+    /// Minimum cosine similarity for consolidation duplicate candidates (C9):
+    /// set from `ai.consolidation.dup_similarity_min` by the daemon, or the
+    /// `DUP_SIMILARITY_MIN` default when unset.
+    pub dup_similarity_min: f64,
 }
 
 impl Optimizer {
@@ -43,6 +47,7 @@ impl Optimizer {
             ai,
             search,
             workspace: None,
+            dup_similarity_min: crate::memory_consolidate::DUP_SIMILARITY_MIN,
         }
     }
 

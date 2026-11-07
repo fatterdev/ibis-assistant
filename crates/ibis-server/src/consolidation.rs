@@ -76,12 +76,14 @@ pub fn start(state: &Arc<AppState>, shutdown: CancellationToken) {
 /// and drain each one (store-driven, so team clients can capture for repos
 /// the server config does not know).
 async fn run_pass(state: &Arc<AppState>) {
-    let optimizer = ibis_optimization::Optimizer::new(
+    let mut optimizer = ibis_optimization::Optimizer::new(
         state.db(),
         Some(Arc::new(crate::state::ClientAIAdapter(state.ai.clone()))
             as Arc<dyn ibis_ai::AIProvider>),
         Some(state.search()),
     );
+    // C9: the duplicate-lookup similarity floor is config-driven.
+    optimizer.dup_similarity_min = state.config().ai.consolidation.dup_similarity_min;
     let projects = match optimizer.pending_observation_projects().await {
         Ok(projects) => projects,
         Err(err) => {

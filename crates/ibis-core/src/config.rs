@@ -164,6 +164,10 @@ pub struct ConsolidationConfig {
     /// Seconds between consolidation passes (clamped to a 60s minimum).
     #[serde(rename = "interval_secs")]
     pub interval_secs: u64,
+    /// Minimum cosine similarity for a consolidation duplicate candidate to
+    /// reach the distillation prompt (C9): candidates scoring below it are
+    /// dropped before the LLM call. Clamped to [0.0, 1.0] at use.
+    pub dup_similarity_min: f64,
 }
 
 impl Default for ConsolidationConfig {
@@ -171,6 +175,9 @@ impl Default for ConsolidationConfig {
         ConsolidationConfig {
             enabled: false,
             interval_secs: 3600,
+            // C9: duplicate candidates below this cosine similarity never
+            // reach the distillation prompt.
+            dup_similarity_min: 0.80,
         }
     }
 }
@@ -1300,6 +1307,8 @@ mod tests {
         let dflt = default_config();
         assert!(!dflt.ai.consolidation.enabled);
         assert_eq!(dflt.ai.consolidation.interval_secs, 3600);
+        // C9: the duplicate-lookup similarity floor ships at 0.80.
+        assert!((dflt.ai.consolidation.dup_similarity_min - 0.80).abs() < f64::EPSILON);
 
         let cfg: Config = serde_json::from_str(
             r#"{"ai": {"consolidation": {"enabled": true, "interval_secs": 600}}}"#,
@@ -1307,12 +1316,21 @@ mod tests {
         .unwrap();
         assert!(cfg.ai.consolidation.enabled);
         assert_eq!(cfg.ai.consolidation.interval_secs, 600);
+        assert!((cfg.ai.consolidation.dup_similarity_min - 0.80).abs() < f64::EPSILON);
+
+        // The C9 knob overlays like the rest of the consolidation object.
+        let cfg: Config = serde_json::from_str(
+            r#"{"ai": {"consolidation": {"dup_similarity_min": 0.9}}}"#,
+        )
+        .unwrap();
+        assert!((cfg.ai.consolidation.dup_similarity_min - 0.9).abs() < f64::EPSILON);
 
         // Missing consolidation key under a present `ai` → defaults apply.
         let cfg: Config =
             serde_json::from_str(r#"{"ai": {"reasoning": {"provider": "ollama"}}}"#).unwrap();
         assert!(!cfg.ai.consolidation.enabled);
         assert_eq!(cfg.ai.consolidation.interval_secs, 3600);
+        assert!((cfg.ai.consolidation.dup_similarity_min - 0.80).abs() < f64::EPSILON);
     }
 
     #[test]

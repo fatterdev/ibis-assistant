@@ -4,6 +4,19 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(optimization): duplicate-lookup threshold + deterministic title
+  match (C9)** — ddofds fase 1: consolidation duplicate candidates scoring
+  below `ai.consolidation.dup_similarity_min` (default `0.80`, clamped to
+  [0.0, 1.0]) are dropped before the distillation prompt (embedding-less
+  rows score 0.0 and drop too; zero-candidate observations still distill,
+  with `POSSIBLE DUPLICATES: []`). Observations whose normalized title
+  equals a candidate's (lowercase, trimmed, path separators → spaces,
+  whitespace collapsed, trailing sentence punctuation stripped; the
+  observation title falls back to the first content line, the claim-store
+  convention) merge deterministically with no
+  AI call, through the same persist flow as an LLM merge. Governance
+  untouched (personal/team scoping still binds `$dup_owner`).
+
 - **feat(server): personal claims mode env override** - F4-A5 prerequisite
   (F4 §B.7): the runtime honors `IBIS_CLAIMS_PERSONAL_MODE` as the highest
   priority override for `memory.git_store.personal_claims` (`db_only` /

@@ -917,12 +917,14 @@ async fn memory_consolidate(
     let state = state.clone();
     let project = project_name.clone();
     tokio::spawn(async move {
-        let optimizer = ibis_optimization::Optimizer::new(
+        let mut optimizer = ibis_optimization::Optimizer::new(
             state.db(),
             Some(Arc::new(crate::state::ClientAIAdapter(state.ai.clone()))
                 as Arc<dyn ibis_ai::AIProvider>),
             Some(state.search()),
         );
+        // C9: the duplicate-lookup similarity floor is config-driven.
+        optimizer.dup_similarity_min = state.config().ai.consolidation.dup_similarity_min;
         match optimizer.consolidate_loop(&project, max_items).await {
             Err(err) => tracing::error!("Memory consolidation failed: {err}"),
             Ok(()) => {
