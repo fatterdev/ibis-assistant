@@ -351,12 +351,21 @@ pub async fn synthesize_ingest_rules(
 
     let prompt = build_ingest_synth_prompt(&ext, samples);
     let contents = [ibis_ai::Content::text(prompt)];
+    // D12: the rule set is the invalidation context — a cached proposal can
+    // never outlive the `rules/` directory it was produced against.
+    let rules_ctx = crate::ast_chunker::sg_config_dir()
+        .map(|root| ibis_ai::rules_fingerprint(&root.join("rules")))
+        .unwrap_or_else(|| "none".to_string());
     let candidate = ai_client
         .generate_content(
             &contents,
             ibis_ai::GenerationConfig {
                 temperature: 0.1,
                 route_hint: RULE_SYNTH_ROUTE_HINT.to_string(),
+                response_cache: Some(ibis_ai::ResponseCacheSpec::new(
+                    ibis_ai::ResponseCacheCallSite::RuleSynth,
+                    rules_ctx,
+                )),
                 ..Default::default()
             },
         )

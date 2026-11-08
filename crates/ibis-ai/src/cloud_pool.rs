@@ -77,6 +77,19 @@ impl AIProvider for CloudPool {
         "cloud_pool"
     }
 
+    /// D12: fingerprint the effective failover order (primary first, then the
+    /// configured order), so a cloud/model switch invalidates cached
+    /// responses.
+    fn cache_identity(&self, route_hint: &str) -> String {
+        let steps: Vec<String> = self
+            .try_order()
+            .iter()
+            .filter_map(|name| self.providers.get(name))
+            .map(|provider| provider.cache_identity(route_hint))
+            .collect();
+        format!("cloud[{}]", steps.join(","))
+    }
+
     async fn is_functional(&self) -> bool {
         self.is_functional_impl()
     }

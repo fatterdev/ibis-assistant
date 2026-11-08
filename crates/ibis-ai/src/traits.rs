@@ -18,6 +18,19 @@ pub trait AIProvider: Send + Sync {
         None
     }
 
+    /// D12: stable identity of the model/routing configuration that serves
+    /// `route_hint` — the model component of the response-cache key. The
+    /// default is the concrete model when the provider exposes one, else the
+    /// provider name; composite providers (router, fallback chain, cloud
+    /// pool) override it to fingerprint their steps, so a model switch can
+    /// never read a response cached under a different configuration.
+    fn cache_identity(&self, route_hint: &str) -> String {
+        let _ = route_hint;
+        self.model()
+            .map(str::to_string)
+            .unwrap_or_else(|| self.name().to_string())
+    }
+
     async fn is_functional(&self) -> bool;
 
     async fn embed_text(&self, text: &str) -> Result<Vec<f32>, AiError> {

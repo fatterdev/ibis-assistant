@@ -78,6 +78,17 @@ impl Step {
     }
 }
 
+/// Splits a normalized route hint into its base policy and optional D10 tier.
+fn split_hint(hint: &str) -> (&str, Option<LocalTier>) {
+    match hint.split_once(':') {
+        Some((base, suffix)) => match LocalTier::parse(suffix) {
+            Some(tier) => (base, Some(tier)),
+            None => (hint, None),
+        },
+        None => (hint, None),
+    }
+}
+
 /// Routes generation between local providers and a cloud pool:
 /// - hint `quality` → cloud first;
 /// - hint `auto` → cloud only when `use_cloud_when_no_gpu` and the host is CPU-only;
@@ -181,6 +192,24 @@ impl AIProvider for ReasoningRouter {
         "hybrid"
     }
 
+    /// D12: fingerprint the local tier selected by the hint plus the cloud
+    /// pool, so switching any model (or the cloud order) invalidates cached
+    /// responses even though the concrete provider is chosen per call.
+    fn cache_identity(&self, route_hint: &str) -> String {
+        let hint = route_hint.trim().to_lowercase();
+        let (_, tier) = split_hint(&hint);
+        let local = self
+            .local_provider(tier)
+            .map(|p| p.cache_identity(&hint))
+            .unwrap_or_else(|| "none".to_string());
+        let cloud = self
+            .cloud
+            .as_deref()
+            .map(|p| p.cache_identity(&hint))
+            .unwrap_or_else(|| "none".to_string());
+        format!("hybrid[local={local};cloud={cloud}]")
+    }
+
     async fn is_functional(&self) -> bool {
         if let Some(l) = &self.local {
             if l.is_functional().await {
@@ -210,13 +239,7 @@ impl AIProvider for ReasoningRouter {
         // D10: `local:<tier>` / `local_only:<tier>` — the base keeps the
         // existing cloud policy, the suffix picks the local provider. An
         // unknown suffix leaves the hint untouched (backward compatible).
-        let (base, tier) = match hint.split_once(':') {
-            Some((base, suffix)) => match LocalTier::parse(suffix) {
-                Some(tier) => (base, Some(tier)),
-                None => (hint.as_str(), None),
-            },
-            None => (hint.as_str(), None),
-        };
+        let (base, tier) = split_hint(&hint);
         let local = Step::Local(tier);
         let tiered_local = tier.is_some() && base != "local_only";
         let prefer_cloud = base == "quality"
@@ -273,6 +296,7 @@ mod tests {
 
     struct Stub {
         name: String,
+        model: Option<String>,
         functional: bool,
         err: Option<AiError>,
         text: String,
@@ -284,6 +308,7 @@ mod tests {
         fn ok(name: &str, text: &str) -> Self {
             Stub {
                 name: name.to_string(),
+                model: None,
                 functional: true,
                 err: None,
                 text: text.to_string(),
@@ -294,6 +319,7 @@ mod tests {
         fn failing(name: &str, err: &str) -> Self {
             Stub {
                 name: name.to_string(),
+                model: None,
                 functional: true,
                 err: Some(AiError::other(err)),
                 text: String::new(),
@@ -304,6 +330,7 @@ mod tests {
         fn nonfunctional(name: &str) -> Self {
             Stub {
                 name: name.to_string(),
+                model: None,
                 functional: false,
                 err: None,
                 text: String::new(),
@@ -315,12 +342,19 @@ mod tests {
             self.delay = Some(d);
             self
         }
+        fn with_model(mut self, model: &str) -> Self {
+            self.model = Some(model.to_string());
+            self
+        }
     }
 
     #[async_trait]
     impl AIProvider for Stub {
         fn name(&self) -> &str {
             &self.name
+        }
+        fn model(&self) -> Option<&str> {
+            self.model.as_deref()
         }
         async fn is_functional(&self) -> bool {
             self.functional
@@ -580,6 +614,45 @@ mod tests {
         assert_eq!(route_text(&r, "local:L").await.unwrap(), "large");
         // Tier absent from the map falls back to the default local provider.
         assert_eq!(route_text(&r, "local:XL").await.unwrap(), "default-model");
+    }
+
+    /// D12: the cache identity fingerprints the tier model selected by the
+    /// hint and the cloud pool, so a model switch invalidates cached
+    /// responses.
+    #[test]
+    fn cache_identity_fingerprints_tier_model_and_cloud() {
+        let router = |tier_model: &str, cloud_model: &str| {
+            ReasoningRouter::new(
+                Some(boxed(Stub::ok("default", "x").with_model("base-model"))),
+                Some(boxed(Stub::ok("gemini", "x").with_model(cloud_model))),
+                RouterConfig::default(),
+            )
+            .with_local_tiers(vec![(
+                "M".to_string(),
+                boxed(Stub::ok("ollama", "x").with_model(tier_model)),
+            )])
+        };
+        let a = router("m1", "c1");
+        let b = router("m2", "c1");
+        let c = router("m1", "c2");
+        let id = a.cache_identity("local:M");
+        assert!(id.contains("m1"), "tier model is part of the identity");
+        assert_eq!(id, a.cache_identity("local:M"), "stable");
+        assert_ne!(
+            id,
+            b.cache_identity("local:M"),
+            "a tier model switch must invalidate"
+        );
+        assert_ne!(
+            id,
+            c.cache_identity("local:M"),
+            "a cloud model switch must invalidate"
+        );
+        assert_ne!(
+            id,
+            a.cache_identity("local:S"),
+            "a different hint resolves a different tier identity"
+        );
     }
 
     #[tokio::test]

@@ -114,6 +114,10 @@ impl AIProvider for OpenAICompatProvider {
         "openai_compat"
     }
 
+    fn model(&self) -> Option<&str> {
+        Some(&self.model)
+    }
+
     async fn is_functional(&self) -> bool {
         !self.api_key.trim().is_empty() && !self.model.trim().is_empty()
     }

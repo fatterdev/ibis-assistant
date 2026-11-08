@@ -50,6 +50,17 @@ impl AIProvider for FallbackChain {
         "fallback_chain"
     }
 
+    /// D12: the chain's cache identity is its ordered step identities — a
+    /// step/model change invalidates cached responses.
+    fn cache_identity(&self, route_hint: &str) -> String {
+        let steps: Vec<String> = self
+            .steps
+            .iter()
+            .map(|step| step.cache_identity(route_hint))
+            .collect();
+        format!("chain[{}]", steps.join(","))
+    }
+
     async fn is_functional(&self) -> bool {
         for step in &self.steps {
             if step.is_functional().await {

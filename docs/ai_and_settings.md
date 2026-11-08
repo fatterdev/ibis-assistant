@@ -55,6 +55,39 @@ length is treated as a miss. Store failures degrade transparently to the HTTP
 path (the seam is best-effort, like `CostStore`). The L1 wholesale clear stays
 as-is: the DB is strictly L2.
 
+### Exact-match response cache (D12, opt-in)
+
+The **exact-match tier** of the D12 response cache ships first; the semantic
+tier is deliberately excluded (a wrong semantic hit is a silent quality
+regression — it needs calibration data and an error metric first). Opt-in via
+`ai.response_cache.enabled: true` (default `false`):
+
+| Knob | Default | Behavior |
+|------|---------|----------|
+| `ai.response_cache.enabled` | `false` | Wraps the assembled reasoning stack in `ibis_ai::CachedGenerate`. Only calls that carry a `ResponseCacheSpec` consult the cache; everything else (including `ask_project`/agentic) is a transparent pass-through. |
+| `ai.response_cache.ttl_secs` | `604800` (7d) | Boot-time prune of `llm_response_cache` rows older than the TTL (`created_at`). |
+
+Only three deterministic call sites opt in:
+
+| Call site | Invalidation context |
+|-----------|----------------------|
+| Semantic log analysis (`log_analyze`) | Resolved code-index HEAD (`head:<oid>`) |
+| Ingest rule synthesis (`rule_synth`) | SHA-256 fingerprint of the `rules/*.yml` directory |
+| ast-grep rule generation (`ast_rule_gen`) | SHA-256 fingerprint of the `rules/*.yml` directory |
+
+Cache key: `{call_site}:{model}:{sha256(context, full_prompt)}` — the model
+component is `AIProvider::cache_identity`, which composite providers override
+with their routing fingerprint (tier models + cloud order), so a model switch
+can never read a response cached under a different configuration. A hit
+returns the stored text with no usage metadata (zero billed tokens). The store
+is best-effort, like B6: a missing DB, a lookup failure or a disabled flag
+degrades to the live provider; provider errors are never cached.
+
+Runtime note: the decorator is installed when the AI stack is assembled. In
+plugin mode a workspace bound *after* startup keeps the cache off until the
+next start (the AI stack is not rebuilt on late binding), exactly like the B6
+embedding cache.
+
 ## Prompt stability (D13)
 
 Every cloud AI call site follows one written convention, enforced by
@@ -254,6 +287,10 @@ IDE packaging and shared runtime: [ide_host_and_lm_bridge.md](ide_host_and_lm_br
         "L": "gemma4:12b",
         "XL": "muse-glimmer"
       }
+    },
+    "response_cache": {
+      "enabled": false,
+      "ttl_secs": 604800
     }
   }
 }

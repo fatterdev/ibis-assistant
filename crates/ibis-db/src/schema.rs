@@ -74,6 +74,7 @@ pub mod names {
     pub const LOG_PROCESSED_FILE: &str = "log_processed_file";
     pub const LOG_PENDING_NOTIFICATION: &str = "log_pending_notification";
     pub const FILE_AT_COMMIT: &str = "file_at_commit";
+    pub const LLM_RESPONSE_CACHE: &str = "llm_response_cache";
     pub const SYMBOL: &str = "symbol";
     pub const COMMUNITY: &str = "community";
     pub const PROCESS: &str = "process";
@@ -331,6 +332,14 @@ pub const INIT_STATEMENTS: &[&str] = &[
     "DEFINE FIELD IF NOT EXISTS dim ON TABLE embedding_cache TYPE int;",
     "DEFINE FIELD IF NOT EXISTS embedding ON TABLE embedding_cache TYPE array<float>;",
     "DEFINE FIELD IF NOT EXISTS created_at ON TABLE embedding_cache TYPE option<datetime>;",
+    // D12: exact-match LLM response cache (opt-in, best-effort). The key is
+    // `{call_site}:{model}:{sha256(context, full_prompt)}`; the record id is
+    // the SHA-256 of that key (deterministic, idempotent UPSERT).
+    "DEFINE TABLE IF NOT EXISTS llm_response_cache SCHEMAFULL;",
+    "DEFINE FIELD IF NOT EXISTS key ON TABLE llm_response_cache TYPE string;",
+    "DEFINE FIELD IF NOT EXISTS response ON TABLE llm_response_cache TYPE string;",
+    "DEFINE FIELD IF NOT EXISTS finish_reason ON TABLE llm_response_cache TYPE option<string>;",
+    "DEFINE FIELD IF NOT EXISTS created_at ON TABLE llm_response_cache TYPE option<datetime>;",
     // Axon-like tables (no writer yet — future lanes declare their fields).
     "DEFINE TABLE IF NOT EXISTS symbol SCHEMAFULL;",
     "DEFINE FIELD IF NOT EXISTS name ON TABLE symbol TYPE option<string>;",
@@ -436,6 +445,9 @@ pub const INIT_STATEMENTS: &[&str] = &[
     // B6: the L2 embedding cache is keyed by the exact `{model}:{dim}:{hash}`
     // string — one UNIQUE index enforces it.
     "DEFINE INDEX IF NOT EXISTS embedding_cache_key ON TABLE embedding_cache COLUMNS key UNIQUE;",
+    // D12: one row per exact cache key — the UNIQUE index is the server-side
+    // backstop behind the deterministic record id.
+    "DEFINE INDEX IF NOT EXISTS llm_response_cache_key ON TABLE llm_response_cache COLUMNS key UNIQUE;",
     "DEFINE INDEX IF NOT EXISTS job_status ON TABLE batch_job COLUMNS status;",
     "DEFINE INDEX IF NOT EXISTS chunk_batch_id ON TABLE file_chunk COLUMNS batch_id;",
     "DEFINE INDEX IF NOT EXISTS chunk_batch_status ON TABLE file_chunk COLUMNS batch_status;",
@@ -551,6 +563,28 @@ mod tests {
             s.contains("embedding_cache_key")
                 && s.contains("UNIQUE")
                 && s.contains("embedding_cache")
+        }));
+    }
+
+    /// D12: the response-cache table and its UNIQUE key index are declared
+    /// together (schema and store adapter drift would silently disable hits).
+    #[test]
+    fn llm_response_cache_table_and_key_index() {
+        assert!(INIT_STATEMENTS.iter().any(|s| {
+            s.contains("DEFINE TABLE IF NOT EXISTS llm_response_cache") && s.contains("SCHEMAFULL")
+        }));
+        for field in ["key", "response", "finish_reason", "created_at"] {
+            assert!(
+                INIT_STATEMENTS.iter().any(|s| s.contains(&format!(
+                    "DEFINE FIELD IF NOT EXISTS {field} ON TABLE llm_response_cache"
+                ))),
+                "missing llm_response_cache field {field}"
+            );
+        }
+        assert!(INIT_STATEMENTS.iter().any(|s| {
+            s.contains("llm_response_cache_key")
+                && s.contains("UNIQUE")
+                && s.contains("llm_response_cache")
         }));
     }
 }

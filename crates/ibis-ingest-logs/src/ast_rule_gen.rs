@@ -211,9 +211,23 @@ impl LogAnalyzer {
             role: String::new(),
             parts: vec![ibis_ai::types::Part { text: prompt }],
         }];
+        // D12: the rule set is the invalidation context — a cached proposal
+        // can never outlive the `rules/` directory it was produced against.
+        let rules_ctx = {
+            let root = find_sg_config_dir();
+            if root.is_empty() {
+                "none".to_string()
+            } else {
+                ibis_ai::rules_fingerprint(&std::path::Path::new(&root).join("rules"))
+            }
+        };
         let cfg = ibis_ai::types::GenerationConfig {
             temperature: 0.1,
             route_hint: AST_RULE_ROUTE_HINT.to_string(),
+            response_cache: Some(ibis_ai::types::ResponseCacheSpec::new(
+                ibis_ai::types::ResponseCacheCallSite::AstRuleGen,
+                rules_ctx,
+            )),
             ..Default::default()
         };
         let candidate = ai.generate_content(&contents, cfg).await?;

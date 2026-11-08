@@ -226,6 +226,29 @@ impl Default for DecideConfig {
     }
 }
 
+/// D12 — tiered LLM response cache (`ai.response_cache`). v1 is the
+/// exact-match tier only: byte-identical prompt + routing identity +
+/// invalidation context. Opt-in, best-effort (a missing DB store or a lookup
+/// failure degrades to the live provider), never applied to `ask_project`
+/// (call sites opt in by setting `GenerationConfig::response_cache`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ResponseCacheConfig {
+    /// Master switch. Off by default, like the B6 embedding disk cache.
+    pub enabled: bool,
+    /// TTL seconds for the boot-time prune (default 7 days).
+    pub ttl_secs: u64,
+}
+
+impl Default for ResponseCacheConfig {
+    fn default() -> Self {
+        ResponseCacheConfig {
+            enabled: false,
+            ttl_secs: 7 * 24 * 60 * 60,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct AIConfig {
@@ -233,6 +256,7 @@ pub struct AIConfig {
     pub reasoning: ReasoningConfig,
     pub consolidation: ConsolidationConfig,
     pub decide: DecideConfig,
+    pub response_cache: ResponseCacheConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -670,6 +694,7 @@ impl Default for Config {
                 },
                 consolidation: ConsolidationConfig::default(),
                 decide: DecideConfig::default(),
+                response_cache: ResponseCacheConfig::default(),
             },
             gemini_default_rpm: 100,
             redmine_concurrency: 10,
@@ -1440,6 +1465,32 @@ mod tests {
         let cfg: Config =
             serde_json::from_str(r#"{"ai": {"consolidation": {"enabled": true}}}"#).unwrap();
         assert!(cfg.ai.decide.shadow);
+    }
+
+    /// `ai.response_cache` (D12): opt-in, 7-day TTL, overlays like the rest
+    /// of the `ai` object.
+    #[test]
+    fn ai_response_cache_config() {
+        let dflt = default_config();
+        assert!(!dflt.ai.response_cache.enabled);
+        assert_eq!(dflt.ai.response_cache.ttl_secs, 7 * 24 * 60 * 60);
+
+        let cfg: Config = serde_json::from_str(
+            r#"{"ai": {"response_cache": {"enabled": true, "ttl_secs": 3600}}}"#,
+        )
+        .unwrap();
+        assert!(cfg.ai.response_cache.enabled);
+        assert_eq!(cfg.ai.response_cache.ttl_secs, 3600);
+
+        // Partial object: the missing key keeps its default.
+        let cfg: Config =
+            serde_json::from_str(r#"{"ai": {"response_cache": {"enabled": true}}}"#).unwrap();
+        assert!(cfg.ai.response_cache.enabled);
+        assert_eq!(cfg.ai.response_cache.ttl_secs, 7 * 24 * 60 * 60);
+
+        // Missing section under a present `ai` → cache stays off.
+        let cfg: Config = serde_json::from_str(r#"{"ai": {"decide": {"shadow": false}}}"#).unwrap();
+        assert!(!cfg.ai.response_cache.enabled);
     }
 
     #[test]

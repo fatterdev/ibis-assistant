@@ -94,6 +94,8 @@ impl SearchService {
                         temperature: 0.2,
                         max_output_tokens: 2000,
                         route_hint: AGENTIC_ROUTE_HINT.to_string(),
+                        // D12: agentic ask is never response-cached.
+                        ..Default::default()
                     },
                 )
                 .await

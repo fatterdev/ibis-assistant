@@ -23,6 +23,7 @@ pub mod mcp_sampling;
 pub mod ollama;
 pub mod ollama_chat;
 pub mod openai_compat;
+pub mod response_cache;
 pub mod router;
 pub mod runner;
 pub mod traits;
@@ -57,6 +58,9 @@ pub use mcp_sampling::{
 pub use ollama::OllamaProvider;
 pub use ollama_chat::OllamaChatProvider;
 pub use openai_compat::OpenAICompatProvider;
+pub use response_cache::{
+    response_cache_key, rules_fingerprint, CachedGenerate, CachedResponse, ResponseCacheStore,
+};
 pub use router::{LocalTier, ReasoningRouter, RouterConfig};
 pub use runner::{
     ensure_ollama, ensure_ollama_binary, find_ollama_exec, start_ollama_daemon,
@@ -65,7 +69,7 @@ pub use runner::{
 pub use traits::AIProvider;
 pub use types::{
     estimate_tokens, usage_id_for_key, BatchJobStatus, Candidate, Content, GenerationConfig,
-    KeyConfig, Part, UsageMetadata,
+    KeyConfig, Part, ResponseCacheCallSite, ResponseCacheSpec, UsageMetadata,
 };
 
 #[cfg(test)]

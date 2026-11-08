@@ -42,6 +42,54 @@ impl Content {
     }
 }
 
+/// D12 — the only call sites allowed to use the exact-match response cache.
+///
+/// `ask_project` and the agentic loop are deliberately absent: the type system
+/// makes it impossible to opt them in (the plan forbids caching them in every
+/// tier, including a future semantic layer).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ResponseCacheCallSite {
+    LogAnalyze,
+    RuleSynth,
+    AstRuleGen,
+}
+
+impl ResponseCacheCallSite {
+    /// Stable key component.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ResponseCacheCallSite::LogAnalyze => "log_analyze",
+            ResponseCacheCallSite::RuleSynth => "rule_synth",
+            ResponseCacheCallSite::AstRuleGen => "ast_rule_gen",
+        }
+    }
+}
+
+/// D12 — exact-match response-cache directive attached to one call.
+///
+/// Call sites opt in by setting [`GenerationConfig::response_cache`]; every
+/// other call (including `ask_project`/agentic) leaves it `None` and is never
+/// cached. The directive is local routing metadata: it is skipped on the
+/// wire (`#[serde(skip)]` on the field), so provider payloads are unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResponseCacheSpec {
+    /// One of the three deterministic call sites.
+    pub call_site: ResponseCacheCallSite,
+    /// Invalidation context folded into the prompt hash: the code-index HEAD
+    /// oid for the log analyzer, the `rules/` fingerprint for the rule
+    /// synthesizers. Empty = no extra context dimension.
+    pub context: String,
+}
+
+impl ResponseCacheSpec {
+    pub fn new(call_site: ResponseCacheCallSite, context: impl Into<String>) -> Self {
+        ResponseCacheSpec {
+            call_site,
+            context: context.into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct GenerationConfig {
     #[serde(default, skip_serializing_if = "is_zero_f64")]
@@ -61,6 +109,10 @@ pub struct GenerationConfig {
         skip_serializing_if = "String::is_empty"
     )]
     pub route_hint: String,
+    /// D12 exact-match response cache: `None` = never cached (default).
+    /// `#[serde(skip)]` keeps the directive out of the provider wire contract.
+    #[serde(skip)]
+    pub response_cache: Option<ResponseCacheSpec>,
 }
 
 fn is_zero_f64(v: &f64) -> bool {
@@ -177,6 +229,7 @@ mod tests {
             temperature: 0.7,
             max_output_tokens: 100,
             route_hint: "quality".into(),
+            ..Default::default()
         };
         let json = serde_json::to_value(&cfg).unwrap();
         assert_eq!(json["temperature"], 0.7);
@@ -185,6 +238,23 @@ mod tests {
 
         let empty = serde_json::to_value(GenerationConfig::default()).unwrap();
         assert_eq!(empty, serde_json::json!({}));
+    }
+
+    /// D12: the response-cache directive is local metadata — it never enters
+    /// the provider wire payload, and decoding a wire config leaves it unset.
+    #[test]
+    fn response_cache_directive_is_local_only() {
+        let cfg = GenerationConfig {
+            response_cache: Some(ResponseCacheSpec::new(
+                ResponseCacheCallSite::LogAnalyze,
+                "head:abc123",
+            )),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(json, serde_json::json!({}));
+        let decoded: GenerationConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded.response_cache, None);
     }
 
     #[test]

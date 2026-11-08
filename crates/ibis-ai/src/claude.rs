@@ -108,6 +108,10 @@ impl AIProvider for ClaudeProvider {
         "claude"
     }
 
+    fn model(&self) -> Option<&str> {
+        Some(&self.model)
+    }
+
     async fn is_functional(&self) -> bool {
         !self.api_key.trim().is_empty()
     }

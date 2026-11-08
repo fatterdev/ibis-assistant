@@ -349,6 +349,34 @@ async fn ollama_provider_with_disk_cache(
     provider.with_disk_cache(store, dim)
 }
 
+/// D12: wraps the assembled reasoning stack in the exact-match response
+/// cache when `ai.response_cache.enabled` is on and a DB executor exists.
+/// The wrapper is inert for calls that do not carry a `ResponseCacheSpec`
+/// (ask/agentic), and a missing DB or a failing store degrades to the live
+/// provider. Boot-time prune drops rows older than the configured TTL.
+async fn reasoning_with_response_cache(
+    cfg: &Config,
+    db: Option<Arc<dyn Executor>>,
+    reasoning: Option<Arc<dyn AIProvider>>,
+) -> Option<Arc<dyn AIProvider>> {
+    if !cfg.ai.response_cache.enabled {
+        return reasoning;
+    }
+    let reasoning = reasoning?;
+    let Some(exec) = db else {
+        tracing::info!("Response cache on but no DB executor; L2 cache disabled");
+        return Some(reasoning);
+    };
+    let store = Arc::new(crate::assembly::DbResponseCacheStore::new(exec));
+    let ttl = cfg.ai.response_cache.ttl_secs;
+    let pruned = ibis_ai::ResponseCacheStore::prune(store.as_ref(), ttl).await;
+    tracing::info!(
+        "Response cache: L2 enabled (exact-match tier); boot prune dropped {pruned} rows older than {ttl}s"
+    );
+    let store: Arc<dyn ibis_ai::ResponseCacheStore> = store;
+    Some(Arc::new(ibis_ai::CachedGenerate::new(reasoning, store)) as Arc<dyn AIProvider>)
+}
+
 /// Builds the AI client from config (parity with the original provider switches).
 /// `sampling` is the F0.5 MCP-sampling seam (`SamplingSessionRegistry`): the
 /// `ide_sampling`/`mcp_sampling` reasoning provider sends
@@ -618,6 +646,9 @@ pub async fn assemble_ai(
         ),
         _ => reasoning,
     };
+    // D12: outermost decorator — caches only calls that carry a
+    // `ResponseCacheSpec`, everything else passes through untouched.
+    let reasoning = reasoning_with_response_cache(cfg, db.clone(), reasoning).await;
 
     let client = Arc::new(Client::new(embedding, reasoning, runner));
 

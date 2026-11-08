@@ -28,6 +28,24 @@ pub struct AiConfig {
     pub embedding: EmbeddingConfig,
     pub reasoning: ReasoningConfig,
     pub decide: DecideConfig,
+    pub response_cache: ResponseCacheConfig,
+}
+
+/// D12: exact-match response cache (`ai.response_cache`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ResponseCacheConfig {
+    pub enabled: bool,
+    pub ttl_secs: u64,
+}
+
+impl Default for ResponseCacheConfig {
+    fn default() -> Self {
+        ResponseCacheConfig {
+            enabled: false,
+            ttl_secs: 7 * 24 * 60 * 60,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -336,6 +354,18 @@ mod tests {
         assert!(cfg.decide.shadow);
         let cfg: AiConfig = serde_json::from_str(r#"{"decide":{"shadow":false}}"#).unwrap();
         assert!(!cfg.decide.shadow);
+    }
+
+    /// D12: the response cache is opt-in and the mirror carries the TTL.
+    #[test]
+    fn response_cache_defaults_off_and_overlays() {
+        let cfg: AiConfig = serde_json::from_str("{}").unwrap();
+        assert!(!cfg.response_cache.enabled);
+        assert_eq!(cfg.response_cache.ttl_secs, 7 * 24 * 60 * 60);
+        let cfg: AiConfig =
+            serde_json::from_str(r#"{"response_cache":{"enabled":true,"ttl_secs":60}}"#).unwrap();
+        assert!(cfg.response_cache.enabled);
+        assert_eq!(cfg.response_cache.ttl_secs, 60);
     }
 
     #[test]

@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use ibis_ai::cost::{CostStore, CostTracker};
-use ibis_ai::types::{Content, GenerationConfig, Part};
+use ibis_ai::types::{Content, GenerationConfig, Part, ResponseCacheCallSite, ResponseCacheSpec};
 use ibis_ai::Client;
 use ibis_db::executor::{vars, Executor};
 use ibis_db::ids::{format_record_id, sanitize_id};
@@ -608,6 +608,13 @@ impl LogAnalyzer {
         let cfg = GenerationConfig {
             temperature: 0.1,
             route_hint: ANALYZER_ROUTE_HINT.to_string(),
+            // D12: exact-match cache. The invalidation context is the
+            // resolved code baseline (the analysis depends on the indexed
+            // tree), and the prompt already carries the same baseline.
+            response_cache: Some(ResponseCacheSpec::new(
+                ResponseCacheCallSite::LogAnalyze,
+                format!("head:{}", baseline.commit),
+            )),
             ..Default::default()
         };
 
@@ -1672,6 +1679,62 @@ mod tests {
         assert!(
             !analyzer.known_patterns.lock().unwrap().is_empty(),
             "expected known pattern accumulated after first chunk"
+        );
+    }
+
+    /// D12 acceptance: the second identical analysis of the same log (same
+    /// baseline) is served from the exact-match cache — zero extra LLM calls.
+    #[tokio::test]
+    async fn response_cache_serves_repeated_analysis_without_ai() {
+        #[derive(Default)]
+        struct MemoryResponseStore(Mutex<HashMap<String, ibis_ai::CachedResponse>>);
+
+        #[async_trait::async_trait]
+        impl ibis_ai::ResponseCacheStore for MemoryResponseStore {
+            async fn get(&self, key: &str) -> Option<ibis_ai::CachedResponse> {
+                self.0.lock().unwrap().get(key).cloned()
+            }
+            async fn put(&self, key: &str, response: ibis_ai::CachedResponse) {
+                self.0.lock().unwrap().insert(key.to_string(), response);
+            }
+        }
+
+        let reply = r#"[{"category":"CACHE_TEST","stack_trace":"stack","file":"","line":0,"symbol":"","cause":"c","severity":5,"template":"UNRELATED_PATTERN <VAR>","supersedes":[]}]"#;
+        let calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let provider = std::sync::Arc::new(CountingAI {
+            calls: calls.clone(),
+            reply: reply.to_string(),
+        }) as std::sync::Arc<dyn ibis_ai::AIProvider>;
+        let store = std::sync::Arc::new(MemoryResponseStore::default());
+        let cached = std::sync::Arc::new(ibis_ai::CachedGenerate::new(provider, store.clone()));
+        let ai = std::sync::Arc::new(Client::new(Some(cached.clone()), Some(cached), None));
+
+        // Two independent analyzers model a re-run of the same log (fresh
+        // in-memory patterns) sharing the persistent cache: the second run
+        // must not reach the provider.
+        let mut first_analyzer = LogAnalyzer::bare("cache-test");
+        first_analyzer.ai = Some(ai.clone());
+        let mut second_analyzer = LogAnalyzer::bare("cache-test");
+        second_analyzer.ai = Some(ai);
+        let lines = vec!["ERROR boom id=1".to_string()];
+
+        let (first, err1) = first_analyzer.process_batch_sync(&lines).await;
+        assert!(err1.is_none(), "first analysis: {err1:?}");
+        assert_eq!(first.len(), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        let (second, err2) = second_analyzer.process_batch_sync(&lines).await;
+        assert!(err2.is_none(), "second analysis: {err2:?}");
+        assert_eq!(second, first);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "the second identical analysis must hit the cache"
+        );
+        assert_eq!(
+            store.0.lock().unwrap().len(),
+            1,
+            "exactly one cache row is written"
         );
     }
 

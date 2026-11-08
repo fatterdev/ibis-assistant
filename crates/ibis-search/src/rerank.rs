@@ -240,6 +240,8 @@ pub(crate) async fn rerank_hits(
                 temperature: RERANK_TEMPERATURE,
                 max_output_tokens: RERANK_MAX_OUTPUT_TOKENS,
                 route_hint: RERANK_ROUTE_HINT.to_string(),
+                // D12: rerank scores are per-query; never response-cached.
+                ..Default::default()
             },
         )
         .await

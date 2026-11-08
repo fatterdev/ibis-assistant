@@ -568,6 +568,103 @@ impl ibis_ai::EmbeddingCacheStore for DbEmbeddingCacheStore {
     }
 }
 
+/// D12: DB-backed exact-match LLM response cache over the executor. Record
+/// ids are the SHA-256 of the cache key — deterministic, so the UPSERT is
+/// idempotent under concurrency. Failures are logged at debug and swallowed:
+/// the seam is best-effort, the live provider stays the correctness path.
+pub struct DbResponseCacheStore {
+    exec: Arc<dyn Executor>,
+}
+
+#[derive(Debug, SurrealValue)]
+struct ResponseCacheRow {
+    response: Option<String>,
+    finish_reason: Option<String>,
+}
+
+impl DbResponseCacheStore {
+    pub fn new(exec: Arc<dyn Executor>) -> Self {
+        DbResponseCacheStore { exec }
+    }
+
+    /// Deterministic record id for a cache key:
+    /// `llm_response_cache:⟨sha256(key)⟩`.
+    fn record_id_for(&self, key: &str) -> String {
+        let sum = sha2::Sha256::digest(key.as_bytes());
+        let hash: String = sum.iter().map(|b| format!("{b:02x}")).collect();
+        format!("llm_response_cache:⟨{hash}⟩")
+    }
+}
+
+#[async_trait::async_trait]
+impl ibis_ai::ResponseCacheStore for DbResponseCacheStore {
+    async fn get(&self, key: &str) -> Option<ibis_ai::CachedResponse> {
+        let record_id = self.record_id_for(key);
+        let sql = format!("SELECT response, finish_reason FROM {record_id};");
+        let outcome = match self.exec.execute(&sql).await {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                tracing::debug!("response cache get failed (best-effort): {e}");
+                return None;
+            }
+        };
+        let rows = match ibis_db::value::decode_row_list::<ResponseCacheRow>(
+            outcome.first().unwrap_or(&Value::None),
+            &sql,
+        ) {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::debug!("response cache decode failed (best-effort): {e}");
+                return None;
+            }
+        };
+        let row = rows.first()?;
+        let text = row.response.clone().filter(|text| !text.is_empty())?;
+        Some(ibis_ai::CachedResponse {
+            text,
+            finish_reason: row.finish_reason.clone().unwrap_or_default(),
+        })
+    }
+
+    async fn put(&self, key: &str, response: ibis_ai::CachedResponse) {
+        let record_id = self.record_id_for(key);
+        let sql = format!(
+            "UPSERT {record_id} SET key = $key, response = $response, finish_reason = $finish_reason, created_at = time::now();"
+        );
+        let mut vars = Vars::new();
+        vars.insert("key".into(), Value::from_t(key));
+        vars.insert("response".into(), Value::from_t(response.text));
+        vars.insert(
+            "finish_reason".into(),
+            Value::from_t(response.finish_reason),
+        );
+        if let Err(e) = self.exec.smart_query(&sql, vars).await {
+            tracing::debug!("response cache put failed (best-effort): {e}");
+        }
+    }
+
+    async fn prune(&self, ttl_secs: u64) -> usize {
+        // 4.0 semantics (live-probed on B6): `RETURN BEFORE` restores the
+        // deleted-row list; `RETURN AFTER` yields NONE.
+        let sql = format!(
+            "DELETE llm_response_cache WHERE created_at < time::now() - {ttl_secs}s RETURN BEFORE;"
+        );
+        let outcome = match self.exec.execute(&sql).await {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                tracing::debug!("response cache prune failed (best-effort): {e}");
+                return 0;
+            }
+        };
+        ibis_db::value::decode_row_list::<ResponseCacheRow>(
+            outcome.first().unwrap_or(&Value::None),
+            &sql,
+        )
+        .map(|rows| rows.len())
+        .unwrap_or(0)
+    }
+}
+
 /// DB-backed chunk store for the batch manager (lane-C trait adapter over
 /// the executor; bound variables + UPSERT per D17/F-002).
 pub struct DbChunkStore(pub Arc<dyn Executor>);

@@ -4,6 +4,38 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(ai): exact-match response cache with invalidation context (D12
+  ddofds)** - new `ibis_ai::response_cache` seam: `ResponseCacheStore`
+  (`get`/`put`/`prune`, best-effort like B6), a `CachedGenerate` provider
+  decorator and the key `{call_site}:{model}:{sha256(context, full_prompt)}`
+  (length-prefixed role/part fingerprint). v1 ships the exact-match tier only;
+  the semantic tier stays out by design. Call sites opt in with
+  `GenerationConfig::response_cache` (a `ResponseCacheSpec` that is
+  `#[serde(skip)]`, so provider wire payloads are unchanged); every other call
+  — `ask_project`/agentic, rerank, consolidation — stays a transparent
+  pass-through. `AIProvider::cache_identity` supplies the model component and
+  composite providers fingerprint their routing (tier models + cloud order for
+  the hybrid router, ordered steps for the fallback chain and cloud pool), so a
+  model switch cannot read a response cached under a different configuration.
+  The three deterministic call sites opt in: semantic log analysis
+  (`log_analyze`, context = resolved code-index HEAD), ingest rule synthesis
+  (`rule_synth`) and ast-grep rule generation (`ast_rule_gen`) — the latter two
+  with a SHA-256 fingerprint of the sorted `rules/*.yml` directory, so a cached
+  proposal can never outlive the rule set it was produced against. Schema:
+  `llm_response_cache` (`key` UNIQUE, `response`, `finish_reason`,
+  `created_at`) + `ibis-server::assembly::DbResponseCacheStore` (record id =
+  SHA-256 of the key, idempotent UPSERT, `RETURN BEFORE` prune) wired at
+  assembly as the outermost reasoning decorator. Config `ai.response_cache`
+  (`enabled` default **false**, `ttl_secs` default 7d, boot-time prune; no DB
+  or disabled → transparent). A hit returns no usage metadata, so it bills zero
+  tokens; provider errors and empty responses are never cached. Tests: ibis-ai
+  172/172 (7 response-cache, router/cloud identity, local-only directive,
+  config mirror), ibis-core
+  56/56 (`ai.response_cache`), ibis-db 30/30 (table + UNIQUE), ibis-ingest-logs
+  66/66 (end-to-end second analysis = 1 provider call), ibis-server live
+  roundtrip/miss/empty/prune/UNIQUE green on the pinned 4.0.0 sidecar; workspace
+  `cargo test` green, clippy `-D warnings` green.
+
 - **feat(ai): bounded decisions with shadow-mode calibration (D11 ddofds)** -
   new `ibis_ai::decide` primitive: a single-turn typed question set
   (`DecideQuestion`: `Noul` | `Choice`) over a state returns
