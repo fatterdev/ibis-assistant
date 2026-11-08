@@ -10,7 +10,9 @@
 
 use std::sync::Arc;
 
-use ibis_ai::AIProvider;
+use async_trait::async_trait;
+use ibis_ai::types::{Candidate, Content, GenerationConfig};
+use ibis_ai::{AIProvider, AiError};
 use ibis_db::executor::{Executor, SurrealDbExecutor};
 use ibis_optimization::eval::{
     build_report, load_dataset, seed_golden_estate, OfflineEmbedder, RetrievalEvalRunner,
@@ -20,6 +22,9 @@ use ibis_search::SearchService;
 const DEFAULT_SURREAL_URL: &str = "ws://127.0.0.1:38000";
 const DEFAULT_OLLAMA_URL: &str = "http://127.0.0.1:11434";
 const DEFAULT_EMBEDDING_MODEL: &str = "nomic-embed-text";
+/// Local scoring model for `--rerank local` (tier-M class, the L1/L3 pick
+/// for judging; `--rerank-model` overrides).
+const DEFAULT_RERANK_MODEL: &str = "qwen2.5-coder:7b";
 
 pub struct EvalParams {
     dataset: String,
@@ -35,6 +40,10 @@ pub struct EvalParams {
     fusion: String,
     /// Query expansion under test (off|symbol_variant — A4).
     query_expansion: String,
+    /// Reranker under test (off|local — A3).
+    rerank: String,
+    /// Local chat model serving the reranker when `--rerank local`.
+    rerank_model: String,
     /// RRF smoothing constant k (A2 default 60; the eval sweeps it).
     rrf_k: f64,
     seed: bool,
@@ -61,6 +70,8 @@ fn parse_args(args: &[String]) -> Result<EvalParams, String> {
         ollama_url: DEFAULT_OLLAMA_URL.to_string(),
         fusion: "additive".to_string(),
         query_expansion: "symbol_variant".to_string(),
+        rerank: "off".to_string(),
+        rerank_model: DEFAULT_RERANK_MODEL.to_string(),
         rrf_k: 60.0,
         seed: true,
         out: None,
@@ -109,6 +120,14 @@ fn parse_args(args: &[String]) -> Result<EvalParams, String> {
                 }
                 params.query_expansion = v;
             }
+            "--rerank" => {
+                let v = value(&mut i, "--rerank")?;
+                if !matches!(v.as_str(), "off" | "local") {
+                    return Err("--rerank must be off|local".to_string());
+                }
+                params.rerank = v;
+            }
+            "--rerank-model" => params.rerank_model = value(&mut i, "--rerank-model")?,
             "--rrf-k" => {
                 params.rrf_k = value(&mut i, "--rrf-k")?
                     .trim()
@@ -148,17 +167,56 @@ fn run_eval(args: &[String]) -> Result<i32, String> {
     runtime.block_on(run_async(params))
 }
 
+/// A3 eval seam: the plain `OllamaProvider` only embeds, the reranker needs
+/// a generation half too — the eval composes the embedding provider with the
+/// local chat model serving the scoring pass. Embeddings keep the queue/cache
+/// semantics of the embedder; generation is a straight delegation.
+struct EmbedOllamaGenerateChat {
+    embedder: ibis_ai::OllamaProvider,
+    generator: ibis_ai::OllamaChatProvider,
+}
+
+#[async_trait]
+impl AIProvider for EmbedOllamaGenerateChat {
+    fn name(&self) -> &str {
+        "ollama_embed+ollama_chat"
+    }
+
+    async fn is_functional(&self) -> bool {
+        self.embedder.is_functional().await && self.generator.is_functional().await
+    }
+
+    async fn embed_text(&self, text: &str) -> Result<Vec<f32>, AiError> {
+        self.embedder.embed_text(text).await
+    }
+
+    async fn generate_content(
+        &self,
+        contents: &[Content],
+        config: GenerationConfig,
+    ) -> Result<Candidate, AiError> {
+        self.generator.generate_content(contents, config).await
+    }
+}
+
 async fn run_async(p: EvalParams) -> Result<i32, String> {
-    let ai: Arc<dyn AIProvider> = match p.embedder.as_str() {
+    let mut ollama_live = false;
+    let embedder: Arc<dyn AIProvider> = match p.embedder.as_str() {
         "offline" => Arc::new(OfflineEmbedder),
-        "ollama" => Arc::new(ibis_ai::OllamaProvider::new(
-            DEFAULT_EMBEDDING_MODEL,
-            &p.ollama_url,
-        )),
+        "ollama" => {
+            ollama_live = true;
+            Arc::new(ibis_ai::OllamaProvider::new(
+                DEFAULT_EMBEDDING_MODEL,
+                &p.ollama_url,
+            ))
+        }
         _ => {
             let probe = ibis_ai::OllamaProvider::new(DEFAULT_EMBEDDING_MODEL, &p.ollama_url);
             match probe.embed_text("ibis eval probe").await {
-                Ok(_) => Arc::new(probe),
+                Ok(_) => {
+                    ollama_live = true;
+                    Arc::new(probe)
+                }
                 Err(e) => {
                     eprintln!(
                         "eval: ollama probe failed ({e}); falling back to the offline embedder"
@@ -167,6 +225,25 @@ async fn run_async(p: EvalParams) -> Result<i32, String> {
                 }
             }
         }
+    };
+
+    // A3: with `--rerank local` the reranker scores via a local chat model —
+    // compose it under the SAME provider the service sees. A non-generating
+    // embedder (offline fallback) fail-opens per ask with a warn; flag it so
+    // the run is not mistaken for a measured rerank.
+    let ai: Arc<dyn AIProvider> = if p.rerank == "local" && ollama_live {
+        Arc::new(EmbedOllamaGenerateChat {
+            embedder: ibis_ai::OllamaProvider::new(DEFAULT_EMBEDDING_MODEL, &p.ollama_url),
+            generator: ibis_ai::OllamaChatProvider::new(&p.rerank_model, &p.ollama_url),
+        })
+    } else if p.rerank == "local" {
+        eprintln!(
+            "eval: --rerank local needs the ollama embedder for the scoring pass; \
+             the offline embedder fail-opens (order stays fused)"
+        );
+        embedder
+    } else {
+        embedder
     };
 
     let db: Arc<dyn Executor> = Arc::new(
@@ -189,6 +266,7 @@ async fn run_async(p: EvalParams) -> Result<i32, String> {
     service.rrf_k = p.rrf_k;
     service.query_expansion =
         ibis_search::retrieval_boost::QueryExpansionMode::resolve(&p.query_expansion);
+    service.rerank_mode = ibis_search::rerank::RerankMode::resolve(&p.rerank);
     let service = Arc::new(service);
     let runner = RetrievalEvalRunner::new(service);
     let cases = runner.run(&dataset).await;
@@ -198,6 +276,7 @@ async fn run_async(p: EvalParams) -> Result<i32, String> {
         ai.name(),
         &p.fusion,
         &p.query_expansion,
+        &p.rerank,
         seeded,
         cases,
     );
@@ -283,10 +362,30 @@ mod tests {
         assert_eq!(p.ns, "ibis_eval");
         assert_eq!(p.fusion, "rrf");
 
+        let rerank_p = parse_args(&args(&[
+            "retrieval",
+            "--dataset",
+            "d.yaml",
+            "--rerank",
+            "local",
+            "--rerank-model",
+            "gemma4:12b",
+        ]))
+        .expect("parse");
+        assert_eq!(rerank_p.rerank, "local");
+        assert_eq!(rerank_p.rerank_model, "gemma4:12b");
+        assert_eq!(
+            parse_args(&args(&["retrieval", "--dataset", "d.yaml"]))
+                .unwrap()
+                .rerank,
+            "off"
+        );
+
         assert!(parse_args(&args(&["retrieval", "--embedder", "bogus"])).is_err());
         assert!(parse_args(&args(&["retrieval", "--min-recall-5", "abc"])).is_err());
         assert!(parse_args(&args(&["retrieval", "--url"])).is_err());
         assert!(parse_args(&args(&["retrieval", "--fusion", "bogus"])).is_err());
+        assert!(parse_args(&args(&["retrieval", "--rerank", "bogus"])).is_err());
         assert!(parse_args(&args(&["retrieval", "--wat"])).is_err());
     }
 }

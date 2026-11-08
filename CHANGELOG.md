@@ -37,6 +37,30 @@ All notable changes to Ibis Assistant are documented here.
   tier rounding rules": 13 vs 33 tokens = primary 13 + variant 20 with
   `pricecalculatorservice` appended). Tests: ibis-search 86/86 (fuzzy
   ranking/merge, at-ref double pass + off mode), live_memory_estate 12/12.
+- **feat(search): optional post-fusion reranker (A3 ddofds)** -
+  `search.rerank = "off" | "local"` (default `off`): after the
+  multi-signal boost, the top `min(board, 30, search.candidates)` hits get
+  one local-first scoring call (`bulk_local` hint, temp 0.0, ~512 output
+  tokens, ~300-rune excerpts, byte-stable instructions → context → query
+  last) returning a JSON `[{index, score}]` array (tolerant parse:
+  markdown fences, truncated arrays salvaged per object, out-of-range
+  indexes dropped, duplicate indexes first-wins, scores clamped 0..1).
+  The fused score becomes `base_norm*0.4 + llm*0.6` (a blend, not a
+  replacement; unscored hits keep their pre-rerank order on the shared
+  normalized scale, ties break by id) and the turn is billed on
+  `system:search_rerank`. Fail-open: a small board (≤5 hits), a
+  non-functional provider, an AI error (`ContextOnly` included) or an
+  unparsable response keep the fused order with a warn; the at-ref path
+  never reranks in v1 (claim_file floor). Eval harness:
+  `ibis eval retrieval --rerank off|local [--rerank-model <model>]` plus a
+  `rerank` field in the JSON report; with the ollama embedder the local
+  chat model serves the scoring pass. Evidence (08/11, SurrealDB 4.0.0,
+  21-case golden set): offline off/on parity 0.952/0.976/1.0 (21/21,
+  identical per-case ranks — fail-open verified); ollama with
+  `granite4.1:3b` as judge MRR 0.929 / recall@5 0.976 vs 0.952/1.0 off
+  (one case rank 1→2) — no gain on the saturated set with a 3B judge, so
+  the default stays `off`. Tests: ibis-search 107/107, ibis-core 53/53,
+  ibis-server 61/61.
 
 - **feat(optimization): duplicate-lookup threshold + deterministic title
   match (C9)** — ddofds fase 1: consolidation duplicate candidates scoring

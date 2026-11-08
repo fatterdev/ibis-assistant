@@ -63,6 +63,11 @@ pub struct SearchConfig {
     /// Unknown values resolve to symbol_variant with a warning.
     #[serde(rename = "query_expansion")]
     pub query_expansion: String,
+    /// Post-fusion reranker (A3): `off` (default) | `local` (one local-first
+    /// scoring pass over the top candidate-window hits, `bulk_local` hint).
+    /// Unknown values resolve to off with a warning.
+    #[serde(rename = "rerank")]
+    pub rerank: String,
 }
 
 impl Default for SearchConfig {
@@ -71,6 +76,7 @@ impl Default for SearchConfig {
             fusion: "additive".to_string(),
             candidates: 50,
             query_expansion: "symbol_variant".to_string(),
+            rerank: "off".to_string(),
         }
     }
 }
@@ -1329,6 +1335,17 @@ mod tests {
         assert_eq!(default_config().search.query_expansion, "symbol_variant");
         let empty: Config = serde_json::from_str(r#"{"search": {}}"#).unwrap();
         assert_eq!(empty.search.query_expansion, "symbol_variant");
+    }
+
+    /// A3: `search.rerank` defaults to `off` (activation guided by the A1
+    /// eval numbers) and accepts `local`.
+    #[test]
+    fn search_rerank_config() {
+        let cfg: Config = serde_json::from_str(r#"{"search": {"rerank": "local"}}"#).unwrap();
+        assert_eq!(cfg.search.rerank, "local");
+        assert_eq!(default_config().search.rerank, "off");
+        let empty: Config = serde_json::from_str(r#"{"search": {}}"#).unwrap();
+        assert_eq!(empty.search.rerank, "off");
     }
 
     /// `ai.consolidation` (F4 §B.5): off by default, the file overlays the

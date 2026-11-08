@@ -198,6 +198,8 @@ pub struct EvalReport {
     pub fusion: String,
     /// Query expansion mode under test (`off` | `symbol_variant` — A4).
     pub query_expansion: String,
+    /// Reranker mode under test (`off` | `local` — A3).
+    pub rerank: String,
     /// RRF k under test (`Some` only for rrf runs — sweep provenance,
     /// remediation plan section 9).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -216,12 +218,14 @@ impl EvalReport {
 }
 
 /// Aggregates per-case results into a report (means over ok cases only).
+#[allow(clippy::too_many_arguments)]
 pub fn build_report(
     dataset: &str,
     version: &str,
     embedder: &str,
     fusion: &str,
     query_expansion: &str,
+    rerank: &str,
     seeded: bool,
     cases: Vec<CaseResult>,
 ) -> EvalReport {
@@ -249,6 +253,7 @@ pub fn build_report(
         embedder: embedder.to_string(),
         fusion: fusion.to_string(),
         query_expansion: query_expansion.to_string(),
+        rerank: rerank.to_string(),
         rrf_k: None,
         seeded,
         aggregate: EvalAggregate {
@@ -1219,6 +1224,7 @@ mod tests {
             "offline-hash-768",
             "additive",
             "symbol_variant",
+            "off",
             true,
             cases,
         );
@@ -1254,6 +1260,7 @@ mod tests {
             "offline-hash-768",
             "additive",
             "symbol_variant",
+            "off",
             false,
             all_error,
         );

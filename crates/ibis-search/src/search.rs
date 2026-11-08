@@ -22,6 +22,7 @@ use crate::commit_meaning;
 use crate::error::{Result, SearchError};
 use crate::graph::{self, CommitSummary, GraphContext, IssueSummary};
 use crate::memory::temporal::{ask_memory_visibility_sql, memory_currentness_sql};
+use crate::rerank::{rerank_hits, RerankMode};
 use crate::retrieval_boost::{
     apply_multi_signal_boost, apply_rrf_boost, calibrate_lexical_score, expand_query,
     resolve_linked_symbols, rrf_fuse, rrf_max_score, tokenize_query, FusionMode,
@@ -140,6 +141,9 @@ pub struct SearchService {
     /// Query expansion mode (`search.query_expansion`: off|symbol_variant —
     /// A4; default symbol_variant, zero-cost when no linked symbols resolve).
     pub query_expansion: QueryExpansionMode,
+    /// Post-fusion reranker mode (`search.rerank`: off|local — A3; default
+    /// off, activation guided by the A1 eval numbers).
+    pub rerank_mode: RerankMode,
     /// Process-local TTL cache of ancestor sets (lazily created).
     pub(crate) ancestor_cache: std::sync::OnceLock<ibis_git::AncestorCache>,
 }
@@ -158,6 +162,7 @@ impl Default for SearchService {
             rrf_k: RRF_K,
             candidate_window: DEFAULT_CANDIDATE_WINDOW,
             query_expansion: QueryExpansionMode::default(),
+            rerank_mode: RerankMode::default(),
             ancestor_cache: std::sync::OnceLock::new(),
         }
     }
@@ -683,6 +688,14 @@ impl SearchService {
             }
             FusionMode::Rrf => apply_rrf_boost(&mut hits, &keywords, &entities, &linked_symbols),
         }
+        // A3 (post-fusion reranker): one optional local-first semantic
+        // scoring pass over the top candidate-window hits, before the final
+        // cut. Fail-open: any AI failure keeps the fused order (warn log);
+        // cost lands on `system:search_rerank`. Off by default.
+        if self.rerank_mode == RerankMode::Local {
+            let tracker = cost_tracker(self);
+            rerank_hits(&mut hits, query, ai, &tracker, self.candidate_window).await;
+        }
         let boosted: Vec<ChunkResult> = hits
             .iter()
             .filter_map(|hit| {
@@ -818,6 +831,7 @@ pub(crate) fn float32_to_f64(vec: &[f32]) -> Vec<f64> {
 mod tests {
     use super::*;
     use crate::test_support::{fake_ai, obj, rows_of, FakeAI, FakeDb};
+    use ibis_ai::types::{Candidate, Content, GenerationConfig, Part};
     use ibis_db::value::Value;
 
     fn service(db: Arc<FakeDb>, ai: Option<Arc<dyn ibis_ai::AIProvider>>) -> SearchService {
@@ -1483,5 +1497,175 @@ mod tests {
             results.iter().any(|r| r.id == "file_chunk:1"),
             "ask still returns the primary board"
         );
+    }
+
+    // --- A3: post-fusion reranker -------------------------------------------
+
+    /// Six one-channel file hits, fused scores descending (0.9..0.4): enough
+    /// rows to clear the rerank floor, one channel so base_norm math is
+    /// transparent.
+    fn rerank_board() -> Vec<Value> {
+        let ids = ["a", "b", "c", "d", "e", "f"];
+        let scores = [0.9f64, 0.8, 0.7, 0.6, 0.5, 0.4];
+        ids.iter()
+            .zip(scores)
+            .map(|(id, score)| {
+                obj(vec![
+                    ("id", Value::from_t(format!("file_chunk:{id}"))),
+                    ("path", Value::from_t(format!("/src/{id}.go"))),
+                    ("content", Value::from_t(format!("body of {id}"))),
+                    ("hash", Value::from_t("h1")),
+                    ("current_hash", Value::from_t("h1")),
+                    ("score", Value::from_t(score)),
+                ])
+            })
+            .collect()
+    }
+
+    /// A3 on: the judged relevance reorders the fused board (blend
+    /// `base_norm*0.4 + llm*0.6`) — the leader drops with score 0, the tail
+    /// rises with score 1.
+    #[tokio::test]
+    async fn ask_project_rerank_reorders_the_fused_board() {
+        let fake = Arc::new(FakeDb::new(vec![(
+            "FROM file_chunk WHERE embedding",
+            rows_of(rerank_board()),
+        )]));
+        let ai: Arc<dyn AIProvider> = FakeAI::with_generate(|_contents| {
+            Candidate {
+            content: Content {
+                role: "model".into(),
+                parts: vec![Part {
+                    text: r#"[{"index": 0, "score": 0.0}, {"index": 2, "score": 0.5}, {"index": 5, "score": 1.0}]"#
+                        .into(),
+                }],
+            },
+            finish_reason: "STOP".into(),
+            usage_metadata: None,
+        }
+        });
+        let mut svc = service(fake, Some(ai));
+        svc.rerank_mode = RerankMode::Local;
+        let results = svc
+            .ask_project(&ActorContext::LOCAL, "anything")
+            .await
+            .expect("ask_project");
+        let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
+        // base_norms (max 0.9): a 1.0, b .925, c .849, d .774, e .699, f .624.
+        // Scored: a→0.400 (llm 0), c→0.640 (llm .5), f→0.849 (llm 1).
+        // Unscored keep their base_norm: b .925, d .774, e .699.
+        assert_eq!(
+            ids,
+            vec![
+                "file_chunk:b",
+                "file_chunk:f",
+                "file_chunk:d",
+                "file_chunk:e",
+                "file_chunk:c",
+                "file_chunk:a",
+            ]
+        );
+    }
+
+    /// A3 fail-open integration: the scoring call fails, the ask keeps the
+    /// fused order and still succeeds.
+    #[tokio::test]
+    async fn ask_project_rerank_failure_keeps_fused_order() {
+        struct RerankFailsAI;
+        #[async_trait]
+        impl AIProvider for RerankFailsAI {
+            fn name(&self) -> &str {
+                "rerank-fails"
+            }
+            async fn is_functional(&self) -> bool {
+                true
+            }
+            async fn embed_text(
+                &self,
+                _text: &str,
+            ) -> std::result::Result<Vec<f32>, ibis_ai::AiError> {
+                Ok(vec![0.1, 0.2, 0.3])
+            }
+            async fn generate_content(
+                &self,
+                _contents: &[Content],
+                _config: GenerationConfig,
+            ) -> std::result::Result<Candidate, ibis_ai::AiError> {
+                Err(ibis_ai::AiError::other("judge down"))
+            }
+        }
+        let fake = Arc::new(FakeDb::new(vec![(
+            "FROM file_chunk WHERE embedding",
+            rows_of(rerank_board()),
+        )]));
+        let mut svc = service(fake, Some(Arc::new(RerankFailsAI)));
+        svc.rerank_mode = RerankMode::Local;
+        let results = svc
+            .ask_project(&ActorContext::LOCAL, "anything")
+            .await
+            .expect("ask survives the rerank failure");
+        let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "file_chunk:a",
+                "file_chunk:b",
+                "file_chunk:c",
+                "file_chunk:d",
+                "file_chunk:e",
+                "file_chunk:f",
+            ],
+            "fused order preserved"
+        );
+    }
+
+    /// A3 off (default): no scoring call, fused order intact.
+    #[tokio::test]
+    async fn ask_project_rerank_off_never_generates() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let generate_calls = Arc::new(AtomicUsize::new(0));
+        struct CountingAI {
+            calls: Arc<AtomicUsize>,
+        }
+        #[async_trait]
+        impl AIProvider for CountingAI {
+            fn name(&self) -> &str {
+                "counting"
+            }
+            async fn is_functional(&self) -> bool {
+                true
+            }
+            async fn embed_text(
+                &self,
+                _text: &str,
+            ) -> std::result::Result<Vec<f32>, ibis_ai::AiError> {
+                Ok(vec![0.1, 0.2, 0.3])
+            }
+            async fn generate_content(
+                &self,
+                _contents: &[Content],
+                _config: GenerationConfig,
+            ) -> std::result::Result<Candidate, ibis_ai::AiError> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Err(ibis_ai::AiError::other("should never be called"))
+            }
+        }
+        let fake = Arc::new(FakeDb::new(vec![(
+            "FROM file_chunk WHERE embedding",
+            rows_of(rerank_board()),
+        )]));
+        let svc = service(
+            fake,
+            Some(Arc::new(CountingAI {
+                calls: generate_calls.clone(),
+            })),
+        );
+        let results = svc
+            .ask_project(&ActorContext::LOCAL, "anything")
+            .await
+            .expect("ask_project");
+        assert_eq!(generate_calls.load(Ordering::SeqCst), 0, "no judge call");
+        let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids.first(), Some(&"file_chunk:a"));
     }
 }

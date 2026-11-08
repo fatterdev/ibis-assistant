@@ -18,6 +18,7 @@ pub mod commit_meaning;
 pub mod error;
 pub mod graph;
 pub mod memory;
+pub mod rerank;
 pub mod retrieval_boost;
 pub mod rows;
 pub mod search;

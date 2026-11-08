@@ -177,6 +177,7 @@ impl AppState {
             (cfg.search.candidates as usize).max(ibis_search::search::VECTOR_CHANNEL_LIMIT);
         service.query_expansion =
             ibis_search::retrieval_boost::QueryExpansionMode::resolve(&cfg.search.query_expansion);
+        service.rerank_mode = ibis_search::rerank::RerankMode::resolve(&cfg.search.rerank);
         *self.search.write().unwrap() = Arc::new(service);
     }
 
