@@ -193,12 +193,28 @@ impl SearchService {
         results
     }
 
-    /// Shared engine for AskProjectAtRef (precomputed vector) and the AsOfCode
-    /// MCP projection. The vector binds as `$vec` (F-002).
+    /// Single-vector wrapper (AsOfCode MCP projection): exact-path unchanged,
+    /// one semantic pass.
     pub(crate) async fn as_of_code_semantic(
         &self,
         query: &str,
         vec: &[f32],
+        repo_path: &str,
+        reference: &str,
+    ) -> Result<Vec<SearchResult>> {
+        self.as_of_code_semantic_multi(query, &[vec.to_vec()], repo_path, reference)
+            .await
+    }
+
+    /// Shared engine for AskProjectAtRef (A4: one pass per query embedding —
+    /// primary + optional symbol variant) and the AsOfCode MCP projection.
+    /// The exact-path branch runs once and is never expanded; the semantic
+    /// channel merges per row with `score = max(passes)`. The vector binds
+    /// as `$vec` (F-002).
+    pub(crate) async fn as_of_code_semantic_multi(
+        &self,
+        query: &str,
+        vecs: &[Vec<f32>],
         repo_path: &str,
         reference: &str,
     ) -> Result<Vec<SearchResult>> {
@@ -239,51 +255,62 @@ impl SearchService {
         let sql = format!(
             "SELECT id, file.path as path, content, hash, file.hash as current_hash, NONE as age_days, vector::similarity::cosine(embedding, $vec) as score FROM file_chunk WHERE embedding != NONE ORDER BY vector::distance::cosine(embedding, $vec) LIMIT {window};"
         );
-        let mut vars = ibis_db::executor::Vars::new();
-        vars.insert("vec".into(), crate::commit_meaning::vec_value(vec));
-        let outcome = db
-            .smart_query(&sql, vars)
-            .await
-            .map_err(|e| SearchError::other(format!("vector search failed on file_chunk: {e}")))?;
-        let rows_values = rows::normalize_rows(&outcome).unwrap_or_default();
-        let mut results = Vec::with_capacity(15);
-        for row in rows::object_rows(&rows_values) {
-            let path = rows::scalar_string(rows::field(row, "path"))
-                .trim()
-                .to_string();
-            if path.is_empty() {
-                continue;
-            }
-            if !tree_set.contains(path.as_str()) {
-                // Path does not exist at R: the HEAD embedding hit is dropped
-                // (the world-state spec).
-                continue;
-            }
-            let (content, found) = match self
-                .cached_file_at_ref(repo_path, ancestors.ref_oid(), &path)
-                .await
-            {
-                Ok((content, found)) => (content, found),
-                Err(_) => continue,
-            };
-            if !found {
-                continue;
-            }
-            results.push(SearchResult {
-                id: rows::record_id(rows::field(row, "id")),
-                path,
-                score: crate::search::apply_temporal_decay(
+        let mut results: Vec<SearchResult> = Vec::new();
+        let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for vec in vecs {
+            let mut vars = ibis_db::executor::Vars::new();
+            vars.insert("vec".into(), crate::commit_meaning::vec_value(vec));
+            let outcome = db.smart_query(&sql, vars).await.map_err(|e| {
+                SearchError::other(format!("vector search failed on file_chunk: {e}"))
+            })?;
+            let rows_values = rows::normalize_rows(&outcome).unwrap_or_default();
+            for row in rows::object_rows(&rows_values) {
+                let path = rows::scalar_string(rows::field(row, "path"))
+                    .trim()
+                    .to_string();
+                if path.is_empty() {
+                    continue;
+                }
+                if !tree_set.contains(path.as_str()) {
+                    // Path does not exist at R: the HEAD embedding hit is
+                    // dropped (the world-state spec).
+                    continue;
+                }
+                let id = rows::record_id(rows::field(row, "id"));
+                let score = crate::search::apply_temporal_decay(
                     rows::numeric_float(rows::field(row, "score")),
                     rows::numeric_float_opt(rows::field(row, "age_days")),
-                ),
-                is_current: false,
-                source_kind: "file_chunk".to_string(),
-                as_of_ref: ancestors.ref_oid().to_string(),
-                content_source: "git_show".to_string(),
-                content,
-                context: ContextData::default(),
-                ..Default::default()
-            });
+                );
+                if let Some(&i) = index.get(&id) {
+                    if score > results[i].score {
+                        results[i].score = score;
+                    }
+                    continue;
+                }
+                let (content, found) = match self
+                    .cached_file_at_ref(repo_path, ancestors.ref_oid(), &path)
+                    .await
+                {
+                    Ok((content, found)) => (content, found),
+                    Err(_) => continue,
+                };
+                if !found {
+                    continue;
+                }
+                index.insert(id.clone(), results.len());
+                results.push(SearchResult {
+                    id,
+                    path,
+                    score,
+                    is_current: false,
+                    source_kind: "file_chunk".to_string(),
+                    as_of_ref: ancestors.ref_oid().to_string(),
+                    content_source: "git_show".to_string(),
+                    content,
+                    context: ContextData::default(),
+                    ..Default::default()
+                });
+            }
         }
         Ok(results)
     }

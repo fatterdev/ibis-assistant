@@ -670,9 +670,10 @@ const GOLDEN_REASONING: &[GoldenReasoning] = &[GoldenReasoning {
 }];
 
 /// A4 (query expansion): one symbol row so the symbol-variant expansion fires
-/// on the mismatch case — `resolve_linked_symbols` matches the lowercase
-/// symbol name against the query entity tokens.
-const GOLDEN_SYMBOLS: &[(&str, &str)] = &[("g_sym_pricecalc", "PriceCalculator")];
+/// on the mismatch case — the fuzzy linker matches the lowercase symbol name
+/// against the query tokens ("price calculator" -> `PriceCalculatorService`),
+/// while the exact linker would miss it.
+const GOLDEN_SYMBOLS: &[(&str, &str)] = &[("g_sym_pricecalc", "PriceCalculatorService")];
 
 fn vars_of(pairs: Vec<(&str, Value)>) -> Vars {
     pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
@@ -1292,6 +1293,7 @@ mod tests {
             "CREATE memory:⟨g_mem_mathmax⟩",
             "CREATE commit_chunk:⟨g_cc_rrf⟩",
             "CREATE reasoning:⟨g_r_decay⟩",
+            "CREATE symbol:⟨g_sym_pricecalc⟩",
         ] {
             assert!(calls.iter().any(|c| c.contains(id)), "missing {id}");
         }

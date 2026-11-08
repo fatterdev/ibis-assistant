@@ -19,12 +19,24 @@ All notable changes to Ibis Assistant are documented here.
   Eval harness: `ibis eval retrieval --query-expansion off|symbol_variant`
   plus a `query_expansion` field in the JSON report; the golden estate
   seeds a `symbol` row and the dataset gains `r21_symbol_variant` (21
-  cases). Evidence (08/11, SurrealDB 4.0.0, offline and Ollama): off/on
-  parity - offline MRR 0.952 / recall@5 0.976, Ollama MRR 0.952 / recall@5
-  1.0, 21/21 ok; the live cost counter proves the variant fires (single
-  ask: 12 vs 30 tokens = primary 12 + variant 18). Caveats recorded in WQ-5:
-  symbol linking is exact-match today (a purely different wording does not
-  link), and `ask_project_at_ref` does not inherit the expansion yet.
+  cases).
+- **feat(search): A4 follow-up - fuzzy symbol linking + at-ref inheritance** -
+  symbol linking is no longer exact-match only: a bounded fuzzy pass
+  (lowercase-name containment; a symbol links when it covers at least two
+  query tokens or one token of >= 8 chars, deterministic coverage/length
+  ranking, fuzzy tail capped at 5) lets "price calculator" link
+  `PriceCalculatorService` while single short-token hits stay out; exact
+  matches come first and the merged list is capped at 20 for both the
+  entity-link boost and the expansion. `ask_project_at_ref` now inherits
+  the expansion on its semantic channels (claims, commit_chunk, reasoning,
+  code - one pass per embedding with `score = max(passes)`), while the
+  exact-path branch runs once and stays literal. Evidence (08/11,
+  SurrealDB 4.0.0, offline and Ollama): off/on parity - offline MRR 0.952 /
+  recall@5 0.976, Ollama MRR 0.952 / recall@5 1.0, 21/21 ok; the live cost
+  counter proves the fuzzy link fires (mismatch query "price calculator
+  tier rounding rules": 13 vs 33 tokens = primary 13 + variant 20 with
+  `pricecalculatorservice` appended). Tests: ibis-search 86/86 (fuzzy
+  ranking/merge, at-ref double pass + off mode), live_memory_estate 12/12.
 
 - **feat(optimization): duplicate-lookup threshold + deterministic title
   match (C9)** — ddofds fase 1: consolidation duplicate candidates scoring

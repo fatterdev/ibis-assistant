@@ -58,13 +58,14 @@ impl SearchService {
             .ai
             .as_ref()
             .ok_or_else(|| SearchError::Embedding("AI provider not configured".into()))?;
-        let vec = ai
-            .embed_text(query)
-            .await
-            .map_err(|e| SearchError::wrap("embedding failed", e))?;
-        crate::search::cost_tracker(self)
-            .record_embedding_usage("system:search_vector", query)
-            .await;
+        // A4: the at-ref ask inherits the symbol-variant expansion on its
+        // semantic channels (claims/commit_chunk/reasoning/code) and never on
+        // the exact-path branch. The shared helper keeps cost/fail-open
+        // semantics identical to `ask_project`.
+        let (_, entities) = crate::retrieval_boost::tokenize_query(query);
+        let linked_symbols =
+            crate::retrieval_boost::resolve_linked_symbols(self.db.as_ref(), &entities).await;
+        let vecs = self.query_embeddings(ai, query, &linked_symbols).await?;
 
         let window = self
             .candidate_window
@@ -73,13 +74,10 @@ impl SearchService {
         let mut results: Vec<SearchResult> = Vec::with_capacity(15);
 
         // Claims channel: HOLDAt wins over Oct status for historical refs.
+        // A4: one pass per embedding, max score per row.
         let (vis_sql, vis_bindings) = ask_memory_visibility_sql(&trusted_actor);
         let mut claims_where =
             format!("embedding != NONE AND introduced_in_oid != NONE AND {vis_sql}");
-        let mut claims_vars = ibis_db::executor::Vars::new();
-        for (k, v) in vis_bindings {
-            claims_vars.insert(k, v);
-        }
         let project = project_name.trim();
         if !project.is_empty() {
             claims_where.push_str(&format!(
@@ -90,49 +88,61 @@ impl SearchService {
         let sql = format!(
             "SELECT id, content, status, kind, visibility, owner, introduced_in_oid, invalidated_at_oid, duration::days(time::now() - created_at) as age_days, vector::similarity::cosine(embedding, $vec) as score FROM memory WHERE {claims_where} ORDER BY vector::distance::cosine(embedding, $vec) LIMIT {window};"
         );
-        claims_vars.insert("vec".into(), crate::commit_meaning::vec_value(&vec));
-        let outcome = db
-            .smart_query(&sql, claims_vars)
-            .await
-            .map_err(|e| SearchError::other(format!("vector search failed on memory: {e}")))?;
         let mut claim_rows: Vec<SearchResult> = Vec::new();
-        for row in rows::object_rows(&rows::normalize_rows(&outcome).unwrap_or_default()) {
-            let introduced_in = rows::scalar_string(rows::field(row, "introduced_in_oid"))
-                .trim()
-                .to_string();
-            let invalidated_at = rows::scalar_string(rows::field(row, "invalidated_at_oid"))
-                .trim()
-                .to_string();
-            if !ibis_git::hold_at(&introduced_in, &invalidated_at, Some(&ancestors)) {
-                continue;
+        let mut claim_index: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for vec in &vecs {
+            let mut claims_vars = ibis_db::executor::Vars::new();
+            for (k, v) in &vis_bindings {
+                claims_vars.insert(k.clone(), v.clone());
             }
-            // Defense in depth: personal claims never surface without their
-            // owner, even if the SQL visibility clause is bypassed
-            // (the world-state spec).
-            let visibility = rows::scalar_string(rows::field(row, "visibility"))
-                .trim()
-                .to_string();
-            let owner = rows::scalar_string(rows::field(row, "owner"))
-                .trim()
-                .to_string();
-            if visibility == "personal" && owner != trusted_actor {
-                continue;
+            claims_vars.insert("vec".into(), crate::commit_meaning::vec_value(vec));
+            let outcome = db
+                .smart_query(&sql, claims_vars)
+                .await
+                .map_err(|e| SearchError::other(format!("vector search failed on memory: {e}")))?;
+            for row in rows::object_rows(&rows::normalize_rows(&outcome).unwrap_or_default()) {
+                let introduced_in = rows::scalar_string(rows::field(row, "introduced_in_oid"))
+                    .trim()
+                    .to_string();
+                let invalidated_at = rows::scalar_string(rows::field(row, "invalidated_at_oid"))
+                    .trim()
+                    .to_string();
+                if !ibis_git::hold_at(&introduced_in, &invalidated_at, Some(&ancestors)) {
+                    continue;
+                }
+                // Defense in depth: personal claims never surface without
+                // their owner, even if the SQL visibility clause is bypassed
+                // (the world-state spec).
+                let visibility = rows::scalar_string(rows::field(row, "visibility"))
+                    .trim()
+                    .to_string();
+                let owner = rows::scalar_string(rows::field(row, "owner"))
+                    .trim()
+                    .to_string();
+                if visibility == "personal" && owner != trusted_actor {
+                    continue;
+                }
+                merge_result_max(
+                    &mut claim_rows,
+                    &mut claim_index,
+                    SearchResult {
+                        id: rows::record_id(rows::field(row, "id")),
+                        content: rows::scalar_string(rows::field(row, "content")),
+                        score: crate::search::apply_temporal_decay(
+                            row_score(rows::field(row, "score")),
+                            rows::numeric_float_opt(rows::field(row, "age_days")),
+                        ),
+                        is_current: false,
+                        source_kind: super::TABLE_MEMORY.to_string(),
+                        status: rows::scalar_string(rows::field(row, "status")),
+                        kind: rows::scalar_string(rows::field(row, "kind")),
+                        as_of_ref: ancestors.ref_oid().to_string(),
+                        context: ContextData::default(),
+                        ..Default::default()
+                    },
+                );
             }
-            claim_rows.push(SearchResult {
-                id: rows::record_id(rows::field(row, "id")),
-                content: rows::scalar_string(rows::field(row, "content")),
-                score: crate::search::apply_temporal_decay(
-                    row_score(rows::field(row, "score")),
-                    rows::numeric_float_opt(rows::field(row, "age_days")),
-                ),
-                is_current: false,
-                source_kind: super::TABLE_MEMORY.to_string(),
-                status: rows::scalar_string(rows::field(row, "status")),
-                kind: rows::scalar_string(rows::field(row, "kind")),
-                as_of_ref: ancestors.ref_oid().to_string(),
-                context: ContextData::default(),
-                ..Default::default()
-            });
         }
         claim_rows.sort_by(|a, b| {
             b.score
@@ -150,38 +160,47 @@ impl SearchService {
             .await?;
 
         // Δ commit_chunk channel: changelog hits reachable from R only.
+        // A4: one pass per embedding, max score per row.
         let sql = crate::commit_meaning::commit_chunk_ask_query(window);
-        let mut vars = ibis_db::executor::Vars::new();
-        vars.insert("vec".into(), crate::commit_meaning::vec_value(&vec));
-        let outcome = db.smart_query(&sql, vars).await.map_err(|e| {
-            SearchError::other(format!("vector search failed on commit_chunk: {e}"))
-        })?;
         let mut commit_rows: Vec<SearchResult> = Vec::new();
-        for row in rows::object_rows(&rows::normalize_rows(&outcome).unwrap_or_default()) {
-            let commit_hash = rows::scalar_string(rows::field(row, "commit_hash"))
-                .trim()
-                .to_string();
-            if !commit_hash.is_empty() && !ancestors.contains(&commit_hash) {
-                // Commits on divergent lines or after R are noise in an
-                // as_of ask.
-                continue;
+        let mut commit_index: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for vec in &vecs {
+            let mut vars = ibis_db::executor::Vars::new();
+            vars.insert("vec".into(), crate::commit_meaning::vec_value(vec));
+            let outcome = db.smart_query(&sql, vars).await.map_err(|e| {
+                SearchError::other(format!("vector search failed on commit_chunk: {e}"))
+            })?;
+            for row in rows::object_rows(&rows::normalize_rows(&outcome).unwrap_or_default()) {
+                let commit_hash = rows::scalar_string(rows::field(row, "commit_hash"))
+                    .trim()
+                    .to_string();
+                if !commit_hash.is_empty() && !ancestors.contains(&commit_hash) {
+                    // Commits on divergent lines or after R are noise in an
+                    // as_of ask.
+                    continue;
+                }
+                merge_result_max(
+                    &mut commit_rows,
+                    &mut commit_index,
+                    SearchResult {
+                        id: rows::record_id(rows::field(row, "id")),
+                        content: crate::commit_meaning::truncate_commit_meaning(
+                            &rows::scalar_string(rows::field(row, "content")),
+                        ),
+                        score: crate::search::apply_temporal_decay(
+                            row_score(rows::field(row, "score")),
+                            rows::numeric_float_opt(rows::field(row, "age_days")),
+                        ),
+                        is_current: false,
+                        source_kind: "commit_chunk".to_string(),
+                        commit_hash,
+                        as_of_ref: ancestors.ref_oid().to_string(),
+                        context: ContextData::default(),
+                        ..Default::default()
+                    },
+                );
             }
-            commit_rows.push(SearchResult {
-                id: rows::record_id(rows::field(row, "id")),
-                content: crate::commit_meaning::truncate_commit_meaning(&rows::scalar_string(
-                    rows::field(row, "content"),
-                )),
-                score: crate::search::apply_temporal_decay(
-                    row_score(rows::field(row, "score")),
-                    rows::numeric_float_opt(rows::field(row, "age_days")),
-                ),
-                is_current: false,
-                source_kind: "commit_chunk".to_string(),
-                commit_hash,
-                as_of_ref: ancestors.ref_oid().to_string(),
-                context: ContextData::default(),
-                ..Default::default()
-            });
         }
         commit_rows.sort_by(|a, b| {
             b.score
@@ -191,30 +210,38 @@ impl SearchService {
         results.extend(commit_rows);
 
         // Reasoning channel: HEAD-contract utility signal (not git-bound).
+        // A4: one pass per embedding, max score per row.
         let sql = format!(
             "SELECT id, NONE as path, string::concat(question OR '', '\n', outcome OR '') as content, NONE as hash, NONE as current_hash, NONE as age_days, vector::similarity::cosine(embedding, $vec) as score FROM reasoning WHERE embedding != NONE ORDER BY vector::distance::cosine(embedding, $vec) LIMIT {window};"
         );
-        let mut vars = ibis_db::executor::Vars::new();
-        vars.insert("vec".into(), crate::commit_meaning::vec_value(&vec));
-        let outcome = db
-            .smart_query(&sql, vars)
-            .await
-            .map_err(|e| SearchError::other(format!("vector search failed on reasoning: {e}")))?;
         let mut reasoning_rows: Vec<SearchResult> = Vec::new();
-        for row in rows::object_rows(&rows::normalize_rows(&outcome).unwrap_or_default()) {
-            reasoning_rows.push(SearchResult {
-                id: rows::record_id(rows::field(row, "id")),
-                content: rows::scalar_string(rows::field(row, "content")),
-                score: crate::search::apply_temporal_decay(
-                    row_score(rows::field(row, "score")),
-                    rows::numeric_float_opt(rows::field(row, "age_days")),
-                ),
-                is_current: true,
-                source_kind: "reasoning".to_string(),
-                as_of_ref: ancestors.ref_oid().to_string(),
-                context: ContextData::default(),
-                ..Default::default()
-            });
+        let mut reasoning_index: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for vec in &vecs {
+            let mut vars = ibis_db::executor::Vars::new();
+            vars.insert("vec".into(), crate::commit_meaning::vec_value(vec));
+            let outcome = db.smart_query(&sql, vars).await.map_err(|e| {
+                SearchError::other(format!("vector search failed on reasoning: {e}"))
+            })?;
+            for row in rows::object_rows(&rows::normalize_rows(&outcome).unwrap_or_default()) {
+                merge_result_max(
+                    &mut reasoning_rows,
+                    &mut reasoning_index,
+                    SearchResult {
+                        id: rows::record_id(rows::field(row, "id")),
+                        content: rows::scalar_string(rows::field(row, "content")),
+                        score: crate::search::apply_temporal_decay(
+                            row_score(rows::field(row, "score")),
+                            rows::numeric_float_opt(rows::field(row, "age_days")),
+                        ),
+                        is_current: true,
+                        source_kind: "reasoning".to_string(),
+                        as_of_ref: ancestors.ref_oid().to_string(),
+                        context: ContextData::default(),
+                        ..Default::default()
+                    },
+                );
+            }
         }
         reasoning_rows.sort_by(|a, b| {
             b.score
@@ -225,9 +252,10 @@ impl SearchService {
 
         // Code channel (phase 3d): honest hybrid — HEAD embeddings ∩ tree(R)
         // paths, bodies replaced by bytes at R via git show
-        // (the world-state spec).
+        // (the world-state spec). A4: semantic passes only; the exact-path
+        // branch runs once and is never expanded.
         let code_results = self
-            .as_of_code_semantic(query, &vec, repo_path, ancestors.ref_oid())
+            .as_of_code_semantic_multi(query, &vecs, repo_path, ancestors.ref_oid())
             .await?;
         results.extend(code_results);
 
@@ -300,5 +328,154 @@ impl SearchService {
             }
         }
         Ok(results)
+    }
+}
+
+/// A4: per-row max merge across embedding passes (one entry per id; a weaker
+/// pass never demotes, a variant-only row joins). Mirrors
+/// `search::merge_channel_pass` for `SearchResult`.
+fn merge_result_max(
+    rows: &mut Vec<SearchResult>,
+    index: &mut std::collections::HashMap<String, usize>,
+    incoming: SearchResult,
+) {
+    match index.get(&incoming.id) {
+        Some(&i) => {
+            if incoming.score > rows[i].score {
+                rows[i].score = incoming.score;
+            }
+        }
+        None => {
+            index.insert(incoming.id.clone(), rows.len());
+            rows.push(incoming);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{obj, rows_of, FakeAI, FakeAnchors, FakeDb};
+    use ibis_ai::AIProvider;
+    use ibis_db::value::Value;
+    use ibis_db::Executor;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    fn claim_row() -> Value {
+        obj(vec![
+            ("id", Value::from_t("memory:m1")),
+            ("content", Value::from_t("price calculator logic")),
+            ("status", Value::from_t("current")),
+            ("kind", Value::from_t("decision")),
+            ("visibility", Value::from_t("team")),
+            ("owner", Value::from_t("")),
+            ("introduced_in_oid", Value::from_t("c1")),
+            ("invalidated_at_oid", Value::None),
+            ("age_days", Value::from_t(0.0f64)),
+            ("score", Value::from_t(0.9f64)),
+        ])
+    }
+
+    fn fake_estate() -> Arc<FakeDb> {
+        Arc::new(FakeDb::new(vec![
+            ("FROM memory WHERE", rows_of(vec![claim_row()])),
+            ("IN $names", rows_of(vec![])),
+            (
+                "CONTAINS",
+                rows_of(vec![obj(vec![(
+                    "name",
+                    Value::from_t("PriceCalculatorService"),
+                )])]),
+            ),
+            ("FROM commit_chunk", rows_of(vec![])),
+            ("FROM reasoning", rows_of(vec![])),
+            ("FROM file_chunk", rows_of(vec![])),
+        ]))
+    }
+
+    fn service_with(fake: Arc<FakeDb>, embed_calls: Arc<AtomicUsize>) -> SearchService {
+        let ai: Arc<dyn AIProvider> = Arc::new(FakeAI {
+            embed: Some(Box::new(move |_text: &str| {
+                embed_calls.fetch_add(1, Ordering::SeqCst);
+                vec![0.1, 0.2, 0.3]
+            })),
+            generate: None,
+        });
+        let mut svc = SearchService::new(Some(fake as Arc<dyn Executor>), Some(ai));
+        let anchors = FakeAnchors::with_head("c1");
+        *anchors.ancestors.lock().unwrap() = [("c1".to_string(), vec!["c1".to_string()])]
+            .into_iter()
+            .collect();
+        svc.git_anchors = Some(anchors as Arc<dyn ibis_git::GitAnchorSource>);
+        svc
+    }
+
+    #[tokio::test]
+    async fn ask_ref_query_expansion_runs_second_semantic_pass() {
+        let fake = fake_estate();
+        let embed_calls = Arc::new(AtomicUsize::new(0));
+        let svc = service_with(fake.clone(), embed_calls.clone());
+        let results = svc
+            .ask_project_at_ref(
+                &ActorContext::LOCAL,
+                "price calculator rounding",
+                "proj",
+                "/repo",
+                "c1",
+                "",
+            )
+            .await
+            .expect("ask at ref");
+        assert_eq!(
+            embed_calls.load(Ordering::SeqCst),
+            2,
+            "fuzzy link resolves the symbol and embeds primary + variant"
+        );
+        let claims_passes = fake
+            .smart_calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|q| q.contains("FROM memory WHERE"))
+            .count();
+        assert_eq!(claims_passes, 2, "claims channel runs both passes");
+        assert!(
+            results.iter().any(|r| r.id == "memory:m1"),
+            "merged board keeps the claim"
+        );
+    }
+
+    #[tokio::test]
+    async fn ask_ref_query_expansion_off_keeps_single_pass() {
+        let fake = fake_estate();
+        let embed_calls = Arc::new(AtomicUsize::new(0));
+        let mut svc = service_with(fake.clone(), embed_calls.clone());
+        svc.query_expansion = crate::retrieval_boost::QueryExpansionMode::Off;
+        let results = svc
+            .ask_project_at_ref(
+                &ActorContext::LOCAL,
+                "price calculator rounding",
+                "proj",
+                "/repo",
+                "c1",
+                "",
+            )
+            .await
+            .expect("ask at ref");
+        assert_eq!(
+            embed_calls.load(Ordering::SeqCst),
+            1,
+            "off mode never embeds the variant"
+        );
+        let claims_passes = fake
+            .smart_calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|q| q.contains("FROM memory WHERE"))
+            .count();
+        assert_eq!(claims_passes, 1);
+        assert!(results.iter().any(|r| r.id == "memory:m1"));
     }
 }

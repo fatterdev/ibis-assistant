@@ -3,7 +3,7 @@
 
 use ibis_db::value::Value;
 use regex::Regex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use crate::rows;
@@ -392,23 +392,106 @@ pub(crate) fn combine_rrf_score(rrf_norm: f64, keyword: f64, entity: f64) -> f64
         + entity * ENTITY_BOOST_WEIGHT
 }
 
-/// Looks up symbol names matching query entity tokens (best-effort; entity
-/// tokens are bound as `$names`, F-002). Failures return an empty list so
-/// retrieval still works.
-pub(crate) async fn resolve_linked_symbols(
-    db: Option<&std::sync::Arc<dyn ibis_db::Executor>>,
+/// Cap on the merged exact+fuzzy linked-symbol list (A4 follow-up). Matches
+/// the expansion cap so the entity-link boost and the symbol-variant
+/// expansion see the same deterministic set.
+pub(crate) const MAX_LINKED_SYMBOLS: usize = 20;
+
+/// Fuzzy symbol linking (A4 follow-up): minimum query-token length that may
+/// match a symbol name as a substring. Shorter tokens ("the", "how") would
+/// link noise.
+const FUZZY_MIN_TOKEN_LEN: usize = 4;
+
+/// A single fuzzy link must either cover at least two distinct query tokens
+/// (`"price calculator"` -> `PriceCalculatorService`) or contain one token
+/// this long (`"PriceCalculator"` -> `PriceCalculatorService`); single
+/// short-token hits are exact-match territory and stay out.
+const FUZZY_LONG_TOKEN_LEN: usize = 8;
+
+/// Cap on fuzzy-only names appended after the exact matches.
+const FUZZY_SYMBOL_LIMIT: usize = 5;
+
+/// Deduplicated fuzzy-match tokens: entity tokens long enough to carry a
+/// symbol signal, lowercase, bounded like the exact bind list.
+pub(crate) fn fuzzy_symbol_tokens(entities: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for e in entities {
+        let tok = e.trim().to_lowercase();
+        if tok.len() < FUZZY_MIN_TOKEN_LEN || !looks_like_identifier(&tok) {
+            continue;
+        }
+        if seen.insert(tok.clone()) {
+            out.push(tok);
+        }
+        if out.len() >= MAX_LINKED_SYMBOLS {
+            break;
+        }
+    }
+    out
+}
+
+/// Fuzzy containment score of one lowercased symbol name against the query
+/// tokens: `Some((coverage, matched_len))` when the deterministic rule
+/// holds (>= 2 tokens, or one long token), `None` otherwise.
+fn fuzzy_symbol_score(tokens: &[String], lower_name: &str) -> Option<(usize, usize)> {
+    let mut coverage = 0usize;
+    let mut matched_len = 0usize;
+    for tok in tokens {
+        if lower_name.contains(tok.as_str()) {
+            coverage += 1;
+            matched_len += tok.len();
+        }
+    }
+    if coverage >= 2 || (coverage == 1 && matched_len >= FUZZY_LONG_TOKEN_LEN) {
+        Some((coverage, matched_len))
+    } else {
+        None
+    }
+}
+
+/// Ranks and bounds fuzzy symbol candidates: coverage desc, matched length
+/// desc, shorter name first, then lexicographic. Deterministic for a given
+/// symbol table snapshot.
+pub(crate) fn rank_fuzzy_symbols(tokens: &[String], names: &[String]) -> Vec<String> {
+    let mut matches: Vec<(String, usize, usize)> = Vec::new();
+    let mut seen = HashSet::new();
+    for name in names {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let lower = trimmed.to_lowercase();
+        if !seen.insert(lower.clone()) {
+            continue;
+        }
+        if let Some((coverage, matched_len)) = fuzzy_symbol_score(tokens, &lower) {
+            matches.push((lower, coverage, matched_len));
+        }
+    }
+    matches.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then_with(|| b.2.cmp(&a.2))
+            .then_with(|| a.0.len().cmp(&b.0.len()))
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    matches.truncate(FUZZY_SYMBOL_LIMIT);
+    matches.into_iter().map(|(name, _, _)| name).collect()
+}
+
+/// Exact symbol lookup: lowercase name IN the query entity tokens (F-002
+/// binds, best-effort).
+async fn exact_symbol_names(
+    db: &std::sync::Arc<dyn ibis_db::Executor>,
     entities: &[String],
 ) -> Vec<String> {
-    let Some(db) = db else {
-        return Vec::new();
-    };
     let mut names_bind: Vec<Value> = Vec::new();
     for e in entities {
         if e.len() < 3 {
             continue;
         }
         names_bind.push(Value::from_t(e.as_str()));
-        if names_bind.len() >= 20 {
+        if names_bind.len() >= MAX_LINKED_SYMBOLS {
             break;
         }
     }
@@ -431,6 +514,81 @@ pub(crate) async fn resolve_linked_symbols(
         let trimmed = name.trim();
         if !trimmed.is_empty() {
             names.push(trimmed.to_lowercase());
+        }
+    }
+    names
+}
+
+/// Fuzzy symbol lookup: symbol names containing at least one query token
+/// (F-002 binds, best-effort). The Rust-side ranking applies the
+/// noise-resistant rule and the deterministic cap.
+async fn fuzzy_symbol_names(
+    db: &std::sync::Arc<dyn ibis_db::Executor>,
+    tokens: &[String],
+) -> Vec<String> {
+    if tokens.is_empty() {
+        return Vec::new();
+    }
+    let mut clauses = Vec::with_capacity(tokens.len());
+    let mut vars = ibis_db::executor::Vars::new();
+    for (i, tok) in tokens.iter().enumerate() {
+        let var = format!("f{i}");
+        clauses.push(format!("string::lowercase(name) CONTAINS ${var}"));
+        vars.insert(var, Value::from_t(tok.as_str()));
+    }
+    let ql = format!(
+        "SELECT name FROM symbol WHERE {} ORDER BY name LIMIT 50;",
+        clauses.join(" OR ")
+    );
+    let Ok(outcome) = db.smart_query(&ql, vars).await else {
+        return Vec::new();
+    };
+    let Some(rows_values) = rows::normalize_rows(&outcome) else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    for row in rows::object_rows(&rows_values) {
+        let name = rows::scalar_string(rows::field(row, "name"));
+        let trimmed = name.trim();
+        if !trimmed.is_empty() {
+            names.push(trimmed.to_string());
+        }
+    }
+    rank_fuzzy_symbols(tokens, &names)
+}
+
+/// Looks up symbol names matching query entity tokens (best-effort; entity
+/// tokens are bound as `$names`, F-002). Exact matches come first, then a
+/// bounded fuzzy pass (A4 follow-up: "price calculator" links
+/// `PriceCalculatorService`); failures return an empty list so retrieval
+/// still works. The merged list is capped at [`MAX_LINKED_SYMBOLS`].
+pub(crate) async fn resolve_linked_symbols(
+    db: Option<&std::sync::Arc<dyn ibis_db::Executor>>,
+    entities: &[String],
+) -> Vec<String> {
+    let Some(db) = db else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for name in exact_symbol_names(db, entities).await {
+        if seen.insert(name.clone()) {
+            names.push(name);
+        }
+        if names.len() >= MAX_LINKED_SYMBOLS {
+            return names;
+        }
+    }
+    let tokens = fuzzy_symbol_tokens(entities);
+    if tokens.is_empty() {
+        return names;
+    }
+    for name in fuzzy_symbol_names(db, &tokens).await {
+        if seen.insert(name.clone()) {
+            names.push(name);
+        }
+        if names.len() >= MAX_LINKED_SYMBOLS {
+            break;
         }
     }
     names
@@ -779,5 +937,130 @@ mod tests {
         );
         assert_eq!(QueryExpansionMode::Off.as_str(), "off");
         assert_eq!(QueryExpansionMode::SymbolVariant.as_str(), "symbol_variant");
+    }
+
+    // --- A4 follow-up: fuzzy symbol linking -----------------------------------
+
+    #[test]
+    fn fuzzy_tokens_keep_long_identifiers_and_dedup() {
+        let entities = vec![
+            "price".to_string(),
+            "calculator".to_string(),
+            "the".to_string(),
+            "Price".to_string(),
+            "x1".to_string(),
+        ];
+        let tokens = fuzzy_symbol_tokens(&entities);
+        assert_eq!(tokens, vec!["price", "calculator"], "short tokens drop");
+    }
+
+    #[test]
+    fn fuzzy_symbol_score_requires_coverage_or_one_long_token() {
+        let tokens = vec!["price".to_string(), "calculator".to_string()];
+        assert_eq!(
+            fuzzy_symbol_score(&tokens, "pricecalculatorservice"),
+            Some((2, 15)),
+            "two-token coverage links the longer symbol"
+        );
+        assert_eq!(
+            fuzzy_symbol_score(&tokens, "pricerepository"),
+            None,
+            "single short token is not enough"
+        );
+        let long = vec!["pricecalculator".to_string()];
+        assert_eq!(
+            fuzzy_symbol_score(&long, "pricecalculatorservice"),
+            Some((1, 15)),
+            "one long identifier token is a strong match"
+        );
+    }
+
+    #[test]
+    fn rank_fuzzy_symbols_orders_by_coverage_then_length() {
+        let tokens = vec![
+            "price".to_string(),
+            "calculator".to_string(),
+            "rounding".to_string(),
+        ];
+        let names = vec![
+            "RoundingService".to_string(),
+            "PriceCalculatorService".to_string(),
+            "PriceCalculator".to_string(),
+            "pricecalculatorservice".to_string(),
+        ];
+        let ranked = rank_fuzzy_symbols(&tokens, &names);
+        assert_eq!(
+            ranked,
+            vec![
+                "pricecalculator".to_string(),
+                "pricecalculatorservice".to_string(),
+                "roundingservice".to_string(),
+            ],
+            "coverage desc, matched length desc, shorter name first; dedup"
+        );
+    }
+
+    #[test]
+    fn rank_fuzzy_symbols_caps_the_fuzzy_tail() {
+        let tokens = vec!["alpha".to_string(), "beta".to_string()];
+        let names: Vec<String> = (0..10).map(|i| format!("alphabeta{i}")).collect();
+        let ranked = rank_fuzzy_symbols(&tokens, &names);
+        assert_eq!(ranked.len(), FUZZY_SYMBOL_LIMIT);
+    }
+
+    #[tokio::test]
+    async fn resolve_linked_symbols_merges_exact_then_fuzzy() {
+        use crate::test_support::{obj, rows_of, FakeDb};
+        use std::sync::Arc;
+        let fake = Arc::new(FakeDb::new(vec![
+            (
+                "IN $names",
+                rows_of(vec![obj(vec![("name", Value::from_t("PriceCalculator"))])]),
+            ),
+            (
+                "CONTAINS",
+                rows_of(vec![
+                    obj(vec![("name", Value::from_t("PriceCalculatorService"))]),
+                    obj(vec![("name", Value::from_t("PriceRepository"))]),
+                    obj(vec![("name", Value::from_t("pricecalculator"))]),
+                ]),
+            ),
+        ]));
+        let entities = vec!["price".to_string(), "calculator".to_string()];
+        let linked = resolve_linked_symbols(
+            Some(&(fake.clone() as Arc<dyn ibis_db::Executor>)),
+            &entities,
+        )
+        .await;
+        assert_eq!(
+            linked,
+            vec![
+                "pricecalculator".to_string(),
+                "pricecalculatorservice".to_string(),
+            ],
+            "exact first, fuzzy merged and deduped, weak single-token dropped"
+        );
+        let smart = fake.smart_calls.lock().unwrap();
+        assert_eq!(smart.len(), 2, "exact + fuzzy queries");
+        assert!(smart[0].contains("IN $names"));
+        assert!(smart[1].contains("CONTAINS"));
+    }
+
+    #[tokio::test]
+    async fn resolve_linked_symbols_skips_fuzzy_without_tokens() {
+        use crate::test_support::{rows_of, FakeDb};
+        use std::sync::Arc;
+        let fake = Arc::new(FakeDb::new(vec![("IN $names", rows_of(vec![]))]));
+        let linked = resolve_linked_symbols(
+            Some(&(fake.clone() as Arc<dyn ibis_db::Executor>)),
+            &["abc".to_string()],
+        )
+        .await;
+        assert!(linked.is_empty(), "no exact and no fuzzy tokens");
+        assert_eq!(
+            fake.smart_calls.lock().unwrap().len(),
+            1,
+            "exact query only"
+        );
     }
 }

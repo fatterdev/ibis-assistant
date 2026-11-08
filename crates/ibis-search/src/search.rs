@@ -229,6 +229,47 @@ pub(crate) fn cost_tracker(service: &SearchService) -> CostTracker {
     )
 }
 
+impl SearchService {
+    /// A4: embeds the literal query plus the optional symbol-variant query.
+    /// Shared by `ask_project` and `ask_project_at_ref` so both retrieval
+    /// paths inherit the same expansion/cost/fail-open semantics. The
+    /// primary embedding error propagates; the variant is best-effort
+    /// (warn + primary pass only on failure).
+    pub(crate) async fn query_embeddings(
+        &self,
+        ai: &Arc<dyn AIProvider>,
+        query: &str,
+        linked_symbols: &[String],
+    ) -> Result<Vec<Vec<f32>>> {
+        let primary = ai
+            .embed_text(query)
+            .await
+            .map_err(|e| SearchError::wrap("embedding failed", e))?;
+        cost_tracker(self)
+            .record_embedding_usage("system:search_vector", query)
+            .await;
+        let mut embeddings = vec![primary];
+        if self.query_expansion == QueryExpansionMode::SymbolVariant {
+            if let Some(variant) = expand_query(query, linked_symbols).get(1) {
+                match ai.embed_text(variant).await {
+                    Ok(vec) => {
+                        cost_tracker(self)
+                            .record_embedding_usage("system:search_vector", variant)
+                            .await;
+                        embeddings.push(vec);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "query expansion: variant embedding failed; primary only: {e}"
+                        );
+                    }
+                }
+            }
+        }
+        Ok(embeddings)
+    }
+}
+
 /// Internal decoded vector-search chunk.
 #[derive(Debug, Clone)]
 struct ChunkResult {
@@ -334,44 +375,15 @@ impl SearchService {
         let (keywords, entities) = tokenize_query(query);
         let linked_symbols = resolve_linked_symbols(self.db.as_ref(), &entities).await;
 
-        let vec = ai
-            .embed_text(query)
-            .await
-            .map_err(|e| SearchError::wrap("embedding failed", e))?;
-
-        cost_tracker(self)
-            .record_embedding_usage("system:search_vector", query)
-            .await;
-
-        let vec_json = commit_meaning::vec_value(&vec);
-        // A4 (query expansion): a second embedding for the symbol-variant
-        // query — only when the mode is on and the variant differs from the
-        // primary (no linked symbols → fast path, zero extra cost). The
+        // A4 (query expansion): the shared helper embeds the literal query
+        // plus the symbol variant when the mode is on and the variant
+        // differs (no linked symbols → fast path, zero extra cost). The
         // variant can only strengthen retrieval: the vector channels keep
         // `score = max(primary_pass, variant_pass)` per row. A variant
         // embedding failure degrades to the primary pass (fail-open).
-        let vec2_json = match self.query_expansion {
-            QueryExpansionMode::SymbolVariant => {
-                match expand_query(query, &linked_symbols).get(1) {
-                    Some(variant) => match ai.embed_text(variant).await {
-                        Ok(vec2) => {
-                            cost_tracker(self)
-                                .record_embedding_usage("system:search_vector", variant)
-                                .await;
-                            Some(commit_meaning::vec_value(&vec2))
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "query expansion: variant embedding failed; primary only: {e}"
-                            );
-                            None
-                        }
-                    },
-                    None => None,
-                }
-            }
-            QueryExpansionMode::Off => None,
-        };
+        let vecs = self.query_embeddings(ai, query, &linked_symbols).await?;
+        let vec_json = commit_meaning::vec_value(&vecs[0]);
+        let vec2_json = vecs.get(1).map(|v| commit_meaning::vec_value(v));
         let window = self.candidate_window.max(VECTOR_CHANNEL_LIMIT);
         let dist_expr = "vector::distance::cosine(embedding, $vec)";
         let sim_expr = "vector::similarity::cosine(embedding, $vec)";
