@@ -21,6 +21,7 @@ use ibis_git::{GitAnchorSource, GitClaimWriter, GitNotesSource};
 use crate::commit_meaning;
 use crate::error::{Result, SearchError};
 use crate::graph::{self, CommitSummary, GraphContext, IssueSummary};
+use crate::memory::details::SchemaEnforcement;
 use crate::memory::temporal::{ask_memory_visibility_sql, memory_currentness_sql};
 use crate::rerank::{rerank_hits, RerankMode};
 use crate::retrieval_boost::{
@@ -144,6 +145,10 @@ pub struct SearchService {
     /// Post-fusion reranker mode (`search.rerank`: off|local — A3; default
     /// off, activation guided by the A1 eval numbers).
     pub rerank_mode: RerankMode,
+    /// Per-kind details enforcement (`memory.schema_enforcement` — C7):
+    /// warn (default) accepts partial details with a warning, strict
+    /// rejects writes missing a kind's required keys.
+    pub schema_enforcement: SchemaEnforcement,
     /// Process-local TTL cache of ancestor sets (lazily created).
     pub(crate) ancestor_cache: std::sync::OnceLock<ibis_git::AncestorCache>,
 }
@@ -163,6 +168,7 @@ impl Default for SearchService {
             candidate_window: DEFAULT_CANDIDATE_WINDOW,
             query_expansion: QueryExpansionMode::default(),
             rerank_mode: RerankMode::default(),
+            schema_enforcement: SchemaEnforcement::default(),
             ancestor_cache: std::sync::OnceLock::new(),
         }
     }

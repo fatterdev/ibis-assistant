@@ -63,7 +63,7 @@ impl SearchService {
             where_parts.push(format!("project = {repo_id}"));
         }
         let sql = format!(
-            "SELECT id, kind, title, content, status, confidence, visibility, owner, tags, branch, created_at, updated_at, provenance.source_hash AS source_hash FROM {TABLE_MEMORY} WHERE {} ORDER BY updated_at DESC;",
+            "SELECT id, kind, title, content, status, confidence, visibility, owner, tags, branch, created_at, updated_at, details, provenance.source_hash AS source_hash FROM {TABLE_MEMORY} WHERE {} ORDER BY updated_at DESC;",
             where_parts.join(" AND ")
         );
         let outcome = db

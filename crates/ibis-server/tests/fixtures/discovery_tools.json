@@ -384,6 +384,10 @@
             "description": "Full memory text (required)",
             "type": "string"
           },
+          "details": {
+            "description": "Optional JSON object with kind-specific structured keys (decision: scope required + alternatives[]/tradeoffs; fix: root_cause required + symptom/remedy; constraint: applies_to[] required + until; rule: enforcement required). Validated per memory.schema_enforcement (warn|strict)",
+            "type": "string"
+          },
           "embedding": {
             "description": "Optional precomputed JSON float array embedding",
             "type": "string"
@@ -417,7 +421,7 @@
             "type": "string"
           },
           "supersedes": {
-            "description": "Optional memory record ID this one replaces",
+            "description": "Optional memory record ID this one replaces (must share the same kind)",
             "type": "string"
           },
           "tags": {
@@ -699,11 +703,15 @@
       "name": "memory_rebuild_git_notes"
     },
     {
-      "description": "Semantic search over typed memories, filtered by kind/status/visibility/tags.",
+      "description": "Semantic search over typed memories, filtered by kind/status/visibility/tags/details.",
       "input_schema": {
         "properties": {
           "actor": {
             "description": "Optional identity fallback",
+            "type": "string"
+          },
+          "details": {
+            "description": "Optional JSON object of scalar equality filters on structured details, e.g. {\"scope\":\"billing\"}",
             "type": "string"
           },
           "kind": {
@@ -776,6 +784,10 @@
           },
           "content": {
             "description": "Optional new content",
+            "type": "string"
+          },
+          "details": {
+            "description": "Optional JSON object patching structured details (merge semantics; null clears a key; validated against the memory's kind)",
             "type": "string"
           },
           "id": {

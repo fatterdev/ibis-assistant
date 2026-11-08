@@ -31,6 +31,10 @@ pub struct Optimizer {
     /// set from `ai.consolidation.dup_similarity_min` by the daemon, or the
     /// `DUP_SIMILARITY_MIN` default when unset.
     pub dup_similarity_min: f64,
+    /// Per-kind details enforcement (C7): set from
+    /// `memory.schema_enforcement`; `warn` accepts a partial `details`,
+    /// `strict` rejects it and retries the distillation once.
+    pub schema_enforcement: ibis_search::memory::details::SchemaEnforcement,
 }
 
 impl Optimizer {
@@ -48,6 +52,7 @@ impl Optimizer {
             search,
             workspace: None,
             dup_similarity_min: crate::memory_consolidate::DUP_SIMILARITY_MIN,
+            schema_enforcement: ibis_search::memory::details::SchemaEnforcement::default(),
         }
     }
 

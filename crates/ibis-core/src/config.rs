@@ -16,13 +16,28 @@ pub const DEFAULT_LOOPBACK_DB_URL: &str = "ws://127.0.0.1:8000/rpc";
 pub const DEFAULT_PLUGIN_DB_URL: &str = "ws://127.0.0.1:18000/rpc";
 pub const DEFAULT_PLUGIN_LOG_FILE: &str = "plugin.log";
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct MemoryConfig {
     #[serde(rename = "projection_enabled")]
     pub projection_enabled: bool,
     #[serde(rename = "git_store")]
     pub git_store: GitStoreConfig,
+    /// Per-kind `details` enforcement (C7): `warn` (default) accepts partial
+    /// details with a warning, `strict` rejects writes missing the kind's
+    /// required keys. Unknown values resolve to warn with a warning.
+    #[serde(rename = "schema_enforcement")]
+    pub schema_enforcement: String,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        MemoryConfig {
+            projection_enabled: false,
+            git_store: GitStoreConfig::default(),
+            schema_enforcement: "warn".to_string(),
+        }
+    }
 }
 
 /// Governs the git-tree claim store (`.ibis/claims/`).
@@ -1274,6 +1289,18 @@ mod tests {
                 .unwrap();
         assert!(cfg.memory.projection_enabled);
         assert_eq!(cfg.memory.git_store.personal_claims, "in_repo");
+    }
+
+    /// C7: `memory.schema_enforcement` defaults to `warn` and accepts the
+    /// `strict` opt-in.
+    #[test]
+    fn memory_schema_enforcement_config() {
+        let cfg: Config =
+            serde_json::from_str(r#"{"memory": {"schema_enforcement": "strict"}}"#).unwrap();
+        assert_eq!(cfg.memory.schema_enforcement, "strict");
+        assert_eq!(default_config().memory.schema_enforcement, "warn");
+        let empty: Config = serde_json::from_str(r#"{"memory": {}}"#).unwrap();
+        assert_eq!(empty.memory.schema_enforcement, "warn");
     }
 
     #[test]

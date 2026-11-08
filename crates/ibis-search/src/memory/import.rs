@@ -83,6 +83,11 @@ impl SearchService {
                             provenance_tool: "memory_import".to_string(),
                             provenance_imported_from: first_non_empty(&[&item.id, "export"]),
                             provenance_source_hash: source_hash,
+                            details: if item.details.is_null() {
+                                None
+                            } else {
+                                Some(item.details.clone())
+                            },
                             ..Default::default()
                         },
                     )
@@ -115,6 +120,11 @@ impl SearchService {
                     provenance_tool: "memory_import".to_string(),
                     provenance_imported_from: first_non_empty(&[&item.id, "export"]),
                     provenance_source_hash: source_hash,
+                    details: if item.details.is_null() {
+                        None
+                    } else {
+                        Some(item.details.clone())
+                    },
                     ..Default::default()
                 },
             )

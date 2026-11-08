@@ -2206,3 +2206,104 @@ async fn lexical_file_chunk_channel_reaches_ask_project() {
 
     drop_scratch(exec.as_ref(), &db_name).await;
 }
+
+/// C7 live: `details` is a FLEXIBLE object on the SCHEMAFULL memory table —
+/// per-kind details survive the write/read roundtrip through the API
+/// projection, and `memory_search` filters on `details.<key>` with bound
+/// equality predicates.
+#[tokio::test]
+async fn details_roundtrip_and_search_filter() {
+    let Some((exec, db_name)) = connect_scratch().await else {
+        return;
+    };
+    init_ddl(exec.as_ref()).await;
+    let (svc, _committer) = service(&exec, true);
+
+    let billing_id = svc
+        .add_memory(
+            &ActorContext::LOCAL,
+            &mut AddMemoryParams {
+                project_name: "c7_live".to_string(),
+                kind: "decision".to_string(),
+                title: "Billing scope decision".to_string(),
+                content: "billing decisions round tax before invoicing".to_string(),
+                visibility: "team".to_string(),
+                details: Some(serde_json::json!({
+                    "scope": "billing",
+                    "alternatives": ["cache", "batch"]
+                })),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("add decision with details");
+    let other_id = svc
+        .add_memory(
+            &ActorContext::LOCAL,
+            &mut AddMemoryParams {
+                project_name: "c7_live".to_string(),
+                kind: "decision".to_string(),
+                title: "Billing reporting decision".to_string(),
+                content: "billing reports render monthly totals".to_string(),
+                visibility: "team".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("add decision without details");
+    fn canonical_memory_id(id: &str) -> String {
+        let key = id
+            .strip_prefix("memory:⟨")
+            .and_then(|k| k.strip_suffix('⟩'))
+            .or_else(|| {
+                id.strip_prefix("memory:?")
+                    .and_then(|k| k.strip_suffix('?'))
+            })
+            .unwrap_or_else(|| id.strip_prefix("memory:").unwrap_or(id));
+        format!("memory:{key}")
+    }
+
+    // Roundtrip: expand_memory projects `details` back as plain JSON.
+    let expanded = svc
+        .expand_memory(
+            &ActorContext::LOCAL,
+            &[canonical_memory_id(&billing_id)],
+            "",
+        )
+        .await
+        .expect("expand");
+    assert_eq!(expanded.len(), 1);
+    assert_eq!(
+        expanded[0].details,
+        serde_json::json!({"scope": "billing", "alternatives": ["cache", "batch"]}),
+        "details survive the SCHEMAFULL FLEXIBLE roundtrip"
+    );
+
+    // Filter: only the scoped decision surfaces.
+    let mut filter = serde_json::Map::new();
+    filter.insert("scope".into(), serde_json::json!("billing"));
+    let hits = svc
+        .search_memory(
+            &ActorContext::LOCAL,
+            ibis_search::memory::MemorySearchParams {
+                query: "billing decisions".to_string(),
+                details: filter,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("filtered search");
+    let ids: Vec<String> = hits.iter().map(|m| m.id.clone()).collect();
+    let billing_canonical = canonical_memory_id(&billing_id);
+    let other_canonical = canonical_memory_id(&other_id);
+    assert!(
+        ids.iter().any(|id| id == &billing_canonical),
+        "the scoped decision must match: {ids:?}"
+    );
+    assert!(
+        !ids.iter().any(|id| id == &other_canonical),
+        "the unscoped decision must be filtered out: {ids:?}"
+    );
+
+    drop_scratch(exec.as_ref(), &db_name).await;
+}

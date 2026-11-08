@@ -84,6 +84,9 @@ async fn run_pass(state: &Arc<AppState>) {
     );
     // C9: the duplicate-lookup similarity floor is config-driven.
     optimizer.dup_similarity_min = state.config().ai.consolidation.dup_similarity_min;
+    optimizer.schema_enforcement = ibis_search::memory::details::SchemaEnforcement::resolve(
+        &state.config().memory.schema_enforcement,
+    );
     let projects = match optimizer.pending_observation_projects().await {
         Ok(projects) => projects,
         Err(err) => {

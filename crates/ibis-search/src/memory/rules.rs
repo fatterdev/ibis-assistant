@@ -97,6 +97,7 @@ impl SearchService {
                         status: "current".to_string(),
                         visibility: "team".to_string(),
                         tags: tags.to_vec(),
+                        details: serde_json::Map::new(),
                         limit,
                         actor: String::new(),
                     },

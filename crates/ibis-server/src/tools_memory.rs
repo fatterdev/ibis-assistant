@@ -71,6 +71,24 @@ fn resolve_project(state: &Arc<AppState>, explicit: &str) -> Result<String, Tool
     }
 }
 
+/// C7: parses an optional JSON-object argument (`details`); empty = absent.
+fn parse_json_object_arg(
+    args: &serde_json::Map<String, Value>,
+    name: &str,
+) -> Result<Option<serde_json::Value>, ToolResult> {
+    let raw = get_string_arg(args, name);
+    if raw.trim().is_empty() {
+        return Ok(None);
+    }
+    match serde_json::from_str::<serde_json::Value>(&raw) {
+        Ok(value @ serde_json::Value::Object(_)) => Ok(Some(value)),
+        Ok(_) => Err(error_result(format!(
+            "invalid {name} JSON: expected an object"
+        ))),
+        Err(err) => Err(error_result(format!("invalid {name} JSON: {err}"))),
+    }
+}
+
 /// F0.4 — resolves a memory's kind/title for the live-update resource URI
 /// (single indexed lookup; degraded mode without a DB resolves to `None`).
 async fn memory_identity(state: &Arc<AppState>, id: &str) -> Option<(String, String)> {
@@ -251,6 +269,10 @@ async fn memory_add(
         valid_until: get_string_arg(args, "valid_until"),
         derived_from: source_refs,
         supersedes: get_string_arg(args, "supersedes"),
+        details: match parse_json_object_arg(args, "details") {
+            Ok(v) => v,
+            Err(e) => return e,
+        },
         embedding,
         provenance_tool: "memory_add".to_string(),
         provenance_source_hash: get_string_arg(args, "source_hash"),
@@ -461,6 +483,11 @@ async fn memory_search(
                 status: get_string_arg(args, "status"),
                 visibility: get_string_arg(args, "visibility"),
                 tags,
+                details: match parse_json_object_arg(args, "details") {
+                    Ok(Some(serde_json::Value::Object(map))) => map,
+                    Ok(_) => serde_json::Map::new(),
+                    Err(e) => return e,
+                },
                 limit,
                 actor: get_string_arg(args, "actor"),
             },
@@ -592,6 +619,11 @@ async fn memory_update(
     }
     if args.contains_key("valid_until") {
         params.valid_until = Some(get_string_arg(args, "valid_until"));
+    }
+    match parse_json_object_arg(args, "details") {
+        Ok(Some(details)) => params.details = Some(details),
+        Ok(None) => {}
+        Err(e) => return e,
     }
     let service = state.search();
     if let Err(e) = service.update_memory(actor, params).await {
@@ -925,6 +957,9 @@ async fn memory_consolidate(
         );
         // C9: the duplicate-lookup similarity floor is config-driven.
         optimizer.dup_similarity_min = state.config().ai.consolidation.dup_similarity_min;
+        optimizer.schema_enforcement = ibis_search::memory::details::SchemaEnforcement::resolve(
+            &state.config().memory.schema_enforcement,
+        );
         match optimizer.consolidate_loop(&project, max_items).await {
             Err(err) => tracing::error!("Memory consolidation failed: {err}"),
             Ok(()) => {

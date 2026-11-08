@@ -10,9 +10,9 @@
 use ibis_db::value::Value;
 
 use super::{
-    bind, first_non_empty, repo_record_id, require_memory_record_id, validate_memory_confidence,
-    Bindings, Memory, ES_DERIVED_FROM, ES_HAS_MEMORY, ES_HAS_REASONING, ES_SUPERSEDES, STORE_GIT,
-    STORE_SURREAL, TABLE_MEMORY,
+    bind, details, first_non_empty, repo_record_id, require_memory_record_id,
+    validate_memory_confidence, Bindings, Memory, ES_DERIVED_FROM, ES_HAS_MEMORY, ES_HAS_REASONING,
+    ES_SUPERSEDES, STORE_GIT, STORE_SURREAL, TABLE_MEMORY,
 };
 use crate::error::{Result, SearchError};
 use crate::search::SearchService;
@@ -58,6 +58,9 @@ pub struct AddMemoryParams {
 
     pub derived_from: Vec<String>,
     pub supersedes: String,
+    /// C7 structured attributes (per-kind rubric; validated against
+    /// `memory.schema_enforcement`). `None`/null = no details.
+    pub details: Option<serde_json::Value>,
     /// Precomputed embedding; empty = embed `content` via the AI provider.
     pub embedding: Vec<f64>,
 }
@@ -117,6 +120,23 @@ impl SearchService {
         if kind.is_empty() {
             kind = "fact".to_string();
         }
+
+        // C7: per-kind required keys (`memory.schema_enforcement`: warn
+        // accepts a partial details with a log line, strict rejects).
+        if let Some(details) = &params.details {
+            if !details.is_null() {
+                if let Err(msg) = details::validate_memory_details(&kind, details) {
+                    match self.schema_enforcement {
+                        details::SchemaEnforcement::Strict => {
+                            return Err(SearchError::other(format!("memory_add details: {msg}")));
+                        }
+                        details::SchemaEnforcement::Warn => {
+                            tracing::warn!("memory_add details: {msg}");
+                        }
+                    }
+                }
+            }
+        }
         let mut status = params.status.trim().to_string();
         if status.is_empty() {
             status = "current".to_string();
@@ -147,6 +167,16 @@ impl SearchService {
                 return Err(SearchError::other(format!(
                     "git-owned claim {} can only be superseded by another git-owned claim (decision/rule/fix, team visibility); the old claim file would otherwise resurrect at ingest",
                     target.id
+                )));
+            }
+        } // C7 governance edge: supersession stays within one kind (a decision
+          // replaces a decision, never a fix); git-owned targets keep their
+          // existing store-domain check below.
+        if let Some(target) = &superseded_target {
+            if !target.kind.trim().is_empty() && target.kind != kind {
+                return Err(SearchError::other(format!(
+                    "supersedes must stay within the same kind: target {} is {:?}, new memory is {:?}",
+                    target.id, target.kind, kind
                 )));
             }
         }
@@ -228,6 +258,19 @@ impl SearchService {
         self.resolve_memory_git_anchor(params).await?;
         append_provenance_fields(&mut fields, &mut bindings, params);
         append_git_bound_fields(&mut fields, &mut bindings, params);
+        // C7: structured details ride dotted fields (bound values, identifier
+        // paths) — `details.scope = $det_0`, nested keys flatten.
+        if let Some(details_value) = &params.details {
+            if !details_value.is_null() {
+                let detail_fields = details::details_fields(details_value)
+                    .map_err(|e| SearchError::other(format!("memory_add details: {e}")))?;
+                for (idx, (path, value)) in detail_fields.into_iter().enumerate() {
+                    let var = format!("det_{idx}");
+                    bindings.push((var.clone(), value));
+                    fields.push(format!("details.{path} = ${var}"));
+                }
+            }
+        }
 
         // Git-tree claim store (the addendum): commit the claim file BEFORE
         // the Surreal row so the repo stays SoT — a DB failure leaves the
@@ -556,5 +599,105 @@ fn append_git_bound_fields(
         if params.provenance_promote_on_commit {
             fields.push("provenance.promote_on_commit = true".to_string());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{fake_ai, obj, rows_of, FakeDb};
+    use ibis_db::value::Value;
+    use std::sync::Arc;
+
+    fn service_with(fake: Arc<FakeDb>) -> SearchService {
+        SearchService::new(Some(fake), Some(fake_ai()))
+    }
+
+    fn decision_params(details: serde_json::Value) -> AddMemoryParams {
+        AddMemoryParams {
+            project_name: "proj".to_string(),
+            kind: "decision".to_string(),
+            content: "billing decision".to_string(),
+            visibility: "team".to_string(),
+            details: Some(details),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn add_memory_emits_details_as_dotted_bound_fields() {
+        let fake = Arc::new(FakeDb::default());
+        let svc = service_with(fake.clone());
+        let mut params = decision_params(serde_json::json!({
+            "scope": "billing",
+            "alternatives": ["cache", "batch"]
+        }));
+        let id = svc
+            .add_memory(&crate::ActorContext::LOCAL, &mut params)
+            .await
+            .expect("add");
+        assert!(id.starts_with("memory:"));
+        let sql = fake.smart_calls.lock().unwrap().join("\n");
+        assert!(sql.contains("details.scope = $det_"), "{sql}");
+        assert!(sql.contains("details.alternatives = $det_"), "{sql}");
+        let vars = fake.smart_vars.lock().unwrap();
+        assert!(
+            vars.iter().any(|v| v
+                .values()
+                .any(|val| matches!(val, Value::String(s) if s == "billing"))),
+            "the details value binds (F-002)"
+        );
+    }
+
+    #[tokio::test]
+    async fn strict_enforcement_rejects_missing_required_details() {
+        let fake = Arc::new(FakeDb::default());
+        let mut svc = service_with(fake);
+        svc.schema_enforcement = details::SchemaEnforcement::Strict;
+        let mut params = decision_params(serde_json::json!({"tradeoffs": "x"}));
+        let err = svc
+            .add_memory(&crate::ActorContext::LOCAL, &mut params)
+            .await
+            .expect_err("strict rejects");
+        assert!(err.to_string().contains("scope"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn warn_enforcement_accepts_partial_details() {
+        let fake = Arc::new(FakeDb::default());
+        let svc = service_with(fake);
+        let mut params = decision_params(serde_json::json!({"tradeoffs": "x"}));
+        svc.add_memory(&crate::ActorContext::LOCAL, &mut params)
+            .await
+            .expect("warn accepts the partial details");
+    }
+
+    #[tokio::test]
+    async fn supersedes_must_share_the_kind() {
+        let fake = Arc::new(FakeDb::new(vec![(
+            "SELECT * FROM memory:mem_old",
+            rows_of(vec![obj(vec![
+                ("id", Value::from_t("memory:mem_old")),
+                ("kind", Value::from_t("fix")),
+                ("content", Value::from_t("old fix")),
+                ("status", Value::from_t("current")),
+                ("confidence", Value::from_t(0.7f64)),
+                ("visibility", Value::from_t("team")),
+                ("owner", Value::from_t("unknown")),
+            ])]),
+        )]));
+        let svc = service_with(fake);
+        let mut params = AddMemoryParams {
+            project_name: "proj".into(),
+            kind: "decision".into(),
+            content: "new".into(),
+            supersedes: "memory:mem_old".into(),
+            ..Default::default()
+        };
+        let err = svc
+            .add_memory(&crate::ActorContext::LOCAL, &mut params)
+            .await
+            .expect_err("kind mismatch");
+        assert!(err.to_string().contains("same kind"), "{err}");
     }
 }

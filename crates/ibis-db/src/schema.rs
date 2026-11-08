@@ -244,6 +244,9 @@ pub const INIT_STATEMENTS: &[&str] = &[
     "DEFINE FIELD IF NOT EXISTS visibility ON TABLE memory TYPE memory_visibility DEFAULT 'team';",
     "DEFINE FIELD IF NOT EXISTS owner ON TABLE memory TYPE option<string>;",
     "DEFINE FIELD IF NOT EXISTS tags ON TABLE memory TYPE option<array<string>> DEFAULT [];",
+    // C7: per-kind structured attributes. FLEXIBLE = nested free-form inside
+    // the object; the rest of the table stays SCHEMAFULL.
+    "DEFINE FIELD IF NOT EXISTS details ON TABLE memory TYPE option<object> FLEXIBLE;",
     "DEFINE FIELD IF NOT EXISTS branch ON TABLE memory TYPE option<string>;",
     "DEFINE FIELD IF NOT EXISTS project ON TABLE memory TYPE option<record<repo>>;",
     "DEFINE FIELD IF NOT EXISTS valid_from ON TABLE memory TYPE option<datetime> DEFAULT time::now();",

@@ -52,6 +52,10 @@ pub struct ConsolidationDecision {
     pub merge_with: String,
     #[serde(default, rename = "valid_until")]
     pub valid_until: String,
+    /// C7 structured attributes (per-kind rubric); null when the model
+    /// omitted them.
+    #[serde(default)]
+    pub details: serde_json::Value,
 }
 
 /// One candidate observation row.
@@ -424,46 +428,80 @@ impl Optimizer {
             role: "user".to_string(),
             parts: vec![ibis_ai::Part { text: prompt }],
         }];
-        let response = ai
-            .generate_content(
-                &contents,
-                GenerationConfig {
-                    route_hint: route_hint.to_string(),
-                    temperature: 0.1,
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(|e| e.to_string())?;
-        if let Some(usage) = &response.usage_metadata {
-            if let Some(db) = &self.db {
-                let tracker = ibis_ai::CostTracker::new(Some(
-                    Arc::new(DbCostStore(db.clone())) as Arc<dyn ibis_ai::CostStore>
-                ));
-                tracker
-                    .record_usage(
-                        "system:memory_consolidation",
-                        usage.prompt_token_count.max(0) as u64,
-                        usage.candidates_token_count.max(0) as u64,
-                        usage.cached_tokens(),
-                    )
-                    .await;
+        // C7 strict mode retries the distillation ONCE when the per-kind
+        // required details keys are missing; warn mode keeps the partial
+        // details with a log line. Every attempt is billed.
+        let mut strict_retried = false;
+        loop {
+            let response = ai
+                .generate_content(
+                    &contents,
+                    GenerationConfig {
+                        route_hint: route_hint.to_string(),
+                        temperature: 0.1,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            if let Some(usage) = &response.usage_metadata {
+                if let Some(db) = &self.db {
+                    let tracker = ibis_ai::CostTracker::new(Some(
+                        Arc::new(DbCostStore(db.clone())) as Arc<dyn ibis_ai::CostStore>,
+                    ));
+                    tracker
+                        .record_usage(
+                            "system:memory_consolidation",
+                            usage.prompt_token_count.max(0) as u64,
+                            usage.candidates_token_count.max(0) as u64,
+                            usage.cached_tokens(),
+                        )
+                        .await;
+                }
             }
+            let text: String = response
+                .content
+                .parts
+                .iter()
+                .map(|p| p.text.as_str())
+                .collect();
+            let decision = parse_consolidation_decision(&text)?;
+            if decision.action == "merge"
+                && !contains_duplicate_id(duplicates, &decision.merge_with)
+            {
+                return Err(format!(
+                    "merge target {:?} was not a supplied candidate",
+                    decision.merge_with
+                ));
+            }
+            // Missing `details` counts as an empty object here: the
+            // distillation prompt asks for the rubric keys, so strict mode
+            // must not silently accept their absence (the add-path stays
+            // backward compatible because its `details` param is optional).
+            let effective_details = if decision.details.is_null() {
+                serde_json::json!({})
+            } else {
+                decision.details.clone()
+            };
+            if let Err(msg) = ibis_search::memory::details::validate_memory_details(
+                &decision.kind,
+                &effective_details,
+            ) {
+                match self.schema_enforcement {
+                    ibis_search::memory::details::SchemaEnforcement::Strict => {
+                        if strict_retried {
+                            return Err(format!("distill details: {msg}"));
+                        }
+                        strict_retried = true;
+                        continue;
+                    }
+                    ibis_search::memory::details::SchemaEnforcement::Warn => {
+                        tracing::warn!("distill details: {msg}");
+                    }
+                }
+            }
+            return Ok(decision);
         }
-        let text: String = response
-            .content
-            .parts
-            .iter()
-            .map(|p| p.text.as_str())
-            .collect();
-        let decision = parse_consolidation_decision(&text)?;
-        if decision.action == "merge" && !contains_duplicate_id(duplicates, &decision.merge_with) {
-            return Err(format!(
-                "merge target {:?} was not a supplied candidate",
-                decision.merge_with
-            ));
-        }
-        Ok(decision)
     }
 
     async fn persist_consolidation(
@@ -502,6 +540,11 @@ impl Optimizer {
             supersedes,
             workspace_root,
             anchor_mode,
+            details: if decision.details.is_null() {
+                None
+            } else {
+                Some(decision.details.clone())
+            },
             ..Default::default()
         };
         let actor = ibis_search::ActorContext::LOCAL;
@@ -629,6 +672,7 @@ fn deterministic_title_match(
         confidence: observation.confidence,
         merge_with: candidate.id.clone(),
         valid_until: String::new(),
+        details: serde_json::Value::Null,
     })
 }
 
@@ -687,13 +731,14 @@ Classify durable information as one of: decision, fix, constraint, rule, gotcha,
 Use action "merge" only when a supplied candidate expresses the same durable fact; merge_with must be that candidate's exact ID.
 Use action "noise" for routine command output, transient chatter, or information with no reusable value.
 For create or merge, rewrite the content as a concise, self-contained statement. Set valid_until only for time-bounded information.
+Fill "details" with the kind-specific structured keys when the observation supports them: decision -> scope (required), alternatives[] (array of strings), tradeoffs; fix -> root_cause (required), symptom, remedy; constraint -> applies_to[] (required, array of strings), until; rule -> enforcement (required). Use only the keys you can ground in the observation; omit the rest.
 "#;
 
 /// Assembles the distill prompt: byte-stable instructions → observation →
 /// duplicates → the return-schema instruction last (D13).
 fn build_distill_prompt(observation_content: &str, candidates_json: &str) -> String {
     format!(
-        "{DISTILL_INSTRUCTIONS}\nOBSERVATION:\n{observation_content}\n\nPOSSIBLE DUPLICATES:\n{candidates_json}\n\nReturn only JSON:\n{{\"action\":\"create|merge|noise\",\"kind\":\"...\",\"title\":\"...\",\"content\":\"...\",\"confidence\":0.0,\"merge_with\":\"\",\"valid_until\":\"\"}}"
+        "{DISTILL_INSTRUCTIONS}\nOBSERVATION:\n{observation_content}\n\nPOSSIBLE DUPLICATES:\n{candidates_json}\n\nReturn only JSON:\n{{\"action\":\"create|merge|noise\",\"kind\":\"...\",\"title\":\"...\",\"content\":\"...\",\"confidence\":0.0,\"merge_with\":\"\",\"valid_until\":\"\",\"details\":{{}}}}"
     )
 }
 
@@ -971,6 +1016,83 @@ mod tests {
                 .contains("guard an empty discovery_root"),
             "content binding: {:?}",
             add_vars[0].get("content")
+        );
+    }
+
+    /// C7 strict mode: the distillation retries ONCE when the per-kind
+    /// required details keys are missing, then persists the grounded details.
+    #[tokio::test]
+    async fn strict_details_retry_once_and_persist_grounded_details() {
+        let db = Arc::new(ConsolidateDb::new(
+            vec![obj(vec![
+                ("id", Value::from_t("memory:obs1")),
+                (
+                    "content",
+                    Value::from_t("The wizard crashes when discovery_root is empty."),
+                ),
+                ("embedding", Value::from_t(vec![0.1f64, 0.2])),
+                ("owner", Value::from_t("agent")),
+                ("visibility", Value::from_t("team")),
+            ])],
+            Vec::new(),
+        ));
+        let ai = Arc::new(ConsolidateAi::new(vec![
+            r#"{"action":"create","kind":"fix","title":"t","content":"c","confidence":0.8}"#,
+            r#"{"action":"create","kind":"fix","title":"t","content":"c","confidence":0.8,"details":{"root_cause":"empty discovery root"}}"#,
+        ]));
+        let mut opt = optimizer(db.clone(), ai.clone());
+        opt.schema_enforcement = ibis_search::memory::details::SchemaEnforcement::Strict;
+        opt.consolidate_loop("ibis", 5)
+            .await
+            .expect("retry succeeds");
+        assert_eq!(
+            ai.prompts.lock().unwrap().len(),
+            2,
+            "strict mode retries the distillation exactly once"
+        );
+        let add_vars = db.vars_of("CREATE memory:");
+        assert_eq!(add_vars.len(), 1, "one add_memory transaction");
+        assert!(
+            add_vars[0]
+                .values()
+                .any(|v| matches!(v, Value::String(s) if s == "empty discovery root")),
+            "details bind on the write: {:?}",
+            add_vars[0]
+        );
+        let calls = db.sql_calls();
+        assert!(
+            calls.join("\n").contains("details.root_cause = $det_0"),
+            "details ride dotted fields: {calls:?}"
+        );
+    }
+
+    /// C7 strict mode: a second missing-details verdict gives up (item-level
+    /// failure, the loop stays healthy) and no memory is written.
+    #[tokio::test]
+    async fn strict_details_gives_up_after_one_retry() {
+        let db = Arc::new(ConsolidateDb::new(
+            vec![obj(vec![
+                ("id", Value::from_t("memory:obs1")),
+                ("content", Value::from_t("Some observation body.")),
+                ("embedding", Value::from_t(vec![0.1f64, 0.2])),
+                ("owner", Value::from_t("agent")),
+                ("visibility", Value::from_t("team")),
+            ])],
+            Vec::new(),
+        ));
+        let ai = Arc::new(ConsolidateAi::new(vec![
+            r#"{"action":"create","kind":"fix","title":"t","content":"c","confidence":0.8}"#,
+            r#"{"action":"create","kind":"fix","title":"t","content":"c","confidence":0.8}"#,
+        ]));
+        let mut opt = optimizer(db.clone(), ai.clone());
+        opt.schema_enforcement = ibis_search::memory::details::SchemaEnforcement::Strict;
+        opt.consolidate_loop("ibis", 5)
+            .await
+            .expect("item-level failure stays contained");
+        assert_eq!(ai.prompts.lock().unwrap().len(), 2, "no third attempt");
+        assert!(
+            db.vars_of("CREATE memory:").is_empty(),
+            "no memory written after the failed retry"
         );
     }
 
@@ -1437,6 +1559,21 @@ mod tests {
             .is_err(),
             "invalid valid_until rejected"
         );
+
+        // C7: details ride through the parser; absence stays null.
+        let with_details = parse_consolidation_decision(
+            "{\"action\":\"create\",\"kind\":\"decision\",\"content\":\"c\",\"details\":{\"scope\":\"billing\",\"alternatives\":[\"cache\"]}}",
+        )
+        .expect("details parse");
+        assert_eq!(
+            with_details.details,
+            serde_json::json!({"scope": "billing", "alternatives": ["cache"]})
+        );
+        let without_details = parse_consolidation_decision(
+            "{\"action\":\"create\",\"kind\":\"decision\",\"content\":\"c\"}",
+        )
+        .expect("no details");
+        assert!(without_details.details.is_null());
     }
 }
 
@@ -1458,7 +1595,7 @@ mod prompt_stability_tests {
         assert_eq!(&b[..DISTILL_INSTRUCTIONS.len()], DISTILL_INSTRUCTIONS);
         assert_ne!(a, b);
         // The return-schema instruction is the trailing (query-adjacent) part.
-        assert!(a.ends_with(r#""merge_with":"","valid_until":""}"#));
-        assert!(b.ends_with(r#""merge_with":"","valid_until":""}"#));
+        assert!(a.ends_with(r#""merge_with":"","valid_until":"","details":{}}"#));
+        assert!(b.ends_with(r#""merge_with":"","valid_until":"","details":{}}"#));
     }
 }

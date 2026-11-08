@@ -4,6 +4,27 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(memory): typed `details` per memory kind (C7 ddofds)** -
+  `memory_add` and `memory_update` accept an optional JSON `details` object
+  (stored as `DEFINE FIELD details TYPE option<object> FLEXIBLE`; nested
+  keys flatten to bound dotted fields, arrays must hold scalars, keys are
+  identifier-vetted). The per-kind rubric enforces one minimal key —
+  decision → `scope`, fix → `root_cause`, constraint → `applies_to`,
+  rule → `enforcement` (the rest — `alternatives[]`/`tradeoffs`,
+  `symptom`/`remedy`, `until` — stays optional) — under
+  `memory.schema_enforcement = "warn"` (default: accept with a warning) or
+  `"strict"` (reject). Supersession now stays within one kind. The
+  consolidation prompt asks for the rubric keys, persists grounded details
+  on the new memory, and in strict mode retries the distillation once
+  before giving up (item-level failure, the loop stays healthy).
+  `memory_search` gains scalar equality filters on `details.<key>`
+  (e.g. `{"scope":"billing"}`); `memory_list`, `memory_search` and
+  `memory_export` project `details` back as plain JSON. Evidence (08/11,
+  SurrealDB 4.0.0, live scratch DB): details survive the SCHEMAFULL
+  FLEXIBLE roundtrip and the filtered search returns only the scoped row
+  (live memory estate 13/13 green). Tests: ibis-search 121/121, ibis-core
+  54/54, ibis-optimization 25/25, ibis-server 61/61; clippy
+  `-D warnings` green.
 - **feat(search): deterministic symbol-variant query expansion (A4 ddofds)** -
   `ask_project` embeds a second, expanded query variant when linked symbols
   resolve: the variant is the literal query plus the reunited CamelCase

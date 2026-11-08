@@ -38,6 +38,7 @@ pub mod claim_notes;
 pub mod claim_store;
 pub mod claim_tree;
 pub mod design;
+pub mod details;
 pub mod export;
 pub mod gitbound;
 pub mod hotcache;
@@ -102,6 +103,10 @@ pub struct Memory {
     /// `provenance.source_hash` when present (export/import dedup).
     #[serde(skip_serializing_if = "String::is_empty", default)]
     pub source_hash: String,
+    /// Per-kind structured attributes (C7): `option<object> FLEXIBLE` on the
+    /// memory row, projected back as plain JSON when present.
+    #[serde(skip_serializing_if = "serde_json::Value::is_null", default)]
+    pub details: serde_json::Value,
 }
 
 /// `memoryFromRow: tolerant decode of any projected memory row.
@@ -124,6 +129,7 @@ pub(crate) fn memory_from_row(row: &Object) -> Memory {
         score: rows::numeric_float(rows::field(row, "score")),
         store: rows::scalar_string(rows::field(row, "store")),
         source_hash: String::new(),
+        details: details::details_json_from_value(rows::field(row, "details")),
     }
 }
 
@@ -318,6 +324,9 @@ pub struct MemoryUpdateParams {
     pub tags: Option<Vec<String>>,
     pub visibility: Option<String>,
     pub valid_until: Option<String>,
+    /// C7: patch the structured details (merge semantics; a `null` value
+    /// clears that key). Validated against the memory's current kind.
+    pub details: Option<serde_json::Value>,
     pub actor: String,
 }
 
@@ -330,6 +339,8 @@ pub struct MemorySearchParams {
     pub status: String,
     pub visibility: String,
     pub tags: Vec<String>,
+    /// C7: scalar equality filters on `details.<key>` (e.g. `scope=billing`).
+    pub details: serde_json::Map<String, serde_json::Value>,
     pub limit: usize,
     pub actor: String,
 }
@@ -395,6 +406,35 @@ impl crate::search::SearchService {
 
         let mut bindings: Bindings = Vec::new();
         let mut sets: Vec<String> = vec!["updated_at = time::now()".to_string()];
+        // C7: details patch — validated against the memory's CURRENT kind;
+        // keys merge into the object, a null value clears that key.
+        if let Some(details) = &params.details {
+            if !details.is_null() {
+                if let Err(msg) = details::validate_memory_details(&memory.kind, details) {
+                    match self.schema_enforcement {
+                        details::SchemaEnforcement::Strict => {
+                            return Err(SearchError::other(format!(
+                                "memory_update details: {msg}"
+                            )));
+                        }
+                        details::SchemaEnforcement::Warn => {
+                            tracing::warn!("memory_update details: {msg}");
+                        }
+                    }
+                }
+                let fields = details::details_fields_including_null(details)
+                    .map_err(|e| SearchError::other(format!("memory_update details: {e}")))?;
+                for (idx, (path, value)) in fields.into_iter().enumerate() {
+                    if matches!(value, ibis_db::value::Value::None) {
+                        sets.push(format!("details.{path} = NONE"));
+                        continue;
+                    }
+                    let var = format!("det_{idx}");
+                    bindings.push((var.clone(), value));
+                    sets.push(format!("details.{path} = ${var}"));
+                }
+            }
+        }
         if let Some(content) = &params.content {
             bindings.push((
                 "content".into(),
@@ -600,7 +640,7 @@ impl crate::search::SearchService {
         // which are indistinguishable otherwise — the field is already on
         // the `Memory` model and every other mutating surface re-reads it.
         let sql = format!(
-            "SELECT id, kind, title, content, status, confidence, visibility, owner, tags, branch, valid_from, valid_until, created_at, updated_at, store FROM memory WHERE {} ORDER BY updated_at DESC LIMIT {limit};",
+            "SELECT id, kind, title, content, status, confidence, visibility, owner, tags, branch, valid_from, valid_until, created_at, updated_at, store, details FROM memory WHERE {} ORDER BY updated_at DESC LIMIT {limit};",
             where_parts.join(" AND ")
         );
         let outcome = db
@@ -690,6 +730,24 @@ impl crate::search::SearchService {
                 bindings.extend(more);
             }
         }
+        // C7: scalar equality filters on structured details (`details.scope`
+        // and friends). Keys are identifier-vetted before they enter the
+        // field path; values bind (F-002).
+        for (idx, (key, value)) in params.details.iter().enumerate() {
+            if !details::key_is_safe(key) {
+                return Err(SearchError::other(format!(
+                    "details filter key {key:?} must match [A-Za-z0-9_]+"
+                )));
+            }
+            let Some(bound) = details::details_filter_value(value) else {
+                return Err(SearchError::other(format!(
+                    "details filter {key:?} must be a string, number or boolean"
+                )));
+            };
+            let var = format!("det_{idx}");
+            bindings.push((var.clone(), bound));
+            where_parts.push(format!("details.{key} = ${var}"));
+        }
 
         // WQ-7: the fetch is a candidate window ranked by the DiskANN index; the
         // keyword/entity re-ranking rescores inside the window.
@@ -719,7 +777,7 @@ impl crate::search::SearchService {
         };
 
         let sql = format!(
-            "SELECT id, kind, title, string::slice(content, 0, {MEMORY_SEARCH_SUMMARY_RUNES}) AS content, status, confidence, visibility, owner, tags, branch, valid_from, valid_until, created_at, updated_at, vector::similarity::cosine(embedding, $vec) AS score FROM memory WHERE {} ORDER BY vector::distance::cosine(embedding, $vec) LIMIT {fetch_limit};",
+            "SELECT id, kind, title, string::slice(content, 0, {MEMORY_SEARCH_SUMMARY_RUNES}) AS content, status, confidence, visibility, owner, tags, branch, valid_from, valid_until, created_at, updated_at, details, vector::similarity::cosine(embedding, $vec) AS score FROM memory WHERE {} ORDER BY vector::distance::cosine(embedding, $vec) LIMIT {fetch_limit};",
             where_parts.join(" AND ")
         );
         bindings.push(("vec".into(), crate::commit_meaning::vec_value_f32(&vector)));
@@ -1473,7 +1531,7 @@ mod tests {
             .cloned()
             .expect("memory query");
         assert!(
-            sql.contains("created_at, updated_at, store FROM memory"),
+            sql.contains("created_at, updated_at, store, details FROM memory"),
             "the store marker must ride the browse projection: {sql}"
         );
     }
@@ -1612,5 +1670,136 @@ mod tests {
             err.to_string().contains("workstream not found"),
             "error names the miss: {err}"
         );
+    }
+
+    // --- C7: structured details ---------------------------------------------
+
+    /// C7: the semantic search applies scalar details filters as bound
+    /// equality predicates on the structured field.
+    #[tokio::test]
+    async fn search_memory_filters_on_details() {
+        use crate::test_support::{fake_ai, rows_of, FakeDb};
+        use ibis_db::value::Value;
+        let fake = std::sync::Arc::new(FakeDb::new(vec![("FROM memory", rows_of(vec![]))]));
+        let svc = crate::search::SearchService::new(Some(fake.clone()), Some(fake_ai()));
+        let mut details = serde_json::Map::new();
+        details.insert("scope".into(), serde_json::json!("billing"));
+        svc.search_memory(
+            &crate::ActorContext::LOCAL,
+            MemorySearchParams {
+                query: "q".into(),
+                details,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("search");
+        let calls = fake.smart_calls.lock().unwrap().clone();
+        let idx = calls
+            .iter()
+            .position(|q| q.contains("FROM memory"))
+            .expect("memory query");
+        assert!(
+            calls[idx].contains("details.scope = $det_0"),
+            "details filter rides the WHERE clause: {}",
+            calls[idx]
+        );
+        let vars = fake.smart_vars.lock().unwrap();
+        assert!(
+            vars[idx]
+                .values()
+                .any(|v| matches!(v, Value::String(s) if s == "billing")),
+            "the filter value binds (F-002)"
+        );
+    }
+
+    /// C7: details filter keys become field paths — unsafe keys are rejected
+    /// before any query runs.
+    #[tokio::test]
+    async fn search_memory_rejects_unsafe_details_filter_keys() {
+        use crate::test_support::{fake_ai, FakeDb};
+        let fake = std::sync::Arc::new(FakeDb::default());
+        let svc = crate::search::SearchService::new(Some(fake), Some(fake_ai()));
+        let mut details = serde_json::Map::new();
+        details.insert("bad key".into(), serde_json::json!("x"));
+        let err = svc
+            .search_memory(
+                &crate::ActorContext::LOCAL,
+                MemorySearchParams {
+                    query: "q".into(),
+                    details,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("unsafe key");
+        assert!(err.to_string().contains("A-Za-z0-9_"), "{err}");
+    }
+
+    fn update_service(
+        kind: &str,
+    ) -> (
+        std::sync::Arc<crate::test_support::FakeDb>,
+        crate::search::SearchService,
+    ) {
+        use crate::test_support::{fake_ai, obj, rows_of, FakeDb};
+        use ibis_db::value::Value;
+        let fake = std::sync::Arc::new(FakeDb::new(vec![(
+            "SELECT * FROM memory:mem_1",
+            rows_of(vec![obj(vec![
+                ("id", Value::from_t("memory:mem_1")),
+                ("kind", Value::from_t(kind)),
+                ("content", Value::from_t("body")),
+                ("status", Value::from_t("current")),
+                ("visibility", Value::from_t("team")),
+                ("owner", Value::from_t("unknown")),
+            ])]),
+        )]));
+        (
+            fake.clone(),
+            crate::search::SearchService::new(Some(fake), Some(fake_ai())),
+        )
+    }
+
+    /// C7: `memory_update` validates the details patch against the memory's
+    /// current kind (strict) and merges keys with null-clears (warn).
+    #[tokio::test]
+    async fn update_memory_patches_details_and_validates_strictly() {
+        let (_fake, mut svc) = update_service("decision");
+        svc.schema_enforcement = details::SchemaEnforcement::Strict;
+        let err = svc
+            .update_memory(
+                &crate::ActorContext::LOCAL,
+                MemoryUpdateParams {
+                    id: "memory:mem_1".into(),
+                    details: Some(serde_json::json!({"tradeoffs": "x"})),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("missing scope");
+        assert!(err.to_string().contains("scope"), "{err}");
+
+        let (fake2, svc2) = update_service("decision");
+        svc2.update_memory(
+            &crate::ActorContext::LOCAL,
+            MemoryUpdateParams {
+                id: "memory:mem_1".into(),
+                details: Some(serde_json::json!({"scope": "billing", "tradeoffs": null})),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("warn accepts + patch");
+        let sql = fake2
+            .smart_calls
+            .lock()
+            .unwrap()
+            .clone()
+            .into_iter()
+            .find(|q| q.contains("UPDATE memory:mem_1"))
+            .expect("update sql");
+        assert!(sql.contains("details.scope = $det_0"), "{sql}");
+        assert!(sql.contains("details.tradeoffs = NONE"), "{sql}");
     }
 }
