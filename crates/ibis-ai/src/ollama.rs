@@ -620,7 +620,11 @@ mod tests {
         let emb = p.embed_text("seeded").await.expect("l2 hit");
         assert_eq!(emb, vec![0.25, -0.75]);
         assert_eq!(store.gets.load(Ordering::SeqCst), 1);
-        assert_eq!(store.puts.load(Ordering::SeqCst), 0, "hits are not re-written");
+        assert_eq!(
+            store.puts.load(Ordering::SeqCst),
+            0,
+            "hits are not re-written"
+        );
     }
 
     /// After a fresh fetch the vector is written back to L2; a second
@@ -646,7 +650,11 @@ mod tests {
             .with_disk_cache(store.clone() as Arc<dyn EmbeddingCacheStore>, 2);
         let emb = first.embed_text("fresh").await.expect("first fetch");
         assert_eq!(emb, vec![0.5, 0.6]);
-        assert_eq!(store.puts.load(Ordering::SeqCst), 1, "write-back after fetch");
+        assert_eq!(
+            store.puts.load(Ordering::SeqCst),
+            1,
+            "write-back after fetch"
+        );
         assert_eq!(hits.load(Ordering::SeqCst), 1);
 
         // Cold L1, same L2: no HTTP.
@@ -654,7 +662,11 @@ mod tests {
             .with_disk_cache(store.clone() as Arc<dyn EmbeddingCacheStore>, 2);
         let emb = second.embed_text("fresh").await.expect("l2 hit");
         assert_eq!(emb, vec![0.5, 0.6]);
-        assert_eq!(hits.load(Ordering::SeqCst), 1, "second call never hits HTTP");
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            1,
+            "second call never hits HTTP"
+        );
     }
 
     /// A failing store degrades to the HTTP path (best-effort contract) and

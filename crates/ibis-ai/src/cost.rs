@@ -58,9 +58,7 @@ impl CostTracker {
                 "Tokens used: {total} (cached {cached_tokens}, billed prompt {billed_prompt}/{prompt_tokens}, saved ~{discount}; Cost: ~${cost:.5}) for {related_entity_id}"
             );
         } else if cost > 0.0001 {
-            tracing::debug!(
-                "Tokens used: {total} (Cost: ~${cost:.5}) for {related_entity_id}"
-            );
+            tracing::debug!("Tokens used: {total} (Cost: ~${cost:.5}) for {related_entity_id}");
         }
     }
 
@@ -110,7 +108,9 @@ mod tests {
     async fn records_total_tokens() {
         let store = Arc::new(FakeStore::new(false));
         let tracker = CostTracker::new(Some(store.clone() as Arc<dyn CostStore>));
-        tracker.record_usage("system:search_agentic", 120, 80, 0).await;
+        tracker
+            .record_usage("system:search_agentic", 120, 80, 0)
+            .await;
         assert_eq!(store.calls.load(Ordering::SeqCst), 1);
         assert_eq!(store.last.lock().unwrap().0, "system:search_agentic");
         assert_eq!(store.last.lock().unwrap().1, 200);

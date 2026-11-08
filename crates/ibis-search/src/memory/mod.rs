@@ -699,8 +699,7 @@ impl crate::search::SearchService {
             // once more to keep the in-scope pool comparable.
             fetch_limit = (fetch_limit * 2).min(90).max(limit);
         }
-        let scope_ids: std::collections::HashSet<String> = if let Some(repo_id) = &project_repo_id
-        {
+        let scope_ids: std::collections::HashSet<String> = if let Some(repo_id) = &project_repo_id {
             let scope_sql = format!(
                 "SELECT VALUE id FROM {TABLE_MEMORY} WHERE (project = {repo_id} OR id IN {repo_id}->{ES_HAS_MEMORY}->{TABLE_MEMORY});"
             );

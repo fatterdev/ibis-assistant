@@ -47,7 +47,9 @@ async fn embedding_cache_roundtrip_miss_mismatch_and_prune() {
     let Some((exec, db_name)) = connect_scratch().await else {
         return;
     };
-    schema::init_schema(exec.as_ref()).await.expect("init schema");
+    schema::init_schema(exec.as_ref())
+        .await
+        .expect("init schema");
     let store = DbEmbeddingCacheStore::new(exec.clone(), "m".into(), 2);
 
     // Roundtrip: put → get returns the exact vector.
@@ -57,7 +59,10 @@ async fn embedding_cache_roundtrip_miss_mismatch_and_prune() {
     assert_eq!(got, vec![0.25, -0.75]);
 
     // Unknown key → None (the SELECT on a missing record id returns empty).
-    assert!(store.get("m:2:never-written").await.is_none(), "miss is None");
+    assert!(
+        store.get("m:2:never-written").await.is_none(),
+        "miss is None"
+    );
 
     // Dimension mismatch reads as a miss, never as a poison.
     let wide = DbEmbeddingCacheStore::new(exec.clone(), "m".into(), 3);
@@ -67,7 +72,10 @@ async fn embedding_cache_roundtrip_miss_mismatch_and_prune() {
         store.get(wide_key).await.is_none(),
         "a 3-float row must miss under a dim-2 adapter"
     );
-    assert!(wide.get(wide_key).await.is_some(), "matching dim still hits");
+    assert!(
+        wide.get(wide_key).await.is_some(),
+        "matching dim still hits"
+    );
 
     // Prune: seed a stale row (40d old) next to the fresh one; only the
     // stale row drops and the prune is idempotent.
@@ -97,7 +105,9 @@ async fn unique_key_index_backstop() {
     let Some((exec, db_name)) = connect_scratch().await else {
         return;
     };
-    schema::init_schema(exec.as_ref()).await.expect("init schema");
+    schema::init_schema(exec.as_ref())
+        .await
+        .expect("init schema");
 
     exec.smart_query(
         "UPSERT embedding_cache:⟨a⟩ SET key = 'dup', model = 'm', dim = 1, embedding = [0.1], created_at = time::now();",

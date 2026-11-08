@@ -1084,10 +1084,7 @@ mod tests {
             "candidate at the configured floor must be kept: {}",
             prompts[0]
         );
-        assert_calls_contain(
-            &db.sql_calls(),
-            &["RELATE $mem->supersedes->memory:fix1"],
-        );
+        assert_calls_contain(&db.sql_calls(), &["RELATE $mem->supersedes->memory:fix1"]);
     }
 
     /// C9: an observation whose normalized title equals a candidate's merges
@@ -1098,7 +1095,10 @@ mod tests {
             vec![obj(vec![
                 ("id", Value::from_t("memory:obs1")),
                 ("title", Value::from_t("Setup  Crash")),
-                ("content", Value::from_t("Setup crashes when roots are empty.")),
+                (
+                    "content",
+                    Value::from_t("Setup crashes when roots are empty."),
+                ),
                 ("embedding", Value::from_t(vec![0.1f64, 0.2])),
                 ("confidence", Value::from_t(0.5f64)),
             ])],
@@ -1454,14 +1454,8 @@ mod prompt_stability_tests {
             r#"[{"id":"memory:mem_a","kind":"fact","title":"t","content":"c","score":0.9}]"#,
         );
         let b = build_distill_prompt("obs B — entirely different and much longer", "[]");
-        assert_eq!(
-            &a[..DISTILL_INSTRUCTIONS.len()],
-            DISTILL_INSTRUCTIONS
-        );
-        assert_eq!(
-            &b[..DISTILL_INSTRUCTIONS.len()],
-            DISTILL_INSTRUCTIONS
-        );
+        assert_eq!(&a[..DISTILL_INSTRUCTIONS.len()], DISTILL_INSTRUCTIONS);
+        assert_eq!(&b[..DISTILL_INSTRUCTIONS.len()], DISTILL_INSTRUCTIONS);
         assert_ne!(a, b);
         // The return-schema instruction is the trailing (query-adjacent) part.
         assert!(a.ends_with(r#""merge_with":"","valid_until":""}"#));

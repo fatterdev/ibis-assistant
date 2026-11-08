@@ -1125,8 +1125,14 @@ mod prompt_stability_tests {
         ];
         let a = build_ingest_synth_prompt(".rs", &samples_a);
         let b = build_ingest_synth_prompt(".jsp", &samples_b);
-        assert_eq!(&a[..INGEST_SYNTH_INSTRUCTIONS.len()], INGEST_SYNTH_INSTRUCTIONS);
-        assert_eq!(&b[..INGEST_SYNTH_INSTRUCTIONS.len()], INGEST_SYNTH_INSTRUCTIONS);
+        assert_eq!(
+            &a[..INGEST_SYNTH_INSTRUCTIONS.len()],
+            INGEST_SYNTH_INSTRUCTIONS
+        );
+        assert_eq!(
+            &b[..INGEST_SYNTH_INSTRUCTIONS.len()],
+            INGEST_SYNTH_INSTRUCTIONS
+        );
         assert_ne!(a, b);
         // The extension fingerprint is variable content: after the prefix.
         assert!(a[INGEST_SYNTH_INSTRUCTIONS.len()..].starts_with("\nExtension: .rs"));

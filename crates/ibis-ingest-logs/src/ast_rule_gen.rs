@@ -1222,14 +1222,8 @@ mod prompt_stability_tests {
             &["line a1".to_string(), "line a2".to_string()],
         );
         let b = build_ast_rule_prompt("python", "proj-b", &[], &["different sample".to_string()]);
-        assert_eq!(
-            &a[..AST_RULE_INSTRUCTIONS.len()],
-            AST_RULE_INSTRUCTIONS
-        );
-        assert_eq!(
-            &b[..AST_RULE_INSTRUCTIONS.len()],
-            AST_RULE_INSTRUCTIONS
-        );
+        assert_eq!(&a[..AST_RULE_INSTRUCTIONS.len()], AST_RULE_INSTRUCTIONS);
+        assert_eq!(&b[..AST_RULE_INSTRUCTIONS.len()], AST_RULE_INSTRUCTIONS);
         assert_ne!(a, b);
         // Query last.
         assert!(a.ends_with("Sample runtime log lines:\nline a1\nline a2\n"));

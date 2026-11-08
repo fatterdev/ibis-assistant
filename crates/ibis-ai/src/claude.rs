@@ -65,8 +65,7 @@ impl ClaudeUsage {
             prompt_token_count: self.input_tokens,
             candidates_token_count: self.output_tokens,
             total_token_count: self.input_tokens + self.output_tokens,
-            cached_content_token_count: Some(self.cache_read_input_tokens)
-                .filter(|v| *v > 0),
+            cached_content_token_count: Some(self.cache_read_input_tokens).filter(|v| *v > 0),
         }
     }
 }

@@ -17,10 +17,10 @@ use ibis_db::executor::{Executor, SurrealDbExecutor, Vars};
 use ibis_db::process::ProcessManager;
 use ibis_db::value::{RecordId, SurrealValue, Value};
 // B6: sha256 record ids for the L2 embedding cache (Digest trait in scope).
-use sha2::Digest;
 use ibis_ingest_dynamic::queue::{IngestionJob, ProcessJobFn, ProjectIngestionManager};
 use ibis_repopr::service::Service as RepoprService;
 use ibis_search::search::SearchService;
+use sha2::Digest;
 
 use crate::state::AppState;
 
