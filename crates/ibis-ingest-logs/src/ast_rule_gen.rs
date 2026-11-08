@@ -201,31 +201,7 @@ impl LogAnalyzer {
             }
         }
 
-        let prompt = format!(
-            r#"You generate an ast-grep YAML rule that extracts log FORMAT strings from source code.
-The rule will be used like human-written rules in rules/*-logs.yml: matches must expose metavar $FORMAT (the format/message string literal).
-
-Constraints:
-- language: {lang} (or refine if samples clearly indicate otherwise; one of: go, javascript, typescript, python, java, csharp, cpp)
-- id MUST start with "ai-generated-" and MUST end with "-logs" (example: ai-generated-go-zap-logs)
-- Use rule.any with pattern entries; every pattern that captures a message must bind $FORMAT
-- Prefer logger call shapes NOT already covered by generic Info/Error/Printf patterns (e.g. Infow, Errorw, With().Info, slog.Log, custom wrappers)
-- Do NOT invent unrelated languages. Keep YAML small (< 8KB).
-- Also provide a short sample_code snippet in that language that MUST match at least one pattern and include a realistic format string literal.
-
-Return ONLY JSON (no markdown):
-{{"language":"...","id":"ai-generated-...-logs","yaml":"<full yaml document>","sample_code":"<snippet>","rationale":"<one sentence>"}}
-
-Project: {project}
-File hints: {file_hints}
-Sample runtime log lines:
-{samples}
-"#,
-            lang = lang,
-            project = self.project,
-            file_hints = file_hints.join(", "),
-            samples = samples.join("\n"),
-        );
+        let prompt = build_ast_rule_prompt(lang, &self.project, &file_hints, samples);
 
         let contents = [ibis_ai::types::Content {
             role: String::new(),
@@ -242,6 +218,7 @@ Sample runtime log lines:
                     &self.log_file_id,
                     usage.prompt_token_count.max(0) as u64,
                     usage.candidates_token_count.max(0) as u64,
+                    usage.cached_tokens(),
                 )
                 .await;
         }
@@ -1026,6 +1003,46 @@ pub fn looks_like_sg_error(out: &str) -> bool {
     lower.contains("error:") && !out.contains("\"ruleId\"") && !out.contains("\"ruleid\"")
 }
 
+/// D13 prompt stability: byte-stable instructions block for the ast-grep
+/// rule-generation call site. The proposed language, project, file hints and
+/// samples are variable content and follow this block; the sample log lines —
+/// the query — go last.
+const AST_RULE_INSTRUCTIONS: &str = r#"You generate an ast-grep YAML rule that extracts log FORMAT strings from source code.
+The rule will be used like human-written rules in rules/*-logs.yml: matches must expose metavar $FORMAT (the format/message string literal).
+
+Constraints:
+- Use one of the ast-grep languages: go, javascript, typescript, python, java, csharp, cpp (or refine if the samples clearly indicate otherwise)
+- id MUST start with "ai-generated-" and MUST end with "-logs" (example: ai-generated-go-zap-logs)
+- Use rule.any with pattern entries; every pattern that captures a message must bind $FORMAT
+- Prefer logger call shapes NOT already covered by generic Info/Error/Printf patterns (e.g. Infow, Errorw, With().Info, slog.Log, custom wrappers)
+- Do NOT invent unrelated languages. Keep YAML small (< 8KB).
+- Also provide a short sample_code snippet in that language that MUST match at least one pattern and include a realistic format string literal.
+
+Return ONLY JSON (no markdown):
+{"language":"...","id":"ai-generated-...-logs","yaml":"<full yaml document>","sample_code":"<snippet>","rationale":"<one sentence>"}
+"#;
+
+/// Assembles the ast-rule prompt: byte-stable instructions → per-call
+/// variable context → sample log lines (the query) last (D13).
+fn build_ast_rule_prompt(
+    lang: &str,
+    project: &str,
+    file_hints: &[&str],
+    samples: &[String],
+) -> String {
+    let mut p = String::from(AST_RULE_INSTRUCTIONS);
+    p.push_str("Proposed language: ");
+    p.push_str(lang);
+    p.push_str("\nProject: ");
+    p.push_str(project);
+    p.push_str("\nFile hints: ");
+    p.push_str(&file_hints.join(", "));
+    p.push_str("\nSample runtime log lines:\n");
+    p.push_str(&samples.join("\n"));
+    p.push('\n');
+    p
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1186,5 +1203,36 @@ mod tests {
 
         remove_env("IBIS_SG_ROOT");
         remove_env("IBIS_AST_RULE_STRUCTURAL_ONLY");
+    }
+}
+
+/// D13 prompt stability: two invocations with different contexts must share
+/// the byte-identical instruction prefix, and the sample log lines (the
+/// query) must stay last.
+#[cfg(test)]
+mod prompt_stability_tests {
+    use super::*;
+
+    #[test]
+    fn ast_rule_prompt_prefix_is_byte_stable_and_query_last() {
+        let a = build_ast_rule_prompt(
+            "go",
+            "proj-a",
+            &["src/a.go"],
+            &["line a1".to_string(), "line a2".to_string()],
+        );
+        let b = build_ast_rule_prompt("python", "proj-b", &[], &["different sample".to_string()]);
+        assert_eq!(
+            &a[..AST_RULE_INSTRUCTIONS.len()],
+            AST_RULE_INSTRUCTIONS
+        );
+        assert_eq!(
+            &b[..AST_RULE_INSTRUCTIONS.len()],
+            AST_RULE_INSTRUCTIONS
+        );
+        assert_ne!(a, b);
+        // Query last.
+        assert!(a.ends_with("Sample runtime log lines:\nline a1\nline a2\n"));
+        assert!(b.ends_with("Sample runtime log lines:\ndifferent sample\n"));
     }
 }

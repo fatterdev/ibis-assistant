@@ -77,6 +77,22 @@ pub struct UsageMetadata {
     pub candidates_token_count: i64,
     #[serde(rename = "totalTokenCount", default)]
     pub total_token_count: i64,
+    /// D13 — prompt tokens served from the provider's prompt cache: Gemini
+    /// `cachedContentTokenCount`, OpenAI-compat
+    /// `prompt_tokens_details.cached_tokens`, Claude `cache_read_input_tokens`.
+    /// `None` when the provider does not expose it (billing stays full-prompt).
+    /// Kept `i64` like the sibling fields so a hostile/negative provider value
+    /// cannot break deserialization; `cached_tokens()` clamps to 0.
+    #[serde(rename = "cachedContentTokenCount", default)]
+    pub cached_content_token_count: Option<i64>,
+}
+
+impl UsageMetadata {
+    /// Non-negative cached-prompt-token count for cost scaling (0 when the
+    /// provider does not expose the field).
+    pub fn cached_tokens(&self) -> u64 {
+        self.cached_content_token_count.unwrap_or(0).max(0) as u64
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

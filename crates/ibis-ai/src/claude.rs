@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use crate::error::AiError;
 use crate::runner::http_client;
 use crate::traits::AIProvider;
-use crate::types::{Candidate, Content, GenerationConfig, Part};
+use crate::types::{Candidate, Content, GenerationConfig, Part, UsageMetadata};
 
 const DEFAULT_MODEL: &str = "claude-sonnet-4";
 const ENDPOINT: &str = "https://api.anthropic.com/v1/messages";
@@ -34,6 +34,8 @@ struct ClaudeMsg {
 struct ClaudeResp {
     #[serde(default)]
     content: Vec<ClaudeBlock>,
+    #[serde(default)]
+    usage: Option<ClaudeUsage>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -42,6 +44,31 @@ struct ClaudeBlock {
     r#type: String,
     #[serde(default)]
     text: String,
+}
+
+/// D13: Anthropic usage block — input/output tokens plus
+/// `cache_read_input_tokens` for prompt-cache reads (cache_creation tokens
+/// are write-side and bill at full prompt price, so they are not tracked).
+#[derive(Debug, serde::Deserialize, Default)]
+struct ClaudeUsage {
+    #[serde(default)]
+    input_tokens: i64,
+    #[serde(default)]
+    output_tokens: i64,
+    #[serde(default)]
+    cache_read_input_tokens: i64,
+}
+
+impl ClaudeUsage {
+    fn to_usage_metadata(&self) -> UsageMetadata {
+        UsageMetadata {
+            prompt_token_count: self.input_tokens,
+            candidates_token_count: self.output_tokens,
+            total_token_count: self.input_tokens + self.output_tokens,
+            cached_content_token_count: Some(self.cache_read_input_tokens)
+                .filter(|v| *v > 0),
+        }
+    }
 }
 
 /// Anthropic Messages API reasoning provider.
@@ -159,7 +186,7 @@ impl AIProvider for ClaudeProvider {
                 parts: vec![Part { text }],
             },
             finish_reason: "STOP".to_string(),
-            usage_metadata: None,
+            usage_metadata: parsed.usage.as_ref().map(|u| u.to_usage_metadata()),
         })
     }
 }

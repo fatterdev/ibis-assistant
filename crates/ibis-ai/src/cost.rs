@@ -25,13 +25,23 @@ impl CostTracker {
         CostTracker { store }
     }
 
+    /// Records one chat/reasoning turn. `cached_tokens` (D13) is the
+    /// provider-reported count of prompt tokens served from its prompt cache:
+    /// the blended billing approximation scales the recorded prompt side to
+    /// `prompt − 0.9 × cached` (cache reads bill at ~10% of full prompt price
+    /// on every major provider), so `tokens_used` accumulates billed tokens.
     pub async fn record_usage(
         &self,
         related_entity_id: &str,
         prompt_tokens: u64,
         candidates_tokens: u64,
+        cached_tokens: u64,
     ) {
-        let total = prompt_tokens + candidates_tokens;
+        // Saturating on purpose: a provider reporting more cached tokens than
+        // prompt tokens must never inflate (or panic on) the billing.
+        let discount = cached_tokens.saturating_mul(9) / 10;
+        let billed_prompt = prompt_tokens.saturating_sub(discount);
+        let total = billed_prompt + candidates_tokens;
         if total == 0 {
             return;
         }
@@ -43,11 +53,13 @@ impl CostTracker {
         // Blended $0.15 per 1M tokens (input+output simplification,
         // ).
         let cost = total as f64 / 1_000_000.0 * 0.15;
-        if cost > 0.0001 {
+        if cached_tokens > 0 {
             tracing::debug!(
-                "Tokens used: {} (Cost: ~${cost:.5}) for {}",
-                total,
-                related_entity_id
+                "Tokens used: {total} (cached {cached_tokens}, billed prompt {billed_prompt}/{prompt_tokens}, saved ~{discount}; Cost: ~${cost:.5}) for {related_entity_id}"
+            );
+        } else if cost > 0.0001 {
+            tracing::debug!(
+                "Tokens used: {total} (Cost: ~${cost:.5}) for {related_entity_id}"
             );
         }
     }
@@ -55,7 +67,7 @@ impl CostTracker {
     /// Estimates tokens for an embedding request (same `len/3` heuristic as
     /// the rate limiter) and records it.
     pub async fn record_embedding_usage(&self, related_entity_id: &str, text: &str) {
-        self.record_usage(related_entity_id, estimate_tokens(text) as u64, 0)
+        self.record_usage(related_entity_id, estimate_tokens(text) as u64, 0, 0)
             .await;
     }
 }
@@ -98,17 +110,43 @@ mod tests {
     async fn records_total_tokens() {
         let store = Arc::new(FakeStore::new(false));
         let tracker = CostTracker::new(Some(store.clone() as Arc<dyn CostStore>));
-        tracker.record_usage("system:search_agentic", 120, 80).await;
+        tracker.record_usage("system:search_agentic", 120, 80, 0).await;
         assert_eq!(store.calls.load(Ordering::SeqCst), 1);
         assert_eq!(store.last.lock().unwrap().0, "system:search_agentic");
         assert_eq!(store.last.lock().unwrap().1, 200);
+    }
+
+    /// D13: cached prompt tokens bill at ~10% — the recorded `tokens_used`
+    /// total scales to `prompt − 0.9 × cached + candidates`.
+    #[tokio::test]
+    async fn cached_tokens_discount_billing() {
+        let store = Arc::new(FakeStore::new(false));
+        let tracker = CostTracker::new(Some(store.clone() as Arc<dyn CostStore>));
+        // 100 prompt, 80 cached → discount 72 → billed prompt 28 → 28 + 50 = 78.
+        tracker.record_usage("x", 100, 50, 80).await;
+        assert_eq!(store.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(store.last.lock().unwrap().1, 78);
+    }
+
+    /// A provider reporting more cached than prompt tokens must not inflate
+    /// the bill: saturating subtraction floors the billed prompt at 0.
+    #[tokio::test]
+    async fn cached_tokens_never_exceed_prompt_billing() {
+        let store = Arc::new(FakeStore::new(false));
+        let tracker = CostTracker::new(Some(store.clone() as Arc<dyn CostStore>));
+        tracker.record_usage("x", 10, 0, 100).await;
+        // discount 90 > prompt 10 → billed prompt 0 → total 0 → skipped.
+        assert_eq!(store.calls.load(Ordering::SeqCst), 0);
+        tracker.record_usage("x", 10, 5, 100).await;
+        assert_eq!(store.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(store.last.lock().unwrap().1, 5);
     }
 
     #[tokio::test]
     async fn zero_total_is_skipped() {
         let store = Arc::new(FakeStore::new(false));
         let tracker = CostTracker::new(Some(store.clone() as Arc<dyn CostStore>));
-        tracker.record_usage("x", 0, 0).await;
+        tracker.record_usage("x", 0, 0, 0).await;
         assert_eq!(store.calls.load(Ordering::SeqCst), 0);
     }
 
@@ -116,7 +154,7 @@ mod tests {
     async fn store_failure_is_logged_not_raised() {
         let store = Arc::new(FakeStore::new(true));
         let tracker = CostTracker::new(Some(store.clone() as Arc<dyn CostStore>));
-        tracker.record_usage("x", 5, 5).await;
+        tracker.record_usage("x", 5, 5, 0).await;
         assert_eq!(store.calls.load(Ordering::SeqCst), 1);
     }
 
@@ -137,7 +175,7 @@ mod tests {
     #[tokio::test]
     async fn nil_store_is_noop() {
         let tracker = CostTracker::new(None);
-        tracker.record_usage("x", 10, 10).await;
+        tracker.record_usage("x", 10, 10, 0).await;
         tracker.record_embedding_usage("x", "text").await;
     }
 }

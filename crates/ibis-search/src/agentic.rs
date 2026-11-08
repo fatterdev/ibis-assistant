@@ -102,6 +102,7 @@ impl SearchService {
                             "system:search_agentic",
                             usage.prompt_token_count.max(0) as u64,
                             usage.candidates_token_count.max(0) as u64,
+                            usage.cached_tokens(),
                         )
                         .await;
                 }

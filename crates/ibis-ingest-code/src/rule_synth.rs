@@ -434,26 +434,11 @@ fn build_ingest_synth_prompt(ext: &str, samples: &[SampleFile]) -> String {
         .first()
         .map(|s| suggest_host_language(&s.rel_path))
         .unwrap_or_default();
-    let mut b = String::new();
-    b.push_str(
-        r#"You generate ast-grep YAML rules for Ibis code ingest of unfamiliar, polyglot, or legacy source files.
-This must work for ANY extension (templates, DSLs, mixed stacks)—not a single framework.
-
-Rules are consumed by ParseAST: id MUST start with "ai-generated-" and end with "-chunk", "-calls", or "-logs".
-- *-chunk: structural symbols (kind: function_declaration / method_declaration / class_declaration / script_element / element / …)
-- *-calls: call sites (kind: call_expression or equivalent patterns)
-- *-logs: only if logger format strings appear; must bind $FORMAT
-
-Pick a built-in ast-grep language: html, javascript, typescript, csharp, css, go, python, java, cpp, ruby, php, …
-If the file extension is not natively mapped, set "language_glob" to the host language (often "html" for markup templates so embedded <script>/<style> inject as JS/CSS).
-
-Keep each YAML < 6KB. Provide sample_code that MUST match at least one pattern/kind.
-
-Return ONLY a JSON array:
-[{"language":"...","language_glob":"html|","id":"ai-generated-...-chunk","kind":"chunk","yaml":"...","sample_code":"...","rationale":"..."}]
-
-Extension: "#,
-    );
+    // D13 prompt stability: byte-stable instructions first, variable context
+    // after. The extension fingerprint is variable content — it must never
+    // enter the byte-stable prefix.
+    let mut b = String::from(INGEST_SYNTH_INSTRUCTIONS);
+    b.push_str("\nExtension: ");
     b.push_str(ext);
     if !host_hint.is_empty() {
         b.push_str("\nSuggested host language: ");
@@ -862,6 +847,26 @@ fn synth_fingerprint(ext: &str, samples: &[SampleFile]) -> String {
         .collect::<Vec<_>>()
         .concat()
 }
+/// D13 prompt stability: byte-stable instructions block for the ingest rule
+/// synthesis call site. The extension fingerprint, host hint and samples are
+/// variable content and follow this block — never inside the stable prefix.
+const INGEST_SYNTH_INSTRUCTIONS: &str = r#"You generate ast-grep YAML rules for Ibis code ingest of unfamiliar, polyglot, or legacy source files.
+This must work for ANY extension (templates, DSLs, mixed stacks)—not a single framework.
+
+Rules are consumed by ParseAST: id MUST start with "ai-generated-" and end with "-chunk", "-calls", or "-logs".
+- *-chunk: structural symbols (kind: function_declaration / method_declaration / class_declaration / script_element / element / …)
+- *-calls: call sites (kind: call_expression or equivalent patterns)
+- *-logs: only if logger format strings appear; must bind $FORMAT
+
+Pick a built-in ast-grep language: html, javascript, typescript, csharp, css, go, python, java, cpp, ruby, php, …
+If the file extension is not natively mapped, set "language_glob" to the host language (often "html" for markup templates so embedded <script>/<style> inject as JS/CSS).
+
+Keep each YAML < 6KB. Provide sample_code that MUST match at least one pattern/kind.
+
+Return ONLY a JSON array:
+[{"language":"...","language_glob":"html|","id":"ai-generated-...-chunk","kind":"chunk","yaml":"...","sample_code":"...","rationale":"..."}]
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1092,5 +1097,42 @@ mod tests {
         assert!(!looks_like_sg_error(
             "{\"text\":\"error: x\",\"ruleId\":\"go-chunk\"}"
         ));
+    }
+}
+
+/// D13 prompt stability: two invocations with different contexts must share
+/// the byte-identical instruction prefix, and the samples (the query) must
+/// stay last.
+#[cfg(test)]
+mod prompt_stability_tests {
+    use super::*;
+
+    #[test]
+    fn synth_prompt_prefix_is_byte_stable_and_query_last() {
+        let samples_a = vec![SampleFile {
+            rel_path: "src/a.rs".to_string(),
+            content: "fn a() {}".to_string(),
+        }];
+        let samples_b = vec![
+            SampleFile {
+                rel_path: "tpl/b.jsp".to_string(),
+                content: "<% int x = 1; %>".to_string(),
+            },
+            SampleFile {
+                rel_path: "tpl/c.jsp".to_string(),
+                content: "<%= y %>".to_string(),
+            },
+        ];
+        let a = build_ingest_synth_prompt(".rs", &samples_a);
+        let b = build_ingest_synth_prompt(".jsp", &samples_b);
+        assert_eq!(&a[..INGEST_SYNTH_INSTRUCTIONS.len()], INGEST_SYNTH_INSTRUCTIONS);
+        assert_eq!(&b[..INGEST_SYNTH_INSTRUCTIONS.len()], INGEST_SYNTH_INSTRUCTIONS);
+        assert_ne!(a, b);
+        // The extension fingerprint is variable content: after the prefix.
+        assert!(a[INGEST_SYNTH_INSTRUCTIONS.len()..].starts_with("\nExtension: .rs"));
+        assert!(b[INGEST_SYNTH_INSTRUCTIONS.len()..].starts_with("\nExtension: .jsp"));
+        // Samples (the query) are last.
+        assert!(a.ends_with("fn a() {}\n"));
+        assert!(b.ends_with("<%= y %>\n"));
     }
 }

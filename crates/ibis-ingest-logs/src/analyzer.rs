@@ -589,33 +589,12 @@ impl LogAnalyzer {
         let baseline = crate::enrich::resolve_baseline(self).await;
         let repo_hints = crate::enrich::gather_repo_hints(self, &unmatched_lines).await;
 
-        let prompt = format!(
-            r#"Analyze the following log chunk from project {project}.
-Code baseline for correlation: {baseline}.
-Extract distinct errors or anomalies — classify AND pinpoint likely source location / root cause using repo context when available.
-Currently known error categories for this project: [{active_categories}]. Use this context to build incremental knowledge.
-Repo knowledge hints (may be empty):
-{repo_hints}
-
-For each error, provide:
-1. "category": a normalized, general description of the error (ignore specific IDs/timestamps)
-2. "stack_trace": the relevant stack trace or context
-3. "file": repo-relative source path when known (from stack frames OR repo hints). Prefer paths like src/db/client.rs over bare basenames. Empty string only if truly unknown.
-4. "line": integer source line when known, else 0
-5. "symbol": function/method/symbol name when known, else ""
-6. "cause": one short sentence explaining the likely root cause grounded in the log + repo hints (not just restating the category)
-7. "severity": a number from 1 to 10 (10 being critical)
-8. "template": The exact raw text of the entire error block (including cascade logs), but replace any dynamic/variable parts (like timestamps, specific IDs, memory addresses) with the literal string "<VAR>". Do not use regex.
-9. "supersedes": a string array of known categories that this new error incorporates or replaces (e.g., if this is a cascade that contains them).
-Note: Previously known errors have been replaced with markers like [KNOWN_ERROR: category]. If you see these markers, understand that the corresponding error occurred there.
-Format your response purely as a JSON array of objects with the above keys. No markdown blocks.
-Log text:
-{text}"#,
-            project = self.project,
-            baseline = baseline,
-            active_categories = active_categories,
-            repo_hints = display_or(&repo_hints, "(none)"),
-            text = text,
+        let prompt = build_analyze_prompt(
+            &self.project,
+            &baseline.to_string(),
+            &active_categories,
+            display_or(&repo_hints, "(none)"),
+            &text,
         );
 
         let contents = [Content {
@@ -664,6 +643,7 @@ Log text:
                     &self.log_file_id,
                     usage.prompt_token_count.max(0) as u64,
                     usage.candidates_token_count.max(0) as u64,
+                    usage.cached_tokens(),
                 )
                 .await;
         }
@@ -802,13 +782,9 @@ Log text:
         }
 
         let sample = lines.join("\n");
-        let prompt = format!(
-            r#"Analyze the following log sample.
-What is the regular expression (RE2) that uniquely identifies the absolute BEGINNING of a new log entry (e.g. a timestamp or log level)?
-Return ONLY the raw regex string, nothing else. If there is no clear delimiter, return an empty string.
-Log sample:
-{sample}"#
-        );
+        // D13 prompt stability: byte-stable instructions, the log sample —
+        // the query — last.
+        let prompt = format!("{DISCOVER_FORMAT_INSTRUCTIONS}Log sample:\n{sample}");
 
         let contents = [Content {
             role: String::new(),
@@ -1193,6 +1169,59 @@ pub(crate) fn mask_template_to_regex(template: &str) -> String {
     }
     b
 }
+
+/// D13 prompt stability: byte-stable instructions block for the semantic
+/// log-analysis call site. Everything dynamic (project, baseline, known
+/// categories, repo hints) follows this block, and the log text — the query —
+/// goes last. No timestamp or request-id may ever enter this const.
+const ANALYZE_INSTRUCTIONS: &str = r#"Analyze the log text provided at the end.
+Extract distinct errors or anomalies — classify AND pinpoint likely source location / root cause using repo context when available.
+
+For each error, provide:
+1. "category": a normalized, general description of the error (ignore specific IDs/timestamps)
+2. "stack_trace": the relevant stack trace or context
+3. "file": repo-relative source path when known (from stack frames OR repo hints). Prefer paths like src/db/client.rs over bare basenames. Empty string only if truly unknown.
+4. "line": integer source line when known, else 0
+5. "symbol": function/method/symbol name when known, else ""
+6. "cause": one short sentence explaining the likely root cause grounded in the log + repo hints (not just restating the category)
+7. "severity": a number from 1 to 10 (10 being critical)
+8. "template": The exact raw text of the entire error block (including cascade logs), but replace any dynamic/variable parts (like timestamps, specific IDs, memory addresses) with the literal string "<VAR>". Do not use regex.
+9. "supersedes": a string array of known categories that this new error incorporates or replaces (e.g., if this is a cascade that contains them).
+Note: Previously known errors have been replaced with markers like [KNOWN_ERROR: category]. If you see these markers, understand that the corresponding error occurred there.
+Format your response purely as a JSON array of objects with the above keys. No markdown blocks.
+"#;
+
+/// Assembles the semantic-analysis prompt: byte-stable instructions →
+/// per-call variable context → log text (the query) last (D13).
+fn build_analyze_prompt(
+    project: &str,
+    baseline: &str,
+    active_categories: &str,
+    repo_hints: &str,
+    text: &str,
+) -> String {
+    let mut p = String::from(ANALYZE_INSTRUCTIONS);
+    p.push_str("Project: ");
+    p.push_str(project);
+    p.push_str("\nCode baseline for correlation: ");
+    p.push_str(baseline);
+    p.push_str("\nCurrently known error categories for this project: [");
+    p.push_str(active_categories);
+    p.push_str(
+        "]. Use this context to build incremental knowledge.\nRepo knowledge hints (may be empty):\n",
+    );
+    p.push_str(repo_hints);
+    p.push_str("\n\nLog text:\n");
+    p.push_str(text);
+    p
+}
+
+/// D13 prompt stability: byte-stable instructions block for the log-format
+/// discovery call site; the log sample — the query — is appended last.
+const DISCOVER_FORMAT_INSTRUCTIONS: &str = r#"Analyze the following log sample.
+What is the regular expression (RE2) that uniquely identifies the absolute BEGINNING of a new log entry (e.g. a timestamp or log level)?
+Return ONLY the raw regex string, nothing else. If there is no clear delimiter, return an empty string.
+"#;
 
 #[cfg(test)]
 mod tests {
@@ -1681,5 +1710,39 @@ mod tests {
         let lines: Vec<String> = (0..300).map(|i| format!("ERROR x{i}")).collect();
         let _ = analyzer.process_batch_sync(&lines).await;
         assert!(reporter.calls.load(Ordering::SeqCst) >= 2);
+    }
+}
+
+/// D13 prompt stability: two invocations with different contexts must share
+/// the byte-identical instruction prefix, and the log text (the query) must
+/// stay last.
+#[cfg(test)]
+mod prompt_stability_tests {
+    use super::*;
+
+    #[test]
+    fn analyze_prompt_prefix_is_byte_stable_and_query_last() {
+        let a = build_analyze_prompt("proj-a", "base-a", "Cat1, Cat2", "hints-a", "text A");
+        let b = build_analyze_prompt("proj-b", "base-b", "", "hints-b, more", "text B\nlonger");
+        assert_eq!(&a[..ANALYZE_INSTRUCTIONS.len()], ANALYZE_INSTRUCTIONS);
+        assert_eq!(&b[..ANALYZE_INSTRUCTIONS.len()], ANALYZE_INSTRUCTIONS);
+        assert_ne!(a, b);
+        // Query last: the log text is the tail of the prompt.
+        assert!(a.ends_with("Log text:\ntext A"));
+        assert!(b.ends_with("Log text:\ntext B\nlonger"));
+    }
+
+    #[test]
+    fn discover_format_prompt_prefix_is_byte_stable() {
+        let a = format!("{DISCOVER_FORMAT_INSTRUCTIONS}Log sample:\n2026-01-01 INFO a");
+        let b = format!("{DISCOVER_FORMAT_INSTRUCTIONS}Log sample:\n2027-05-05 ERROR b");
+        assert_eq!(
+            &a[..DISCOVER_FORMAT_INSTRUCTIONS.len()],
+            DISCOVER_FORMAT_INSTRUCTIONS
+        );
+        assert_eq!(
+            &b[..DISCOVER_FORMAT_INSTRUCTIONS.len()],
+            DISCOVER_FORMAT_INSTRUCTIONS
+        );
     }
 }

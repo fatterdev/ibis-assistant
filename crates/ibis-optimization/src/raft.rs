@@ -92,8 +92,9 @@ impl Optimizer {
                 tracker
                     .record_usage(
                         "system:optimizer_raft",
-                        usage.prompt_token_count as u64,
-                        usage.candidates_token_count as u64,
+                        usage.prompt_token_count.max(0) as u64,
+                        usage.candidates_token_count.max(0) as u64,
+                        usage.cached_tokens(),
                     )
                     .await;
             }

@@ -408,11 +408,7 @@ impl Optimizer {
             .as_ref()
             .ok_or_else(|| "AI provider not configured".to_string())?;
         let candidates = serde_json::to_string(duplicates).unwrap_or_else(|_| "[]".to_string());
-        let prompt = format!(
-            "Consolidate one raw software-project observation into durable memory.\nClassify durable information as one of: decision, fix, constraint, rule, gotcha, design, fact, working_state, reasoning.\nUse action \"merge\" only when a supplied candidate expresses the same durable fact; merge_with must be that candidate's exact ID.\nUse action \"noise\" for routine command output, transient chatter, or information with no reusable value.\nFor create or merge, rewrite the content as a concise, self-contained statement. Set valid_until only for time-bounded information.\n\nOBSERVATION:\n{obs}\n\nPOSSIBLE DUPLICATES:\n{cands}\n\nReturn only JSON:\n{{\"action\":\"create|merge|noise\",\"kind\":\"...\",\"title\":\"...\",\"content\":\"...\",\"confidence\":0.0,\"merge_with\":\"\",\"valid_until\":\"\"}}",
-            obs = observation.content,
-            cands = candidates,
-        );
+        let prompt = build_distill_prompt(&observation.content, &candidates);
         // Personal observation content must not leave the machine via cloud
         // fallback.
         let route_hint = if observation
@@ -447,8 +443,9 @@ impl Optimizer {
                 tracker
                     .record_usage(
                         "system:memory_consolidation",
-                        usage.prompt_token_count as u64,
-                        usage.candidates_token_count as u64,
+                        usage.prompt_token_count.max(0) as u64,
+                        usage.candidates_token_count.max(0) as u64,
+                        usage.cached_tokens(),
                     )
                     .await;
             }
@@ -679,6 +676,25 @@ pub fn parse_consolidation_decision(text: &str) -> Result<ConsolidationDecision,
 
 fn contains_duplicate_id(duplicates: &[DuplicateMemory], id: &str) -> bool {
     duplicates.iter().any(|d| d.id == id)
+}
+
+/// D13 prompt stability: byte-stable instructions block for the consolidation
+/// distill call site (the call site was already convention-shaped: stable
+/// instructions first, variables after; the const pins it by construction).
+/// The trailing "Return only JSON" schema stays the final line of the prompt.
+const DISTILL_INSTRUCTIONS: &str = r#"Consolidate one raw software-project observation into durable memory.
+Classify durable information as one of: decision, fix, constraint, rule, gotcha, design, fact, working_state, reasoning.
+Use action "merge" only when a supplied candidate expresses the same durable fact; merge_with must be that candidate's exact ID.
+Use action "noise" for routine command output, transient chatter, or information with no reusable value.
+For create or merge, rewrite the content as a concise, self-contained statement. Set valid_until only for time-bounded information.
+"#;
+
+/// Assembles the distill prompt: byte-stable instructions → observation →
+/// duplicates → the return-schema instruction last (D13).
+fn build_distill_prompt(observation_content: &str, candidates_json: &str) -> String {
+    format!(
+        "{DISTILL_INSTRUCTIONS}\nOBSERVATION:\n{observation_content}\n\nPOSSIBLE DUPLICATES:\n{candidates_json}\n\nReturn only JSON:\n{{\"action\":\"create|merge|noise\",\"kind\":\"...\",\"title\":\"...\",\"content\":\"...\",\"confidence\":0.0,\"merge_with\":\"\",\"valid_until\":\"\"}}"
+    )
 }
 
 #[cfg(test)]
@@ -1421,5 +1437,34 @@ mod tests {
             .is_err(),
             "invalid valid_until rejected"
         );
+    }
+}
+
+/// D13 prompt stability: two invocations with different contexts must share
+/// the byte-identical instruction prefix, and the return-schema instruction
+/// stays the final line of the prompt.
+#[cfg(test)]
+mod prompt_stability_tests {
+    use super::*;
+
+    #[test]
+    fn distill_prompt_prefix_is_byte_stable_and_schema_last() {
+        let a = build_distill_prompt(
+            "obs A",
+            r#"[{"id":"memory:mem_a","kind":"fact","title":"t","content":"c","score":0.9}]"#,
+        );
+        let b = build_distill_prompt("obs B — entirely different and much longer", "[]");
+        assert_eq!(
+            &a[..DISTILL_INSTRUCTIONS.len()],
+            DISTILL_INSTRUCTIONS
+        );
+        assert_eq!(
+            &b[..DISTILL_INSTRUCTIONS.len()],
+            DISTILL_INSTRUCTIONS
+        );
+        assert_ne!(a, b);
+        // The return-schema instruction is the trailing (query-adjacent) part.
+        assert!(a.ends_with(r#""merge_with":"","valid_until":""}"#));
+        assert!(b.ends_with(r#""merge_with":"","valid_until":""}"#));
     }
 }

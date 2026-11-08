@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use crate::error::AiError;
 use crate::runner::http_client;
 use crate::traits::AIProvider;
-use crate::types::{Candidate, Content, GenerationConfig, Part};
+use crate::types::{Candidate, Content, GenerationConfig, Part, UsageMetadata};
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
@@ -38,12 +38,48 @@ struct ChatMsg {
 struct ChatResp {
     #[serde(default)]
     choices: Vec<ChatChoice>,
+    #[serde(default)]
+    usage: Option<OpenAiUsage>,
 }
 
 #[derive(Debug, serde::Deserialize)]
 struct ChatChoice {
     #[serde(default)]
     message: ChatMsg,
+}
+
+/// D13: usage block of the OpenAI-compat chat response — prompt/completion
+/// token counts plus `prompt_tokens_details.cached_tokens` when the endpoint
+/// reports prompt-cache reads. Missing/absent fields default to 0/None so a
+/// non-conforming endpoint keeps `usage_metadata` populated but cost-neutral.
+#[derive(Debug, serde::Deserialize, Default)]
+struct OpenAiUsage {
+    #[serde(default)]
+    prompt_tokens: i64,
+    #[serde(default)]
+    completion_tokens: i64,
+    #[serde(default)]
+    prompt_tokens_details: Option<PromptTokensDetails>,
+}
+
+#[derive(Debug, serde::Deserialize, Default)]
+struct PromptTokensDetails {
+    #[serde(default)]
+    cached_tokens: i64,
+}
+
+impl OpenAiUsage {
+    fn to_usage_metadata(&self) -> UsageMetadata {
+        UsageMetadata {
+            prompt_token_count: self.prompt_tokens,
+            candidates_token_count: self.completion_tokens,
+            total_token_count: self.prompt_tokens + self.completion_tokens,
+            cached_content_token_count: self
+                .prompt_tokens_details
+                .as_ref()
+                .map(|d| d.cached_tokens),
+        }
+    }
 }
 
 /// Implements `ReasoningProvider` for OpenAI-compatible chat APIs:
@@ -141,7 +177,7 @@ impl AIProvider for OpenAICompatProvider {
                 parts: vec![Part { text }],
             },
             finish_reason: "STOP".to_string(),
-            usage_metadata: None,
+            usage_metadata: parsed.usage.as_ref().map(|u| u.to_usage_metadata()),
         })
     }
 }
