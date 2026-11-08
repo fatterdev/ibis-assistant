@@ -39,6 +39,11 @@ pub struct Optimizer {
     /// `memory.schema_enforcement`; `warn` accepts a partial `details`,
     /// `strict` rejects it and retries the distillation once.
     pub schema_enforcement: ibis_search::memory::details::SchemaEnforcement,
+    /// D11 shadow mode: compute the bounded `is_noise` decision alongside the
+    /// generative verdict and log it without changing behavior. Set from
+    /// `ai.decide.shadow` by the server (product default true); the bare
+    /// constructor stays off so library callers opt in.
+    pub decide_shadow: bool,
 }
 
 impl Optimizer {
@@ -57,6 +62,7 @@ impl Optimizer {
             workspace: None,
             dup_similarity_min: crate::memory_consolidate::DUP_SIMILARITY_MIN,
             schema_enforcement: ibis_search::memory::details::SchemaEnforcement::default(),
+            decide_shadow: false,
         }
     }
 

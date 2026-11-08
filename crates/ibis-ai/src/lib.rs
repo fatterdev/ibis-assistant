@@ -14,6 +14,7 @@ pub mod cloud_pool;
 pub mod config;
 pub mod cost;
 pub mod cursor_lm;
+pub mod decide;
 pub mod embedding_cache;
 pub mod error;
 pub mod fallback;
@@ -37,6 +38,11 @@ pub use client::Client;
 pub use cloud_pool::{normalize_cloud_name, CloudPool};
 pub use cost::{CostStore, CostTracker};
 pub use cursor_lm::{CursorLMProvider, DEFAULT_IDE_BRIDGE_URL};
+pub use decide::{
+    decide, decide_with_hint, DecideAnswer, DecideKind, DecideQuestion, DecideResult,
+    DECIDE_INSTRUCTIONS, DECIDE_ROUTE_HINT, DECIDE_TEMPERATURE, DEFAULT_AUTO_THRESHOLD,
+    DEFAULT_ESCALATE_THRESHOLD,
+};
 pub use embedding_cache::{embedding_cache_key, EmbeddingCacheStore};
 pub use error::AiError;
 pub use fallback::FallbackChain;

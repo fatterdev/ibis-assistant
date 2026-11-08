@@ -4,6 +4,43 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(ai): bounded decisions with shadow-mode calibration (D11 ddofds)** -
+  new `ibis_ai::decide` primitive: a single-turn typed question set
+  (`DecideQuestion`: `Noul` | `Choice`) over a state returns
+  `{"<id>": {"probs": {"<option>": p}}}`. The parser is strict - invalid
+  JSON, unknown/missing options, probabilities outside [0, 1] or a sum
+  other than 1 are an abstention, never a best-effort parse - and the
+  confidence is the margin `max - second`. The abstention policy stays in
+  the caller (`DEFAULT_AUTO_THRESHOLD` 0.75 / `DEFAULT_ESCALATE_THRESHOLD`
+  0.40 are exported, not applied inside `decide`). The default route is
+  `local:S`; `decide_with_hint` serves privacy-bound callers
+  (`local_only:S`). The prompt follows D13 (byte-stable instructions →
+  state → questions last) and uses 0.001 temperature because the provider
+  layer treats 0.0 as the "unset" sentinel (0.0 would fall back to the
+  model default, often 0.8). Shadow mode (`ai.decide.shadow`, default
+  true) computes the `is_noise` decision next to the consolidation verdict
+  and logs `decide_shadow` (`decision_llm`, `best`, `probs`, `confidence`,
+  `agreement`, `rubric`) without changing behavior; the shadow measurement
+  stays `local_only:S` for team and personal observations (it calibrates
+  the tier-S model; a cloud fallback would measure the wrong model and
+  spend cloud budget), the C9 deterministic pre-match stays zero-AI, and a
+  failing decide disables the measurement for the pass with one warning.
+  New labeled dataset `evaluations/decisions/cases.yaml` (40 cases, 20
+  noise / 20 durable, rubric `is_noise.v1` pinned) plus
+  `ibis eval decisions --provider ollama|openai_compat [--min-agreement X]
+  [--auto-threshold X] [--escalate-threshold X] [--out report.json]`.
+  Measured (08/11, local `qwen3.8-27b` via openai_compat; the tier-S
+  `granite4.1:3b` is not installed on the host): 40/40 ok, agreement
+  **0.975**, mean confidence 0.865, auto 35/40 at θ 0.75 with auto
+  accuracy 1.000, 4 escalated, 1 default. The single miss
+  (`d14_test_fixture_rows`) landed in the default bucket (confidence
+  0.20), so the abstention policy would have escalated it; a prior run
+  scored 1.000, so the residual is sampling variance at temp 0.001. Tests: ibis-ai 162/162
+  (20 decide), ibis-core 55/55 (`ai.decide.shadow`), ibis-optimization
+  41/41 (rubric/state/shadow invariants/log capture/dataset/report),
+  ibis-server 63/63 (retrieval+decisions arg parsing); clippy
+  `-D warnings` green.
+
 - **feat(ai): per-task local model routing on S/M/L/XL tiers (D10 ddofds)** -
   the hybrid `ReasoningRouter` accepts `local:S`/`local:M`/`local:L`/`local:XL`
   hints (case-insensitive) plus `local_only:<tier>` for privacy-bound calls.

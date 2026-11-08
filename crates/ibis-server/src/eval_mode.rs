@@ -1,12 +1,15 @@
 //! `ibis eval retrieval` — in-process retrieval evaluation (A1, ddofds
 //! fase 0; plan in `docs/planning/2026-11-02-a1-retrieval-eval-plan.md`).
 //!
-//! Intercepted in `main.rs` BEFORE the MCP CLI passthrough: the eval mounts
-//! SurrealDB + the embedding provider + `SearchService` directly (no running
-//! server, no new MCP tool — the registry stays at 57 tools). The golden
-//! estate is (re)seeded into a dedicated scratch database, the dataset cases
-//! run through `ask_project`, and a JSON report is printed with a non-zero
-//! exit under `--min-recall-5`.
+//! `ibis eval decisions` — bounded-decision calibration (D11, ddofds fase 3):
+//! runs the labeled `is_noise` dataset through the `decide()` primitive.
+//!
+//! Intercepted in `main.rs` BEFORE the MCP CLI passthrough: the evals mount
+//! their dependencies directly (no running server, no new MCP tool — the
+//! registry stays at 58 tools). The retrieval eval (re)seeds a dedicated
+//! scratch database; the decisions eval talks to a chat provider selected on
+//! the CLI. Both print a JSON report and exit non-zero under their quality
+//! gate.
 
 use std::sync::Arc;
 
@@ -14,6 +17,10 @@ use async_trait::async_trait;
 use ibis_ai::types::{Candidate, Content, GenerationConfig};
 use ibis_ai::{AIProvider, AiError};
 use ibis_db::executor::{Executor, SurrealDbExecutor};
+use ibis_optimization::decide_eval::{
+    build_report as build_decision_report, load_dataset as load_decision_dataset,
+    DecisionEvalRunner,
+};
 use ibis_optimization::eval::{
     build_report, load_dataset, seed_golden_estate, OfflineEmbedder, RetrievalEvalRunner,
 };
@@ -25,6 +32,29 @@ const DEFAULT_EMBEDDING_MODEL: &str = "nomic-embed-text";
 /// Local scoring model for `--rerank local` (tier-M class, the L1/L3 pick
 /// for judging; `--rerank-model` overrides).
 const DEFAULT_RERANK_MODEL: &str = "qwen2.5-coder:7b";
+/// D11 calibration defaults: the tier-S local model and its route.
+const DEFAULT_DECIDE_MODEL: &str = "granite4.1:3b";
+const DEFAULT_DECIDE_OLLAMA_URL: &str = "http://127.0.0.1:11434";
+const DEFAULT_OPENAI_COMPAT_URL: &str = "https://api.openai.com/v1";
+
+enum EvalTarget {
+    Retrieval(EvalParams),
+    Decisions(DecisionParams),
+}
+
+/// `ibis eval decisions` knobs (D11 calibration runner).
+struct DecisionParams {
+    dataset: String,
+    min_agreement: f64,
+    /// `ollama` | `openai_compat`.
+    provider: String,
+    model: String,
+    url: String,
+    api_key: String,
+    auto_threshold: f64,
+    escalate_threshold: f64,
+    out: Option<String>,
+}
 
 pub struct EvalParams {
     dataset: String,
@@ -52,7 +82,7 @@ pub struct EvalParams {
 
 /// Parses `retrieval --dataset <path> [flags]` (the `eval` token is already
 /// consumed by the dispatch). Usage errors exit 2 via [`run_eval_cli`].
-fn parse_args(args: &[String]) -> Result<EvalParams, String> {
+fn parse_retrieval_args(args: &[String]) -> Result<EvalParams, String> {
     if args.first().map(String::as_str) != Some("retrieval") {
         return Err(
             "unknown eval target (expected: ibis eval retrieval --dataset <path>)".to_string(),
@@ -149,6 +179,120 @@ fn parse_args(args: &[String]) -> Result<EvalParams, String> {
     Ok(params)
 }
 
+/// Parses `decisions --dataset <path> [flags]` (D11 calibration runner).
+fn parse_decisions_args(args: &[String]) -> Result<DecisionParams, String> {
+    if args.first().map(String::as_str) != Some("decisions") {
+        return Err(
+            "unknown eval target (expected: ibis eval decisions --dataset <path>)".to_string(),
+        );
+    }
+    let mut dataset = String::new();
+    let mut min_agreement = 0.0;
+    let mut provider = "ollama".to_string();
+    let mut model: Option<String> = None;
+    let mut url: Option<String> = None;
+    let mut api_key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
+    let mut auto_threshold = ibis_ai::decide::DEFAULT_AUTO_THRESHOLD;
+    let mut escalate_threshold = ibis_ai::decide::DEFAULT_ESCALATE_THRESHOLD;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        let flag = args[i].as_str();
+        let value = |i: &mut usize, name: &str| -> Result<String, String> {
+            *i += 1;
+            args.get(*i)
+                .cloned()
+                .ok_or_else(|| format!("{name} requires a value"))
+        };
+        match flag {
+            "--dataset" => dataset = value(&mut i, "--dataset")?,
+            "--min-agreement" => {
+                min_agreement =
+                    parse_unit_interval(&value(&mut i, "--min-agreement")?, "--min-agreement")?
+            }
+            "--provider" => {
+                let v = value(&mut i, "--provider")?;
+                if !matches!(v.as_str(), "ollama" | "openai_compat") {
+                    return Err("--provider must be ollama|openai_compat".to_string());
+                }
+                provider = v;
+            }
+            "--model" => model = Some(value(&mut i, "--model")?),
+            "--url" => url = Some(value(&mut i, "--url")?),
+            "--api-key" => api_key = value(&mut i, "--api-key")?,
+            "--auto-threshold" => {
+                auto_threshold =
+                    parse_unit_interval(&value(&mut i, "--auto-threshold")?, "--auto-threshold")?
+            }
+            "--escalate-threshold" => {
+                escalate_threshold = parse_unit_interval(
+                    &value(&mut i, "--escalate-threshold")?,
+                    "--escalate-threshold",
+                )?
+            }
+            "--out" => out = Some(value(&mut i, "--out")?),
+            other => return Err(format!("unknown eval flag: {other}")),
+        }
+        i += 1;
+    }
+    if dataset.is_empty() {
+        return Err("--dataset <path> is required".to_string());
+    }
+    if escalate_threshold > auto_threshold {
+        return Err("--escalate-threshold must not exceed --auto-threshold".to_string());
+    }
+    let model = match model {
+        Some(model) if !model.trim().is_empty() => model,
+        _ if provider == "ollama" => DEFAULT_DECIDE_MODEL.to_string(),
+        _ => {
+            return Err(
+                "--model is required for --provider openai_compat (e.g. --model qwen3.8-27b)"
+                    .to_string(),
+            )
+        }
+    };
+    let url = url.unwrap_or_else(|| {
+        if provider == "openai_compat" {
+            DEFAULT_OPENAI_COMPAT_URL.to_string()
+        } else {
+            DEFAULT_DECIDE_OLLAMA_URL.to_string()
+        }
+    });
+    Ok(DecisionParams {
+        dataset,
+        min_agreement,
+        provider,
+        model,
+        url,
+        api_key,
+        auto_threshold,
+        escalate_threshold,
+        out,
+    })
+}
+
+fn parse_unit_interval(value: &str, name: &str) -> Result<f64, String> {
+    let parsed = value
+        .trim()
+        .parse::<f64>()
+        .map_err(|_| format!("{name} must be a number"))?;
+    if !(0.0..=1.0).contains(&parsed) {
+        return Err(format!("{name} must be in [0, 1]"));
+    }
+    Ok(parsed)
+}
+
+fn parse_eval_args(args: &[String]) -> Result<EvalTarget, String> {
+    match args.first().map(String::as_str) {
+        Some("retrieval") => Ok(EvalTarget::Retrieval(parse_retrieval_args(args)?)),
+        Some("decisions") => Ok(EvalTarget::Decisions(parse_decisions_args(args)?)),
+        _ => Err(
+            "unknown eval target (expected: ibis eval retrieval|decisions --dataset <path>)"
+                .to_string(),
+        ),
+    }
+}
+
 /// CLI entry: prints errors on stderr and returns the process exit code
 /// (0 = pass, 1 = quality gate or all-error run, 2 = usage/setup failure).
 pub fn run_eval_cli(args: &[String]) -> i32 {
@@ -162,9 +306,12 @@ pub fn run_eval_cli(args: &[String]) -> i32 {
 }
 
 fn run_eval(args: &[String]) -> Result<i32, String> {
-    let params = parse_args(args)?;
+    let target = parse_eval_args(args)?;
     let runtime = tokio::runtime::Runtime::new().map_err(|e| format!("tokio runtime: {e}"))?;
-    runtime.block_on(run_async(params))
+    match target {
+        EvalTarget::Retrieval(params) => runtime.block_on(run_retrieval_async(params)),
+        EvalTarget::Decisions(params) => runtime.block_on(run_decisions_async(params)),
+    }
 }
 
 /// A3 eval seam: the plain `OllamaProvider` only embeds, the reranker needs
@@ -199,7 +346,7 @@ impl AIProvider for EmbedOllamaGenerateChat {
     }
 }
 
-async fn run_async(p: EvalParams) -> Result<i32, String> {
+async fn run_retrieval_async(p: EvalParams) -> Result<i32, String> {
     let mut ollama_live = false;
     let embedder: Arc<dyn AIProvider> = match p.embedder.as_str() {
         "offline" => Arc::new(OfflineEmbedder),
@@ -315,6 +462,65 @@ async fn run_async(p: EvalParams) -> Result<i32, String> {
     Ok(0)
 }
 
+/// D11 calibration run: one `decide()` call per labeled case against the
+/// selected chat provider (Ollama or any OpenAI-compatible endpoint).
+async fn run_decisions_async(p: DecisionParams) -> Result<i32, String> {
+    let ai: Arc<dyn AIProvider> = match p.provider.as_str() {
+        "ollama" => Arc::new(ibis_ai::OllamaChatProvider::new(&p.model, &p.url)),
+        "openai_compat" => Arc::new(ibis_ai::OpenAICompatProvider::new(
+            &p.url, &p.api_key, &p.model,
+        )),
+        other => return Err(format!("unsupported provider {other:?}")),
+    };
+    if !ai.is_functional().await {
+        return Err(format!(
+            "provider {} is not functional (check --url/--model/--api-key; local servers accept any non-empty placeholder key)",
+            p.provider
+        ));
+    }
+    let dataset = load_decision_dataset(&p.dataset)?;
+    let runner = DecisionEvalRunner::new(ai.clone());
+    let cases = runner.run(&dataset).await;
+    let report = build_decision_report(
+        &p.dataset,
+        &dataset.version,
+        &dataset.rubric,
+        ai.name(),
+        ai.model(),
+        p.auto_threshold,
+        p.escalate_threshold,
+        cases,
+    );
+    let json = serde_json::to_string_pretty(&report).map_err(|e| format!("report: {e}"))?;
+    println!("{json}");
+    if let Some(out) = &p.out {
+        if let Some(parent) = std::path::Path::new(out).parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+            }
+        }
+        std::fs::write(out, format!("{json}\n"))
+            .map_err(|e| format!("write report {}: {e}", out))?;
+    }
+
+    if report.aggregate.cases_ok == 0 {
+        eprintln!(
+            "eval: all {} decision cases errored (degraded provider?)",
+            report.aggregate.cases
+        );
+        return Ok(1);
+    }
+    if report.below_threshold(p.min_agreement) {
+        eprintln!(
+            "eval: agreement {:.3} below threshold {:.3}",
+            report.aggregate.agreement, p.min_agreement
+        );
+        return Ok(1);
+    }
+    Ok(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,21 +529,38 @@ mod tests {
         list.iter().map(|s| s.to_string()).collect()
     }
 
+    fn retrieval(list: &[&str]) -> Result<EvalParams, String> {
+        match parse_eval_args(&args(list))? {
+            EvalTarget::Retrieval(params) => Ok(params),
+            EvalTarget::Decisions(_) => panic!("expected the retrieval target"),
+        }
+    }
+
+    fn decisions(list: &[&str]) -> Result<DecisionParams, String> {
+        match parse_eval_args(&args(list))? {
+            EvalTarget::Decisions(params) => Ok(params),
+            EvalTarget::Retrieval(_) => panic!("expected the decisions target"),
+        }
+    }
+
     #[test]
     fn parse_requires_target_and_dataset() {
         assert_eq!(
-            parse_args(&args(&[])).err(),
+            parse_eval_args(&args(&[])).err(),
             Some(
-                "unknown eval target (expected: ibis eval retrieval --dataset <path>)".to_string()
+                "unknown eval target (expected: ibis eval retrieval|decisions --dataset <path>)"
+                    .to_string()
             )
         );
-        assert!(parse_args(&args(&["retrieval"])).is_err());
-        assert!(parse_args(&args(&["retrieval", "--dataset", "d.yaml"])).is_ok());
+        assert!(retrieval(&["retrieval"]).is_err());
+        assert!(retrieval(&["retrieval", "--dataset", "d.yaml"]).is_ok());
+        assert!(decisions(&["decisions"]).is_err());
+        assert!(decisions(&["decisions", "--dataset", "d.yaml"]).is_ok());
     }
 
     #[test]
     fn parse_flags_and_errors() {
-        let p = parse_args(&args(&[
+        let p = retrieval(&[
             "retrieval",
             "--dataset",
             "d.yaml",
@@ -352,7 +575,7 @@ mod tests {
             "custom",
             "--fusion",
             "rrf",
-        ]))
+        ])
         .expect("parse");
         assert_eq!(p.min_recall_5, 0.4);
         assert_eq!(p.embedder, "offline");
@@ -362,7 +585,7 @@ mod tests {
         assert_eq!(p.ns, "ibis_eval");
         assert_eq!(p.fusion, "rrf");
 
-        let rerank_p = parse_args(&args(&[
+        let rerank_p = retrieval(&[
             "retrieval",
             "--dataset",
             "d.yaml",
@@ -370,22 +593,102 @@ mod tests {
             "local",
             "--rerank-model",
             "gemma4:12b",
-        ]))
+        ])
         .expect("parse");
         assert_eq!(rerank_p.rerank, "local");
         assert_eq!(rerank_p.rerank_model, "gemma4:12b");
         assert_eq!(
-            parse_args(&args(&["retrieval", "--dataset", "d.yaml"]))
+            retrieval(&["retrieval", "--dataset", "d.yaml"])
                 .unwrap()
                 .rerank,
             "off"
         );
 
-        assert!(parse_args(&args(&["retrieval", "--embedder", "bogus"])).is_err());
-        assert!(parse_args(&args(&["retrieval", "--min-recall-5", "abc"])).is_err());
-        assert!(parse_args(&args(&["retrieval", "--url"])).is_err());
-        assert!(parse_args(&args(&["retrieval", "--fusion", "bogus"])).is_err());
-        assert!(parse_args(&args(&["retrieval", "--rerank", "bogus"])).is_err());
-        assert!(parse_args(&args(&["retrieval", "--wat"])).is_err());
+        assert!(retrieval(&["retrieval", "--embedder", "bogus"]).is_err());
+        assert!(retrieval(&["retrieval", "--min-recall-5", "abc"]).is_err());
+        assert!(retrieval(&["retrieval", "--url"]).is_err());
+        assert!(retrieval(&["retrieval", "--fusion", "bogus"]).is_err());
+        assert!(retrieval(&["retrieval", "--rerank", "bogus"]).is_err());
+        assert!(retrieval(&["retrieval", "--wat"]).is_err());
+    }
+
+    #[test]
+    fn parse_decision_flags_and_defaults() {
+        let p = decisions(&["decisions", "--dataset", "cases.yaml"]).expect("parse");
+        assert_eq!(p.provider, "ollama");
+        assert_eq!(p.model, DEFAULT_DECIDE_MODEL);
+        assert_eq!(p.url, DEFAULT_DECIDE_OLLAMA_URL);
+        assert_eq!(p.min_agreement, 0.0);
+        assert_eq!(p.auto_threshold, ibis_ai::decide::DEFAULT_AUTO_THRESHOLD);
+        assert_eq!(
+            p.escalate_threshold,
+            ibis_ai::decide::DEFAULT_ESCALATE_THRESHOLD
+        );
+
+        let p = decisions(&[
+            "decisions",
+            "--dataset",
+            "cases.yaml",
+            "--provider",
+            "openai_compat",
+            "--url",
+            "http://127.0.0.1:8080/v1",
+            "--model",
+            "qwen3.8-27b",
+            "--api-key",
+            "local",
+            "--min-agreement",
+            "0.8",
+            "--auto-threshold",
+            "0.8",
+            "--escalate-threshold",
+            "0.3",
+            "--out",
+            "r.json",
+        ])
+        .expect("parse");
+        assert_eq!(p.provider, "openai_compat");
+        assert_eq!(p.model, "qwen3.8-27b");
+        assert_eq!(p.url, "http://127.0.0.1:8080/v1");
+        assert_eq!(p.api_key, "local");
+        assert_eq!(p.min_agreement, 0.8);
+        assert_eq!(p.auto_threshold, 0.8);
+        assert_eq!(p.escalate_threshold, 0.3);
+        assert_eq!(p.out.as_deref(), Some("r.json"));
+    }
+
+    #[test]
+    fn parse_decision_errors() {
+        assert!(decisions(&["decisions", "--provider", "bogus", "--dataset", "d.yaml"]).is_err());
+        assert!(decisions(&[
+            "decisions",
+            "--dataset",
+            "d.yaml",
+            "--provider",
+            "openai_compat"
+        ])
+        .is_err());
+        assert!(
+            decisions(&["decisions", "--dataset", "d.yaml", "--min-agreement", "1.5"]).is_err()
+        );
+        assert!(decisions(&[
+            "decisions",
+            "--dataset",
+            "d.yaml",
+            "--auto-threshold",
+            "abc"
+        ])
+        .is_err());
+        assert!(decisions(&[
+            "decisions",
+            "--dataset",
+            "d.yaml",
+            "--auto-threshold",
+            "0.4",
+            "--escalate-threshold",
+            "0.7"
+        ])
+        .is_err());
+        assert!(decisions(&["decisions", "--dataset", "d.yaml", "--wat"]).is_err());
     }
 }

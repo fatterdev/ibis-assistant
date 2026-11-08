@@ -1,0 +1,200 @@
+# D11 bounded-decision calibration dataset (ddofds fase 3).
+#
+# Labels are for the `is_noise` question used by memory consolidation:
+#   noise   -> routine progress, transient state, restated context, or content
+#              with no durable project value
+#   durable -> a durable project fact, decision, fix, rule, constraint,
+#              gotcha, or design rationale worth keeping
+#
+# The rubric id is pinned; changing the rubric requires a new dataset version.
+# Run with: ibis eval decisions --dataset evaluations/decisions/cases.yaml ...
+version: "1"
+rubric: is_noise.v1
+cases:
+  # ---------------------------------------------------------------------
+  # noise
+  # ---------------------------------------------------------------------
+  - id: d01_tests_green_again
+    observation: "Ran cargo test again; all green."
+    expected: noise
+    note: routine status update with no durable value
+  - id: d02_dev_server_left_running
+    observation: "Started the dev server on port 3030 and left it running."
+    expected: noise
+    note: transient process state
+  - id: d03_reread_router
+    observation: "Re-read crates/ibis-ai/src/router.rs to find the hint parser."
+    expected: noise
+    note: navigation activity, not a fact
+  - id: d04_waiting_for_ci
+    observation: "Waited for CI to finish; the job is still running."
+    expected: noise
+    note: transient wait state
+  - id: d05_retry_after_exit
+    observation: "The command failed with exit code 1, retrying."
+    expected: noise
+    candidates:
+      - id: memory:fix_retry
+        kind: fix
+        title: Retry transient exit codes
+        content: Transient toolchain exits are retried once before surfacing the error.
+    note: routine retry chatter even with a related memory present
+  - id: d06_next_step_eval
+    observation: "Next step: run the retrieval eval after the build."
+    expected: noise
+    note: plan fragment, no durable fact
+  - id: d07_debug_log_level
+    observation: "Temporarily set log level to DEBUG to inspect the handshake."
+    expected: noise
+    note: transient debugging configuration
+  - id: d08_usual_warnings
+    observation: "The terminal is showing the usual warnings from the toolchain."
+    expected: noise
+    note: ambient output without a conclusion
+  - id: d09_checked_out_branch
+    observation: "Checked out the branch and opened the editor."
+    expected: noise
+    note: workspace navigation
+  - id: d10_model_download
+    observation: "The model is downloading; 42% complete."
+    expected: noise
+    note: transient download progress
+  - id: d11_reranker_speculation
+    observation: "I think the reranker might help, but I have not measured it."
+    expected: noise
+    note: ungrounded speculation, no project truth
+  - id: d12_user_asked_tickets
+    observation: "The user asked about ticket surfaces today."
+    expected: noise
+    note: conversation meta, not project knowledge
+  - id: d13_restarted_daemon
+    observation: "Restarted the daemon to pick up the config change."
+    expected: noise
+    note: operational action, no durable conclusion
+  - id: d14_test_fixture_rows
+    observation: "The test fixture uses three fake rows."
+    expected: noise
+    note: test data detail with no reusable value
+  - id: d15_whitespace_only
+    observation: "Formatting the file changed only whitespace."
+    expected: noise
+    note: cosmetic diff
+  - id: d16_repeated_log_line
+    observation: "The log line is repeated every few seconds."
+    expected: noise
+    note: raw observation without diagnosis or decision
+  - id: d17_diff_nothing_unexpected
+    observation: "Looked at the diff; nothing unexpected."
+    expected: noise
+    note: routine review, no durable fact
+  - id: d18_reminder_tomorrow
+    observation: "Scheduled a reminder to review the PR tomorrow."
+    expected: noise
+    candidates:
+      - id: memory:decision_review
+        kind: decision
+        title: PR review loop
+        content: Pull requests are reviewed by the owner before merge.
+    note: personal reminder next to a related decision
+  - id: d19_cold_build_cache
+    observation: "The build cache was cold, so the first compile took two minutes."
+    expected: noise
+    note: one-off timing observation
+  - id: d20_verbose_flag
+    observation: "Tried the command with --verbose to see more output."
+    expected: noise
+    note: transient debugging action
+
+  # ---------------------------------------------------------------------
+  # durable
+  # ---------------------------------------------------------------------
+  - id: d21_additive_fusion_decision
+    observation: "Chose additive fusion over RRF after A2 validation: RRF regressed recall@5 to 0.875 on the ollama baseline."
+    expected: durable
+    note: decision with measured trade-off
+  - id: d22_empty_discovery_root_fix
+    observation: "Fixed the empty discovery_root crash by validating the root before the scan in the setup wizard."
+    expected: durable
+    note: fix with root cause
+  - id: d23_plugin_data_path
+    observation: "Constraint: plugin runtime data lives under %LOCALAPPDATA%\\ibis-assistant\\plugin, separate from the server store."
+    expected: durable
+    note: durable deployment constraint
+  - id: d24_personal_local_only
+    observation: "Rule: personal observations must route local_only and never reach a cloud provider."
+    expected: durable
+    note: privacy rule
+  - id: d25_surreal_unbound_param
+    observation: "Gotcha: SurrealDB 4 evaluates an unbound parameter as NONE, so every placeholder must be bound."
+    expected: durable
+    note: engine gotcha
+  - id: d26_mcp_bridge_design
+    observation: "Design: the MCP bridge speaks Streamable HTTP at /mcp; the legacy SSE transport was removed."
+    expected: durable
+    note: architecture decision
+  - id: d27_surreal_pin
+    observation: "Fact: the embedded SurrealDB sidecar is pinned at 4.0.0 for the crate, the sidecar and the team-server image."
+    expected: durable
+    note: durable version fact
+  - id: d28_fusion_restated
+    observation: "Additive fusion remains the default because the RRF retune did not beat it."
+    expected: durable
+    candidates:
+      - id: memory:decision_fusion
+        kind: decision
+        title: Retrieval fusion
+        content: Additive channel fusion remains the default; RRF retune did not beat it.
+    note: restatement of a durable decision (merge path, not noise)
+  - id: d29_idempotency_key
+    observation: "The retry reuses the same idempotency key so a crash between attempts cannot duplicate the chunk."
+    expected: durable
+    note: design rationale
+  - id: d30_supersedes_same_kind
+    observation: "Supersession edges must stay within one memory kind (decision to decision); add_memory enforces it."
+    expected: durable
+    note: durable rule
+  - id: d31_dup_threshold
+    observation: "The consolidation duplicate lookup uses a cosine floor of 0.80, configurable via ai.consolidation.dup_similarity_min."
+    expected: durable
+    note: durable configuration fact
+  - id: d32_ir_verification_root_cause
+    observation: "Root cause of the IR verification failure: the DiskANN window carried a graph predicate; the fix moves project scoping to Rust."
+    expected: durable
+    note: fix with root cause and remedy
+  - id: d33_prompt_cache_tradeoff
+    observation: "Trade-off accepted: prompt caching only pays off when the stable prefix dominates; variable context is excluded."
+    expected: durable
+    note: decision with trade-off
+  - id: d34_team_server_source_of_truth
+    observation: "The team server is the source of truth for shared memory; personal mode uses a separate store."
+    expected: durable
+    note: architecture decision
+  - id: d35_runtime_mode_values
+    observation: "Constraint: the VS Code setting ibis.runtime.mode has three values: attach, auto, spawn."
+    expected: durable
+    note: durable interface constraint
+  - id: d36_no_db_subcommand
+    observation: "Gotcha: the GitHub SurrealDB binary has no db subcommand; the CLI starts with start and a surrealkv URL."
+    expected: durable
+    note: engine tooling gotcha
+  - id: d37_prewarm_handshake
+    observation: "Fix: the pre-warm handshake now issues a read-only memory_list after initialize, so the first tree fetch is warm."
+    expected: durable
+    note: fix with rationale
+  - id: d38_never_cache_ask
+    observation: "Rule: never cache ask_project responses; exact-match caching is limited to deterministic analyzer and rule-synthesis calls."
+    expected: durable
+    note: durable caching rule
+  - id: d39_empty_root_restated
+    observation: "The setup wizard still crashes when discovery_root is empty."
+    expected: durable
+    candidates:
+      - id: memory:fix_empty_root
+        kind: fix
+        title: Guard empty discovery root
+        content: The setup wizard must validate discovery_root before scanning.
+    note: restatement of an existing fix (merge path, not noise)
+  - id: d40_retrieval_baseline
+    observation: "Fact: the 4.0 retrieval baseline is MRR 0.950, recall@5 0.975 and recall@15 1.0 with additive fusion."
+    expected: durable
+    note: durable measured baseline

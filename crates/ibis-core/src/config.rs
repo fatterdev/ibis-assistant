@@ -209,12 +209,30 @@ impl Default for ConsolidationConfig {
     }
 }
 
+/// Bounded decisions (`ai.decide`, D11): shadow mode is on by default — the
+/// consolidation computes the typed `is_noise` decision next to the
+/// generative verdict and logs `decide_shadow`, without changing behavior.
+/// Activation (routing the decision through `decide()`) is a later phase
+/// driven by the shadow agreement data.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct DecideConfig {
+    pub shadow: bool,
+}
+
+impl Default for DecideConfig {
+    fn default() -> Self {
+        DecideConfig { shadow: true }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct AIConfig {
     pub embedding: EmbeddingConfig,
     pub reasoning: ReasoningConfig,
     pub consolidation: ConsolidationConfig,
+    pub decide: DecideConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -651,6 +669,7 @@ impl Default for Config {
                     ..Default::default()
                 },
                 consolidation: ConsolidationConfig::default(),
+                decide: DecideConfig::default(),
             },
             gemini_default_rpm: 100,
             redmine_concurrency: 10,
@@ -1405,6 +1424,22 @@ mod tests {
         assert!(!cfg.ai.consolidation.enabled);
         assert_eq!(cfg.ai.consolidation.interval_secs, 3600);
         assert!((cfg.ai.consolidation.dup_similarity_min - 0.80).abs() < f64::EPSILON);
+    }
+
+    /// `ai.decide.shadow` (D11): shadow mode ships on and overlays like the
+    /// rest of the `ai` object.
+    #[test]
+    fn ai_decide_shadow_config() {
+        let dflt = default_config();
+        assert!(dflt.ai.decide.shadow);
+
+        let cfg: Config = serde_json::from_str(r#"{"ai": {"decide": {"shadow": false}}}"#).unwrap();
+        assert!(!cfg.ai.decide.shadow);
+
+        // Missing decide key under a present `ai` → shadow stays on.
+        let cfg: Config =
+            serde_json::from_str(r#"{"ai": {"consolidation": {"enabled": true}}}"#).unwrap();
+        assert!(cfg.ai.decide.shadow);
     }
 
     #[test]

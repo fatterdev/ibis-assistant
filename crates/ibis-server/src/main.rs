@@ -85,8 +85,8 @@ fn main() {
         }
         "start" | "stop" => exit_with_service_dispatch(&argv),
         "eval" => {
-            // In-process retrieval eval (A1): no running server, no MCP
-            // registry change — see eval_mode.
+            // In-process evals (A1 retrieval, D11 decisions): no running
+            // server, no MCP registry change — see eval_mode.
             let code = ibis_server::eval_mode::run_eval_cli(&argv[1..]);
             std::process::exit(code);
         }
@@ -201,6 +201,9 @@ fn print_help() {
     println!("\nIn-process commands:");
     println!("  eval retrieval --dataset <path> [--min-recall-5 X]");
     println!("               Retrieval quality eval over the golden dataset");
+    println!("  eval decisions --dataset <path> --provider ollama|openai_compat --model <id>");
+    println!("               [--min-agreement X]");
+    println!("               Bounded-decision calibration over the labeled is_noise dataset");
     println!("\nExample:");
     println!("  {bin_name} run -port 3030");
 }

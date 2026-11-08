@@ -1,11 +1,13 @@
 //! Sleeptime memory consolidation (
 //! ).
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 
+use ibis_ai::decide::{decide_with_hint, DecideAnswer, DecideQuestion};
 use ibis_ai::types::GenerationConfig;
 use ibis_db::executor::Executor;
 use ibis_db::value::{Embedding, RecordId, SurrealValue, Value, F64};
@@ -28,6 +30,18 @@ pub(crate) const DUP_SIMILARITY_MIN: f64 = 0.80;
 /// no-cloud guarantee through the `local_only:` base.
 const CONSOLIDATION_ROUTE_HINT: &str = "local:M";
 const CONSOLIDATION_PERSONAL_ROUTE_HINT: &str = "local_only:M";
+
+/// D11: bounded-decision question id and rubric version. The calibration
+/// dataset (`evaluations/decisions/cases.yaml`) pins the version — a rubric
+/// change requires a new dataset.
+pub const IS_NOISE_QUESTION_ID: &str = "is_noise";
+pub const IS_NOISE_RUBRIC_VERSION: &str = "is_noise.v1";
+
+/// D11 shadow-mode routing: the measurement must run on the tier-S local
+/// model. A cloud fallback would calibrate a different model and spend cloud
+/// budget; `local_only` also enforces the L3 edge case (missing tier-S model
+/// → skip shadow, log once).
+const DECIDE_SHADOW_ROUTE_HINT: &str = "local_only:S";
 
 const VALID_CONSOLIDATION_KINDS: [&str; 9] = [
     "decision",
@@ -62,6 +76,23 @@ pub struct ConsolidationDecision {
     /// omitted them.
     #[serde(default)]
     pub details: serde_json::Value,
+}
+
+/// D11 shadow-mode record: what the bounded decision would have answered next
+/// to the generative verdict. Logged under the `decide_shadow` target; the
+/// consolidation behavior never changes while shadow mode is on.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DecideShadow {
+    pub observation_id: String,
+    pub rubric: String,
+    /// The generative action (`noise` | `create` | `merge`).
+    pub decision_llm: String,
+    /// The bounded decision's highest-probability option.
+    pub best: String,
+    pub probs: BTreeMap<String, f64>,
+    pub confidence: f64,
+    /// `decision_llm == "noise"` matches `best == "noise"`.
+    pub agreement: bool,
 }
 
 /// One candidate observation row.
@@ -157,6 +188,9 @@ impl Optimizer {
                 .as_ref()
                 .map(|ai| Arc::new(SearchService::new(self.db.clone(), Some(ai.clone())))),
         };
+        // D11: a failing decide shadow disables the measurement for the rest
+        // of the pass (missing tier-S model, malformed output) and logs once.
+        let mut shadow_skipped = false;
         for (index, observation) in observations.iter().enumerate() {
             let duplicates = match self
                 .find_duplicate_memories(db, project_name, observation)
@@ -174,17 +208,17 @@ impl Optimizer {
             // C9 deterministic pre-match: when the normalized observation
             // title equals a candidate's, merge directly without an AI call
             // (same persist flow as an LLM merge).
-            let decision = match deterministic_title_match(observation, &duplicates) {
+            let (decision, used_llm) = match deterministic_title_match(observation, &duplicates) {
                 Some(decision) => {
                     tracing::info!(
                         "ConsolidateLoop: deterministic duplicate match for {} -> {}",
                         observation.id,
                         decision.merge_with
                     );
-                    decision
+                    (decision, false)
                 }
                 None => match self.distill_observation(observation, &duplicates).await {
-                    Ok(d) => d,
+                    Ok(d) => (d, true),
                     Err(e) => {
                         tracing::warn!(
                             "ConsolidateLoop: distillation failed for {}: {e}",
@@ -194,6 +228,36 @@ impl Optimizer {
                     }
                 },
             };
+            // D11 shadow mode: measure what the bounded decision would have
+            // said next to the generative verdict. Behavior never changes
+            // while shadow is on; the deterministic pre-match stays
+            // zero-AI by construction (C9), so it is not shadowed.
+            if used_llm && self.decide_shadow && !shadow_skipped {
+                match self
+                    .shadow_decide(observation, &duplicates, &decision)
+                    .await
+                {
+                    Ok(shadow) => {
+                        tracing::info!(
+                            target: "decide_shadow",
+                            observation = %shadow.observation_id,
+                            rubric = %shadow.rubric,
+                            decision_llm = %shadow.decision_llm,
+                            best = %shadow.best,
+                            probs = ?shadow.probs,
+                            confidence = shadow.confidence,
+                            agreement = shadow.agreement,
+                            "decide_shadow"
+                        );
+                    }
+                    Err(e) => {
+                        shadow_skipped = true;
+                        tracing::warn!(
+                            "ConsolidateLoop: decide shadow disabled for this pass: {e}"
+                        );
+                    }
+                }
+            }
             if decision.action == "noise" {
                 if let Err(e) = self.decay_noise(db, observation).await {
                     tracing::warn!(
@@ -512,6 +576,51 @@ impl Optimizer {
         }
     }
 
+    /// D11 shadow mode: computes the bounded `is_noise` decision over the
+    /// observation and its duplicate window. The measurement is local-only
+    /// (`local_only:S`) for team and personal content alike: it calibrates
+    /// the tier-S model, so a cloud fallback would measure the wrong model. A
+    /// missing tier-S model fails here and the caller logs it once.
+    async fn shadow_decide(
+        &self,
+        observation: &ConsolidationObservation,
+        duplicates: &[DuplicateMemory],
+        decision: &ConsolidationDecision,
+    ) -> Result<DecideShadow, String> {
+        let ai = self
+            .ai
+            .as_ref()
+            .ok_or_else(|| "AI provider not configured".to_string())?;
+        let state = build_is_noise_state(&observation.content, duplicates);
+        let result = decide_with_hint(
+            &state,
+            &[is_noise_question()],
+            ai.as_ref(),
+            DECIDE_SHADOW_ROUTE_HINT,
+        )
+        .await
+        .map_err(|e| format!("decide({IS_NOISE_QUESTION_ID}): {e}"))?;
+        if let Some(usage) = &result.usage {
+            if let Some(db) = &self.db {
+                let tracker = ibis_ai::CostTracker::new(Some(
+                    Arc::new(DbCostStore(db.clone())) as Arc<dyn ibis_ai::CostStore>
+                ));
+                tracker
+                    .record_usage(
+                        "system:decide_shadow",
+                        usage.prompt_token_count.max(0) as u64,
+                        usage.candidates_token_count.max(0) as u64,
+                        usage.cached_tokens(),
+                    )
+                    .await;
+            }
+        }
+        let answer = result.answers.get(IS_NOISE_QUESTION_ID).ok_or_else(|| {
+            format!("decide({IS_NOISE_QUESTION_ID}): answer missing from the result")
+        })?;
+        Ok(decide_shadow_record(&observation.id, decision, answer))
+    }
+
     async fn persist_consolidation(
         &self,
         db: &Arc<dyn Executor>,
@@ -750,6 +859,66 @@ fn build_distill_prompt(observation_content: &str, candidates_json: &str) -> Str
     )
 }
 
+/// D11 rubric: the closed `is_noise` question used by the shadow-mode
+/// measurement and by `ibis eval decisions`. The rubric version lives in the
+/// question text so a calibration dataset pins the exact wording.
+pub fn is_noise_question() -> DecideQuestion {
+    DecideQuestion::choice(
+        IS_NOISE_QUESTION_ID,
+        &format!(
+            "Rubric {IS_NOISE_RUBRIC_VERSION}. Is the observation routine noise, or does it state a durable project fact, decision, fix, rule, constraint, gotcha, or design rationale worth keeping?"
+        ),
+        &[
+            (
+                "noise",
+                "routine progress, transient working state, restated context, or content with no durable project value",
+            ),
+            (
+                "durable",
+                "a durable project fact, decision, fix, rule, constraint, gotcha, or design rationale worth keeping",
+            ),
+        ],
+    )
+}
+
+/// D11 state for the `is_noise` decision: the observation plus the same
+/// duplicate window the distillation prompt sees (ids, kinds, titles,
+/// contents). Shared by shadow mode and the calibration runner so the
+/// measurement matches production exactly.
+pub fn build_is_noise_state(observation: &str, duplicates: &[DuplicateMemory]) -> String {
+    let mut state = String::from("Observation:\n");
+    state.push_str(observation.trim());
+    state.push_str("\n\nExisting memories:\n");
+    if duplicates.is_empty() {
+        state.push_str("(none)");
+    } else {
+        for duplicate in duplicates {
+            state.push_str(&format!(
+                "- id: {}\n  kind: {}\n  title: {}\n  content: {}\n",
+                duplicate.id, duplicate.kind, duplicate.title, duplicate.content
+            ));
+        }
+    }
+    state
+}
+
+/// D11 shadow comparison: `noise` vs any durable action (`create`/`merge`).
+pub fn decide_shadow_record(
+    observation_id: &str,
+    decision: &ConsolidationDecision,
+    answer: &DecideAnswer,
+) -> DecideShadow {
+    DecideShadow {
+        observation_id: observation_id.to_string(),
+        rubric: IS_NOISE_RUBRIC_VERSION.to_string(),
+        decision_llm: decision.action.clone(),
+        best: answer.best.clone(),
+        probs: answer.probs.clone(),
+        confidence: answer.confidence,
+        agreement: (decision.action == "noise") == (answer.best == "noise"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -760,6 +929,92 @@ mod tests {
     use ibis_db::value::Object;
     use ibis_db::value::ToSql as _;
     use ibis_db::Executor;
+
+    /// D11 log capture: a global subscriber that records only the
+    /// `decide_shadow` target events (structured fields as strings). A global
+    /// subscriber avoids tracing's process-wide callsite-interest cache being
+    /// poisoned by a no-op subscriber in another test; the buffer is shared,
+    /// so each test filters by its own observation id.
+    #[derive(Default)]
+    struct CapturedEvent {
+        fields: Vec<(String, String)>,
+    }
+
+    #[derive(Default)]
+    struct FieldCapture {
+        fields: Vec<(String, String)>,
+    }
+
+    impl tracing::field::Visit for FieldCapture {
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            self.fields
+                .push((field.name().to_string(), format!("{value:?}")));
+        }
+
+        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+            self.fields
+                .push((field.name().to_string(), value.to_string()));
+        }
+
+        fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
+            self.fields
+                .push((field.name().to_string(), value.to_string()));
+        }
+
+        fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
+            self.fields
+                .push((field.name().to_string(), value.to_string()));
+        }
+    }
+
+    static DECIDE_SHADOW_EVENTS: std::sync::OnceLock<std::sync::Mutex<Vec<CapturedEvent>>> =
+        std::sync::OnceLock::new();
+    static DECIDE_SHADOW_CAPTURE: std::sync::Once = std::sync::Once::new();
+
+    struct DecideShadowSubscriber {
+        events: &'static std::sync::Mutex<Vec<CapturedEvent>>,
+    }
+
+    impl tracing::Subscriber for DecideShadowSubscriber {
+        fn enabled(&self, _metadata: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+
+        fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+
+        fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
+
+        fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
+
+        fn event(&self, event: &tracing::Event<'_>) {
+            if event.metadata().target() != "decide_shadow" {
+                return;
+            }
+            let mut capture = FieldCapture::default();
+            event.record(&mut capture);
+            self.events.lock().unwrap().push(CapturedEvent {
+                fields: capture.fields,
+            });
+        }
+
+        fn enter(&self, _span: &tracing::span::Id) {}
+
+        fn exit(&self, _span: &tracing::span::Id) {}
+    }
+
+    fn install_decide_shadow_capture() -> &'static std::sync::Mutex<Vec<CapturedEvent>> {
+        DECIDE_SHADOW_CAPTURE.call_once(|| {
+            let events = DECIDE_SHADOW_EVENTS.get_or_init(|| std::sync::Mutex::new(Vec::new()));
+            // Another global subscriber in the test process would win; the
+            // capture test then sees an empty buffer and fails loudly.
+            let _ = tracing::subscriber::set_global_default(DecideShadowSubscriber { events });
+        });
+        DECIDE_SHADOW_EVENTS
+            .get()
+            .expect("capture buffer initialized")
+    }
 
     /// D10 contract: team distillation declares tier M, personal keeps the
     /// tier-M provider but never falls back to cloud.
@@ -1029,6 +1284,260 @@ mod tests {
             "content binding: {:?}",
             add_vars[0].get("content")
         );
+    }
+
+    /// D11 contract: the shadow measurement is tier-S local-only.
+    #[test]
+    fn decide_shadow_route_hints_are_tier_s() {
+        assert_eq!(DECIDE_SHADOW_ROUTE_HINT, "local_only:S");
+        assert_eq!(IS_NOISE_QUESTION_ID, "is_noise");
+        assert_eq!(IS_NOISE_RUBRIC_VERSION, "is_noise.v1");
+    }
+
+    /// D11 rubric: closed two-option question with a versioned instruction.
+    #[test]
+    fn is_noise_question_is_closed_and_versioned() {
+        let question = is_noise_question();
+        assert_eq!(question.id, IS_NOISE_QUESTION_ID);
+        assert!(question.instructions.contains(IS_NOISE_RUBRIC_VERSION));
+        match question.kind {
+            ibis_ai::decide::DecideKind::Choice(options) => {
+                let ids: Vec<&str> = options.iter().map(|(id, _)| id.as_str()).collect();
+                assert_eq!(ids, vec!["noise", "durable"]);
+            }
+            other => panic!("expected a choice question, got {other:?}"),
+        }
+    }
+
+    /// D11 state builder: observation + duplicate window, explicit empty case.
+    #[test]
+    fn is_noise_state_matches_the_duplicate_window() {
+        let empty = build_is_noise_state("Ran the tests again.", &[]);
+        assert!(empty.starts_with("Observation:\nRan the tests again."));
+        assert!(empty.ends_with("Existing memories:\n(none)"));
+
+        let duplicates = [DuplicateMemory {
+            id: "memory:fix1".into(),
+            kind: "fix".into(),
+            title: "Setup crash".into(),
+            content: "Setup crashes on empty root.".into(),
+            score: 0.96,
+        }];
+        let state = build_is_noise_state("Empty roots crash setup.", &duplicates);
+        assert!(state.contains("- id: memory:fix1"));
+        assert!(state.contains("kind: fix"));
+        assert!(state.contains("title: Setup crash"));
+        assert!(state.contains("content: Setup crashes on empty root."));
+    }
+
+    /// D11 agreement: noise vs any durable action.
+    #[test]
+    fn shadow_agreement_maps_noise_to_noise() {
+        let answer = DecideAnswer {
+            probs: [("durable".to_string(), 0.9), ("noise".to_string(), 0.1)]
+                .into_iter()
+                .collect(),
+            best: "durable".into(),
+            confidence: 0.8,
+        };
+        let mut decision = ConsolidationDecision {
+            action: "create".into(),
+            ..Default::default()
+        };
+        let record = decide_shadow_record("memory:obs1", &decision, &answer);
+        assert!(record.agreement);
+        assert_eq!(record.rubric, IS_NOISE_RUBRIC_VERSION);
+
+        decision.action = "noise".into();
+        let record = decide_shadow_record("memory:obs1", &decision, &answer);
+        assert!(!record.agreement);
+    }
+
+    /// D11 shadow mode: the generative decision is unchanged, the extra
+    /// `decide()` call is logged on tier S, and the same fix is persisted.
+    #[tokio::test]
+    async fn shadow_mode_measures_decide_without_changing_the_decision() {
+        let db = Arc::new(ConsolidateDb::new(
+            vec![obj(vec![
+                ("id", Value::from_t("memory:obs1")),
+                (
+                    "content",
+                    Value::from_t("The wizard crashes when discovery_root is empty."),
+                ),
+                ("embedding", Value::from_t(vec![0.1f64, 0.2])),
+                ("owner", Value::from_t("agent")),
+                ("visibility", Value::from_t("team")),
+            ])],
+            Vec::new(),
+        ));
+        let ai = Arc::new(ConsolidateAi::new(vec![
+            r#"{
+                "action":"create",
+                "kind":"fix",
+                "title":"Guard empty discovery root",
+                "content":"The setup wizard must guard an empty discovery_root before scanning.",
+                "confidence":0.88,
+                "details":{"root_cause":"empty discovery_root"}
+            }"#,
+            r#"{"is_noise":{"probs":{"noise":0.1,"durable":0.9}}}"#,
+        ]));
+        let mut opt = optimizer(db.clone(), ai.clone());
+        opt.decide_shadow = true;
+
+        opt.consolidate_loop("ibis", 5)
+            .await
+            .expect("ConsolidateLoop failed");
+        let hints = ai.route_hints.lock().unwrap().clone();
+        assert_eq!(
+            hints,
+            vec!["local:M".to_string(), "local_only:S".to_string()],
+            "distill then local-only shadow decide: {hints:?}"
+        );
+        let prompts = ai.prompts.lock().unwrap().clone();
+        assert_eq!(prompts.len(), 2, "one distill + one shadow decide");
+        assert!(prompts[1].contains("\n\nSTATE:\n"));
+        assert!(prompts[1].contains("Existing memories:\n(none)"));
+
+        // Behavior unchanged: the generative verdict still persists the fix.
+        let add_vars = db.vars_of("CREATE memory:");
+        assert_eq!(add_vars.len(), 1, "one memory written");
+        assert_eq!(
+            add_vars[0].get("kind").map(var_str).unwrap_or_default(),
+            "fix"
+        );
+    }
+
+    /// D11 shadow mode: the structured `decide_shadow` log line carries the
+    /// agreement data the activation phase needs.
+    #[tokio::test]
+    async fn shadow_mode_emits_the_decide_shadow_log() {
+        let db = Arc::new(ConsolidateDb::new(
+            vec![obj(vec![
+                ("id", Value::from_t("memory:obs_log")),
+                ("content", Value::from_t("Some durable observation.")),
+                ("embedding", Value::from_t(vec![0.1f64, 0.2])),
+                ("owner", Value::from_t("agent")),
+                ("visibility", Value::from_t("team")),
+            ])],
+            Vec::new(),
+        ));
+        let ai = Arc::new(ConsolidateAi::new(vec![
+            r#"{"action":"create","kind":"fact","title":"t","content":"c","confidence":0.8}"#,
+            r#"{"is_noise":{"probs":{"noise":0.2,"durable":0.8}}}"#,
+        ]));
+        let mut opt = optimizer(db, ai);
+        opt.decide_shadow = true;
+
+        let events = install_decide_shadow_capture();
+        events.lock().unwrap().clear();
+        opt.consolidate_loop("ibis", 5)
+            .await
+            .expect("ConsolidateLoop failed");
+
+        let captured = events.lock().unwrap();
+        let matching: Vec<&CapturedEvent> = captured
+            .iter()
+            .filter(|event| {
+                event
+                    .fields
+                    .iter()
+                    .any(|(name, value)| name == "observation" && value == "memory:obs_log")
+            })
+            .collect();
+        assert_eq!(matching.len(), 1, "one decide_shadow event");
+        let fields: std::collections::BTreeMap<&str, &str> = matching[0]
+            .fields
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        assert_eq!(fields.get("decision_llm"), Some(&"create"));
+        assert_eq!(fields.get("best"), Some(&"durable"));
+        assert_eq!(fields.get("agreement"), Some(&"true"));
+        assert_eq!(fields.get("rubric"), Some(&IS_NOISE_RUBRIC_VERSION));
+        assert!(fields.contains_key("probs"));
+        assert!(fields.contains_key("confidence"));
+    }
+
+    /// D11 shadow mode: a failing decide call never changes the decision and
+    /// disables the measurement for the rest of the pass (one warn, no more
+    /// tier-S calls).
+    #[tokio::test]
+    async fn shadow_mode_failure_keeps_the_generative_path() {
+        let db = Arc::new(ConsolidateDb::new(
+            vec![
+                obj(vec![
+                    ("id", Value::from_t("memory:obs1")),
+                    ("content", Value::from_t("First durable observation.")),
+                    ("embedding", Value::from_t(vec![0.1f64, 0.2])),
+                    ("owner", Value::from_t("agent")),
+                    ("visibility", Value::from_t("team")),
+                ]),
+                obj(vec![
+                    ("id", Value::from_t("memory:obs2")),
+                    ("content", Value::from_t("Second durable observation.")),
+                    ("embedding", Value::from_t(vec![0.3f64, 0.4])),
+                    ("owner", Value::from_t("agent")),
+                    ("visibility", Value::from_t("team")),
+                ]),
+            ],
+            Vec::new(),
+        ));
+        let ai = Arc::new(ConsolidateAi::new(vec![
+            r#"{"action":"create","kind":"fact","title":"one","content":"one","confidence":0.8}"#,
+            "not json",
+            r#"{"action":"create","kind":"fact","title":"two","content":"two","confidence":0.8}"#,
+        ]));
+        let mut opt = optimizer(db.clone(), ai.clone());
+        opt.decide_shadow = true;
+
+        opt.consolidate_loop("ibis", 5)
+            .await
+            .expect("shadow failure stays contained");
+        let hints = ai.route_hints.lock().unwrap().clone();
+        assert_eq!(
+            hints,
+            vec![
+                "local:M".to_string(),
+                "local_only:S".to_string(),
+                "local:M".to_string()
+            ],
+            "shadow is skipped after the first failure: {hints:?}"
+        );
+        assert_eq!(
+            db.vars_of("CREATE memory:").len(),
+            2,
+            "both generative decisions persisted"
+        );
+    }
+
+    /// D11 shadow mode: personal observations never leave the machine.
+    #[tokio::test]
+    async fn shadow_mode_routes_personal_content_local_only() {
+        let db = Arc::new(ConsolidateDb::new(Vec::new(), Vec::new()));
+        let ai = Arc::new(ConsolidateAi::new(vec![
+            r#"{"is_noise":{"probs":{"noise":0.2,"durable":0.8}}}"#,
+        ]));
+        let opt = optimizer(db, ai.clone());
+        let observation = ConsolidationObservation {
+            id: "memory:obs1".into(),
+            content: "A personal note.".into(),
+            owner: "agent".into(),
+            visibility: "personal".into(),
+            ..Default::default()
+        };
+        let decision = ConsolidationDecision {
+            action: "create".into(),
+            ..Default::default()
+        };
+        let shadow = opt
+            .shadow_decide(&observation, &[], &decision)
+            .await
+            .expect("shadow decide");
+        assert_eq!(
+            ai.route_hints.lock().unwrap().clone(),
+            vec!["local_only:S".to_string()]
+        );
+        assert!(shadow.agreement);
     }
 
     /// C7 strict mode: the distillation retries ONCE when the per-kind

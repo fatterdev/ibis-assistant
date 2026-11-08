@@ -27,6 +27,7 @@ pub(crate) const DEFAULT_FALLBACK_ORDER: [&str; 3] = ["gemini", "openai_compat",
 pub struct AiConfig {
     pub embedding: EmbeddingConfig,
     pub reasoning: ReasoningConfig,
+    pub decide: DecideConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -56,6 +57,20 @@ pub struct ReasoningConfig {
     pub context_only_fallback: bool,
     pub always_smallest_local: bool,
     pub use_ide_provided_models: bool,
+}
+
+/// D11 bounded decisions (`ai.decide`). Mirror of the `ibis-core` config;
+/// shadow mode ships on.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct DecideConfig {
+    pub shadow: bool,
+}
+
+impl Default for DecideConfig {
+    fn default() -> Self {
+        DecideConfig { shadow: true }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -312,6 +327,15 @@ mod tests {
     fn flattened_gemini_array_is_rejected() {
         let bad = r#"{"reasoning":{"clouds":{"gemini":[{"key":"k"}]}}}"#;
         assert!(serde_json::from_str::<AiConfig>(bad).is_err());
+    }
+
+    /// D11: shadow mode defaults on in the crate-local mirror too.
+    #[test]
+    fn decide_shadow_defaults_true_and_overlays() {
+        let cfg: AiConfig = serde_json::from_str("{}").unwrap();
+        assert!(cfg.decide.shadow);
+        let cfg: AiConfig = serde_json::from_str(r#"{"decide":{"shadow":false}}"#).unwrap();
+        assert!(!cfg.decide.shadow);
     }
 
     #[test]

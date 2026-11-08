@@ -87,6 +87,9 @@ async fn run_pass(state: &Arc<AppState>) {
     optimizer.schema_enforcement = ibis_search::memory::details::SchemaEnforcement::resolve(
         &state.config().memory.schema_enforcement,
     );
+    // D11: shadow mode ships on (`ai.decide.shadow`); it never changes the
+    // consolidation behavior, only the `decide_shadow` log line.
+    optimizer.decide_shadow = state.config().ai.decide.shadow;
     let projects = match optimizer.pending_observation_projects().await {
         Ok(projects) => projects,
         Err(err) => {

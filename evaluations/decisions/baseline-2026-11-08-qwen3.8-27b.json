@@ -1,0 +1,501 @@
+{
+  "dataset": "evaluations/decisions/cases.yaml",
+  "version": "1",
+  "rubric": "is_noise.v1",
+  "provider": "openai_compat",
+  "auto_threshold": 0.75,
+  "escalate_threshold": 0.4,
+  "aggregate": {
+    "cases": 40,
+    "cases_ok": 40,
+    "cases_error": 0,
+    "agreement": 0.975,
+    "mean_confidence": 0.8654999999999994,
+    "auto_cases": 35,
+    "auto_accuracy": 1.0,
+    "escalated_cases": 4,
+    "default_cases": 1
+  },
+  "cases": [
+    {
+      "id": "d01_tests_green_again",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.05,
+        "noise": 0.95
+      },
+      "agreement": true
+    },
+    {
+      "id": "d02_dev_server_left_running",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.05,
+        "noise": 0.95
+      },
+      "agreement": true
+    },
+    {
+      "id": "d03_reread_router",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.05,
+        "noise": 0.95
+      },
+      "agreement": true
+    },
+    {
+      "id": "d04_waiting_for_ci",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.96,
+      "probs": {
+        "durable": 0.02,
+        "noise": 0.98
+      },
+      "agreement": true
+    },
+    {
+      "id": "d05_retry_after_exit",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.96,
+      "probs": {
+        "durable": 0.02,
+        "noise": 0.98
+      },
+      "agreement": true
+    },
+    {
+      "id": "d06_next_step_eval",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.8,
+      "probs": {
+        "durable": 0.1,
+        "noise": 0.9
+      },
+      "agreement": true
+    },
+    {
+      "id": "d07_debug_log_level",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.05,
+        "noise": 0.95
+      },
+      "agreement": true
+    },
+    {
+      "id": "d08_usual_warnings",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.05,
+        "noise": 0.95
+      },
+      "agreement": true
+    },
+    {
+      "id": "d09_checked_out_branch",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.96,
+      "probs": {
+        "durable": 0.02,
+        "noise": 0.98
+      },
+      "agreement": true
+    },
+    {
+      "id": "d10_model_download",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.96,
+      "probs": {
+        "durable": 0.02,
+        "noise": 0.98
+      },
+      "agreement": true
+    },
+    {
+      "id": "d11_reranker_speculation",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.8,
+      "probs": {
+        "durable": 0.1,
+        "noise": 0.9
+      },
+      "agreement": true
+    },
+    {
+      "id": "d12_user_asked_tickets",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.96,
+      "probs": {
+        "durable": 0.02,
+        "noise": 0.98
+      },
+      "agreement": true
+    },
+    {
+      "id": "d13_restarted_daemon",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.6000000000000001,
+      "probs": {
+        "durable": 0.2,
+        "noise": 0.8
+      },
+      "agreement": true
+    },
+    {
+      "id": "d14_test_fixture_rows",
+      "status": "ok",
+      "expected": "noise",
+      "best": "durable",
+      "confidence": 0.19999999999999996,
+      "probs": {
+        "durable": 0.6,
+        "noise": 0.4
+      },
+      "agreement": false
+    },
+    {
+      "id": "d15_whitespace_only",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.7,
+      "probs": {
+        "durable": 0.15,
+        "noise": 0.85
+      },
+      "agreement": true
+    },
+    {
+      "id": "d16_repeated_log_line",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.7,
+      "probs": {
+        "durable": 0.15,
+        "noise": 0.85
+      },
+      "agreement": true
+    },
+    {
+      "id": "d17_diff_nothing_unexpected",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.05,
+        "noise": 0.95
+      },
+      "agreement": true
+    },
+    {
+      "id": "d18_reminder_tomorrow",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.05,
+        "noise": 0.95
+      },
+      "agreement": true
+    },
+    {
+      "id": "d19_cold_build_cache",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.7,
+      "probs": {
+        "durable": 0.15,
+        "noise": 0.85
+      },
+      "agreement": true
+    },
+    {
+      "id": "d20_verbose_flag",
+      "status": "ok",
+      "expected": "noise",
+      "best": "noise",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.05,
+        "noise": 0.95
+      },
+      "agreement": true
+    },
+    {
+      "id": "d21_additive_fusion_decision",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.95,
+        "noise": 0.05
+      },
+      "agreement": true
+    },
+    {
+      "id": "d22_empty_discovery_root_fix",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.95,
+        "noise": 0.05
+      },
+      "agreement": true
+    },
+    {
+      "id": "d23_plugin_data_path",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.95,
+        "noise": 0.05
+      },
+      "agreement": true
+    },
+    {
+      "id": "d24_personal_local_only",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 1.0,
+      "probs": {
+        "durable": 1.0,
+        "noise": 0.0
+      },
+      "agreement": true
+    },
+    {
+      "id": "d25_surreal_unbound_param",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.96,
+      "probs": {
+        "durable": 0.98,
+        "noise": 0.02
+      },
+      "agreement": true
+    },
+    {
+      "id": "d26_mcp_bridge_design",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.96,
+      "probs": {
+        "durable": 0.98,
+        "noise": 0.02
+      },
+      "agreement": true
+    },
+    {
+      "id": "d27_surreal_pin",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.95,
+        "noise": 0.05
+      },
+      "agreement": true
+    },
+    {
+      "id": "d28_fusion_restated",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.95,
+        "noise": 0.05
+      },
+      "agreement": true
+    },
+    {
+      "id": "d29_idempotency_key",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.95,
+        "noise": 0.05
+      },
+      "agreement": true
+    },
+    {
+      "id": "d30_supersedes_same_kind",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.95,
+        "noise": 0.05
+      },
+      "agreement": true
+    },
+    {
+      "id": "d31_dup_threshold",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.95,
+        "noise": 0.05
+      },
+      "agreement": true
+    },
+    {
+      "id": "d32_ir_verification_root_cause",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.95,
+        "noise": 0.05
+      },
+      "agreement": true
+    },
+    {
+      "id": "d33_prompt_cache_tradeoff",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.95,
+        "noise": 0.05
+      },
+      "agreement": true
+    },
+    {
+      "id": "d34_team_server_source_of_truth",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.95,
+        "noise": 0.05
+      },
+      "agreement": true
+    },
+    {
+      "id": "d35_runtime_mode_values",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.95,
+        "noise": 0.05
+      },
+      "agreement": true
+    },
+    {
+      "id": "d36_no_db_subcommand",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.95,
+        "noise": 0.05
+      },
+      "agreement": true
+    },
+    {
+      "id": "d37_prewarm_handshake",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.95,
+        "noise": 0.05
+      },
+      "agreement": true
+    },
+    {
+      "id": "d38_never_cache_ask",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.95,
+        "noise": 0.05
+      },
+      "agreement": true
+    },
+    {
+      "id": "d39_empty_root_restated",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8,
+      "probs": {
+        "durable": 0.9,
+        "noise": 0.1
+      },
+      "agreement": true
+    },
+    {
+      "id": "d40_retrieval_baseline",
+      "status": "ok",
+      "expected": "durable",
+      "best": "durable",
+      "confidence": 0.8999999999999999,
+      "probs": {
+        "durable": 0.95,
+        "noise": 0.05
+      },
+      "agreement": true
+    }
+  ]
+}

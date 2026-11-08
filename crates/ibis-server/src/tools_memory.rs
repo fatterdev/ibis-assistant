@@ -960,6 +960,8 @@ async fn memory_consolidate(
         optimizer.schema_enforcement = ibis_search::memory::details::SchemaEnforcement::resolve(
             &state.config().memory.schema_enforcement,
         );
+        // D11: shadow mode ships on (`ai.decide.shadow`).
+        optimizer.decide_shadow = state.config().ai.decide.shadow;
         match optimizer.consolidate_loop(&project, max_items).await {
             Err(err) => tracing::error!("Memory consolidation failed: {err}"),
             Ok(()) => {

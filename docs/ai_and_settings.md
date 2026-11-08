@@ -107,6 +107,7 @@ cloud contract:
 | RAFT synthetic QA | `ibis-optimization` | `local:S` |
 | Memory consolidation (team) | `ibis-optimization` | `local:M` |
 | Memory consolidation (personal) | `ibis-optimization` | `local_only:M` |
+| Bounded-decision shadow (team + personal) | `ibis-optimization` | `local_only:S` |
 | Semantic log analysis / format discovery | `ibis-ingest-logs` | `local:M` |
 | Ingest rule synthesis | `ibis-ingest-code` | `local:M` |
 | ast-grep rule generation | `ibis-ingest-logs` | `local:M` |
@@ -121,6 +122,50 @@ first uses it. One provider is pinned for the whole ReAct loop, so the model
 never switches mid-task (affinity). Routing is logged at debug level
 (`ibis_ai::router`, `hint`/`tier`/`local_model`) and the assembled map at
 startup.
+
+## Bounded decisions (D11)
+
+Closed, repeated decisions ("is this observation noise?") use a typed
+single-turn primitive instead of free-form JSON generation:
+`decide(state, questions)` returns a probability distribution per question
+plus the confidence margin (`max - second`). The caller owns the abstention
+policy — auto above θ_auto, the current generative path in between, and a
+conservative default below θ_escalate. The primitive never decides on its own.
+
+`ai.decide.shadow` (default `true`) turns on shadow mode: the memory
+consolidation computes the `is_noise` decision next to the generative verdict
+and logs a `decide_shadow` record (`observation`, `rubric`, `decision_llm`,
+`best`, `probs`, `confidence`, `agreement`) without changing behavior. The
+shadow measurement routes `local_only:S` for team and personal observations
+alike: it must calibrate the tier-S model, never a cloud fallback (a missing
+tier-S model skips the pass with one warning). The deterministic C9 pre-match
+stays zero-AI and is not shadowed.
+
+The rubric is versioned (`is_noise.v1`) and pinned by the calibration dataset:
+
+```bash
+# Tier-S local model (Ollama)
+ibis eval decisions --dataset evaluations/decisions/cases.yaml \
+  --provider ollama --model granite4.1:3b --min-agreement 0.80
+
+# Any OpenAI-compatible local server
+ibis eval decisions --dataset evaluations/decisions/cases.yaml \
+  --provider openai_compat --url http://127.0.0.1:8080/v1 \
+  --model qwen3.8-27b --api-key local --min-agreement 0.80
+```
+
+The JSON report carries agreement, mean confidence and the
+auto/escalate/default buckets at `--auto-threshold` (default 0.75) and
+`--escalate-threshold` (default 0.40). The run is manual/owner (a live chat
+model is required); `cargo test` validates the committed dataset and the
+report math without a model. The 08/11 baseline
+(`baseline-2026-11-08-qwen3.8-27b.json`) is 40/40 with agreement 0.975 on a
+local `qwen3.8-27b` (the tier-S `granite4.1:3b` was not installed on the
+measuring host); the single miss is in the default bucket (confidence 0.20)
+and a prior run scored 1.000, so the residual is sampling variance at temp
+0.001. The tier-S run remains the activation gate. Activation (routing the
+consolidation decision through `decide()`) is a later phase driven by the
+shadow agreement numbers.
 
 ## Plug-and-play keys
 
