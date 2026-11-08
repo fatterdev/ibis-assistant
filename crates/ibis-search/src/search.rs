@@ -23,8 +23,9 @@ use crate::error::{Result, SearchError};
 use crate::graph::{self, CommitSummary, GraphContext, IssueSummary};
 use crate::memory::temporal::{ask_memory_visibility_sql, memory_currentness_sql};
 use crate::retrieval_boost::{
-    apply_multi_signal_boost, apply_rrf_boost, calibrate_lexical_score, resolve_linked_symbols,
-    rrf_fuse, rrf_max_score, tokenize_query, FusionMode, ScoredHit, CURRENT_EPSILON, RRF_K,
+    apply_multi_signal_boost, apply_rrf_boost, calibrate_lexical_score, expand_query,
+    resolve_linked_symbols, rrf_fuse, rrf_max_score, tokenize_query, FusionMode,
+    QueryExpansionMode, ScoredHit, CURRENT_EPSILON, RRF_K,
 };
 use crate::rows;
 use crate::ActorContext;
@@ -136,6 +137,9 @@ pub struct SearchService {
     /// channel above the final [`VECTOR_CHANNEL_LIMIT`] cut, shared by the
     /// temporal rescore and the future A3 reranker.
     pub candidate_window: usize,
+    /// Query expansion mode (`search.query_expansion`: off|symbol_variant —
+    /// A4; default symbol_variant, zero-cost when no linked symbols resolve).
+    pub query_expansion: QueryExpansionMode,
     /// Process-local TTL cache of ancestor sets (lazily created).
     pub(crate) ancestor_cache: std::sync::OnceLock<ibis_git::AncestorCache>,
 }
@@ -153,6 +157,7 @@ impl Default for SearchService {
             fusion_mode: FusionMode::default(),
             rrf_k: RRF_K,
             candidate_window: DEFAULT_CANDIDATE_WINDOW,
+            query_expansion: QueryExpansionMode::default(),
             ancestor_cache: std::sync::OnceLock::new(),
         }
     }
@@ -282,6 +287,28 @@ pub(crate) fn apply_temporal_decay(score: f64, age_days: Option<f64>) -> f64 {
     score * 0.7 + temporal
 }
 
+/// A4 cross-pass merge for one channel: a row already present keeps
+/// `score = max(existing, incoming)` (the variant pass can only strengthen);
+/// a row seen only in the variant pass joins the channel. Exactly one entry
+/// per id, always — in-pass duplicates collapse into the existing slot.
+fn merge_channel_pass(
+    channel_rows: &mut Vec<ChunkResult>,
+    index: &mut HashMap<String, usize>,
+    incoming: ChunkResult,
+) {
+    match index.get(&incoming.id) {
+        Some(&idx) => {
+            if incoming.score > channel_rows[idx].score {
+                channel_rows[idx].score = incoming.score;
+            }
+        }
+        None => {
+            index.insert(incoming.id.clone(), channel_rows.len());
+            channel_rows.push(incoming);
+        }
+    }
+}
+
 impl SearchService {
     /// Performs the hybrid search:
     /// 1. vector search with time decay on file_chunk, commit_chunk, memory
@@ -300,6 +327,13 @@ impl SearchService {
             .ai
             .as_ref()
             .ok_or_else(|| SearchError::Embedding("AI provider not configured".into()))?;
+
+        // A4: tokenization and the linked-symbol lookup moved ahead of the
+        // embedding — the expansion variant needs the resolved symbols, and
+        // the boost stage below reuses the same tokens.
+        let (keywords, entities) = tokenize_query(query);
+        let linked_symbols = resolve_linked_symbols(self.db.as_ref(), &entities).await;
+
         let vec = ai
             .embed_text(query)
             .await
@@ -310,6 +344,34 @@ impl SearchService {
             .await;
 
         let vec_json = commit_meaning::vec_value(&vec);
+        // A4 (query expansion): a second embedding for the symbol-variant
+        // query — only when the mode is on and the variant differs from the
+        // primary (no linked symbols → fast path, zero extra cost). The
+        // variant can only strengthen retrieval: the vector channels keep
+        // `score = max(primary_pass, variant_pass)` per row. A variant
+        // embedding failure degrades to the primary pass (fail-open).
+        let vec2_json = match self.query_expansion {
+            QueryExpansionMode::SymbolVariant => {
+                match expand_query(query, &linked_symbols).get(1) {
+                    Some(variant) => match ai.embed_text(variant).await {
+                        Ok(vec2) => {
+                            cost_tracker(self)
+                                .record_embedding_usage("system:search_vector", variant)
+                                .await;
+                            Some(commit_meaning::vec_value(&vec2))
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "query expansion: variant embedding failed; primary only: {e}"
+                            );
+                            None
+                        }
+                    },
+                    None => None,
+                }
+            }
+            QueryExpansionMode::Off => None,
+        };
         let window = self.candidate_window.max(VECTOR_CHANNEL_LIMIT);
         let dist_expr = "vector::distance::cosine(embedding, $vec)";
         let sim_expr = "vector::similarity::cosine(embedding, $vec)";
@@ -398,39 +460,50 @@ impl SearchService {
 
         // F03/D1: channels are collected independently — the same document
         // MAY appear in several channels (each contributes to the fusion);
-        // only duplicates INSIDE one channel collapse (first rank wins).
+        // only duplicates INSIDE one channel collapse (one entry per id).
+        // A4: vector channels run one pass per embedding (primary + optional
+        // symbol variant) and merge per row with `score = max(passes)`;
+        // rows seen only in the variant pass join the channel. Lexical
+        // channels keep the literal query (identical tokens → single pass).
         let mut channels: Vec<Vec<ChunkResult>> = Vec::with_capacity(queries.len());
         for tq in &queries {
-            let mut vars: Vars = memory_vars.iter().cloned().collect();
-            vars.insert("vec".into(), vec_json.clone());
-            vars.insert("q".into(), ibis_db::value::Value::from_t(query));
-            let outcome = db.smart_query(&tq.sql, vars).await.map_err(|e| {
-                SearchError::other(format!("vector search failed on {}: {e}", tq.name))
-            })?;
-            let Some(rows_values) = rows::normalize_rows(&outcome) else {
-                return Err(SearchError::other(format!(
-                    "failed to parse chunks from {}: unexpected result type",
-                    tq.name
-                )));
+            let passes: Vec<&ibis_db::value::Value> = if tq.temporal {
+                match &vec2_json {
+                    Some(v2) => vec![&vec_json, v2],
+                    None => vec![&vec_json],
+                }
+            } else {
+                vec![&vec_json]
             };
-            let mut seen_in_channel = std::collections::HashSet::new();
+            let mut seen_in_channel: HashMap<String, usize> = HashMap::new();
             let mut channel_rows: Vec<ChunkResult> = Vec::new();
-            for row in rows::object_rows(&rows_values) {
-                let mut c = ChunkResult::from_row(row, tq.kind, tq.name);
-                if c.id.is_empty() && c.content.is_empty() {
-                    continue;
+            for pass_vec in passes {
+                let mut vars: Vars = memory_vars.iter().cloned().collect();
+                vars.insert("vec".into(), pass_vec.clone());
+                vars.insert("q".into(), ibis_db::value::Value::from_t(query));
+                let outcome = db.smart_query(&tq.sql, vars).await.map_err(|e| {
+                    SearchError::other(format!("vector search failed on {}: {e}", tq.name))
+                })?;
+                let Some(rows_values) = rows::normalize_rows(&outcome) else {
+                    return Err(SearchError::other(format!(
+                        "failed to parse chunks from {}: unexpected result type",
+                        tq.name
+                    )));
+                };
+                for row in rows::object_rows(&rows_values) {
+                    let mut c = ChunkResult::from_row(row, tq.kind, tq.name);
+                    if c.id.is_empty() && c.content.is_empty() {
+                        continue;
+                    }
+                    if tq.temporal {
+                        c.score = apply_temporal_decay(c.score, c.age_days);
+                    } else {
+                        // F04/D2: raw BM25 units are calibrated onto the blend
+                        // scale before they meet the cosine/decay scores.
+                        c.score = calibrate_lexical_score(c.score);
+                    }
+                    merge_channel_pass(&mut channel_rows, &mut seen_in_channel, c);
                 }
-                if !seen_in_channel.insert(c.id.clone()) {
-                    continue;
-                }
-                if tq.temporal {
-                    c.score = apply_temporal_decay(c.score, c.age_days);
-                } else {
-                    // F04/D2: raw BM25 units are calibrated onto the blend
-                    // scale before they meet the cosine/decay scores.
-                    c.score = calibrate_lexical_score(c.score);
-                }
-                channel_rows.push(c);
             }
             if tq.temporal {
                 // Rescore may reorder within the window: ranks follow the
@@ -497,9 +570,8 @@ impl SearchService {
         // Fusion (F03/D1): the same document appearing in several channels
         // sums its per-channel contributions; the board dedupes AFTER the
         // fusion (one entry per document — `chunks` is already the
-        // representative board).
-        let (keywords, entities) = tokenize_query(query);
-        let linked_symbols = resolve_linked_symbols(self.db.as_ref(), &entities).await;
+        // representative board). `keywords`/`entities`/`linked_symbols` were
+        // resolved before the embedding (A4) and are reused here.
         let mut hits: Vec<ScoredHit> = match self.fusion_mode {
             FusionMode::Additive => chunks
                 .iter()
@@ -733,7 +805,7 @@ pub(crate) fn float32_to_f64(vec: &[f32]) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{fake_ai, obj, rows_of, FakeDb};
+    use crate::test_support::{fake_ai, obj, rows_of, FakeAI, FakeDb};
     use ibis_db::value::Value;
 
     fn service(db: Arc<FakeDb>, ai: Option<Arc<dyn ibis_ai::AIProvider>>) -> SearchService {
@@ -1152,5 +1224,252 @@ mod tests {
         let svc = service(fake.clone(), None);
         let _ = svc.raw_query("SELECT 1;").await.expect("raw");
         assert_eq!(fake.execute_calls.lock().unwrap()[0], "SELECT 1;");
+    }
+
+    // --- A4: query expansion --------------------------------------------------
+
+    #[test]
+    fn merge_channel_pass_keeps_max_per_row() {
+        fn chunk(id: &str, score: f64) -> ChunkResult {
+            ChunkResult {
+                id: id.into(),
+                path: String::new(),
+                content: String::new(),
+                score,
+                hash: String::new(),
+                current_hash: String::new(),
+                source_kind: "file_chunk".into(),
+                channel: "file_chunk".into(),
+                commit_hash: String::new(),
+                status: String::new(),
+                kind: String::new(),
+                age_days: None,
+                at_head: false,
+            }
+        }
+        let mut rows = vec![chunk("a", 0.5), chunk("b", 0.2)];
+        let mut index: HashMap<String, usize> = [("a".to_string(), 0), ("b".to_string(), 1)]
+            .into_iter()
+            .collect();
+        // Variant pass strengthens `a`, introduces `c`, and cannot demote `b`.
+        merge_channel_pass(&mut rows, &mut index, chunk("a", 0.9));
+        merge_channel_pass(&mut rows, &mut index, chunk("c", 0.4));
+        merge_channel_pass(&mut rows, &mut index, chunk("b", 0.1));
+        assert_eq!(rows.len(), 3, "exactly one entry per id");
+        assert!((rows[0].score - 0.9).abs() < 1e-12, "max wins for a");
+        assert!(
+            (rows[1].score - 0.2).abs() < 1e-12,
+            "weaker pass never demotes"
+        );
+        assert!(
+            (rows[2].score - 0.4).abs() < 1e-12,
+            "variant-only row joins"
+        );
+    }
+
+    /// A4: with the symbol-variant expansion on and a linked symbol resolved,
+    /// the query embeds twice (primary + variant) and the vector channel runs
+    /// two passes; the lexical channel keeps the literal query.
+    #[tokio::test]
+    async fn ask_project_query_expansion_runs_second_vector_pass() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let embed_calls = Arc::new(AtomicUsize::new(0));
+        let calls = embed_calls.clone();
+        let ai: Arc<dyn AIProvider> = Arc::new(FakeAI {
+            embed: Some(Box::new(move |_text: &str| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                vec![0.1, 0.2, 0.3]
+            })),
+            generate: None,
+        });
+        let fake = Arc::new(FakeDb::new(vec![
+            (
+                "FROM file_chunk WHERE embedding",
+                rows_of(vec![obj(vec![
+                    ("id", Value::from_t("file_chunk:1")),
+                    ("path", Value::from_t("/src/calc.go")),
+                    ("content", Value::from_t("price calculator logic")),
+                    ("hash", Value::from_t("h1")),
+                    ("current_hash", Value::from_t("h1")),
+                    ("score", Value::from_t(0.9f64)),
+                ])]),
+            ),
+            (
+                "FROM symbol",
+                rows_of(vec![obj(vec![("name", Value::from_t("pricecalculator"))])]),
+            ),
+        ]));
+        let svc = service(fake.clone(), Some(ai));
+        let results = svc
+            .ask_project(&ActorContext::LOCAL, "price calculator PriceCalculator")
+            .await
+            .expect("ask_project");
+
+        assert_eq!(
+            embed_calls.load(Ordering::SeqCst),
+            2,
+            "symbol-variant expansion embeds primary + variant"
+        );
+        let smart = fake.smart_calls.lock().unwrap();
+        let vector_passes = smart
+            .iter()
+            .filter(|q| q.contains("FROM file_chunk WHERE embedding"))
+            .count();
+        assert_eq!(vector_passes, 2, "vector channel runs primary + variant");
+        let lexical_passes = smart
+            .iter()
+            .filter(|q| q.contains("FROM file_chunk WHERE content @1@"))
+            .count();
+        drop(smart);
+        assert_eq!(lexical_passes, 1, "lexical channel keeps the literal query");
+        assert!(
+            results.iter().any(|r| r.id == "file_chunk:1"),
+            "merged board still contains the row"
+        );
+    }
+
+    /// A4 fast path: no linked symbols → single embedding, single pass
+    /// (zero extra cost, L3 edge case).
+    #[tokio::test]
+    async fn ask_project_query_expansion_fast_path_without_symbols() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let embed_calls = Arc::new(AtomicUsize::new(0));
+        let calls = embed_calls.clone();
+        let ai: Arc<dyn AIProvider> = Arc::new(FakeAI {
+            embed: Some(Box::new(move |_text: &str| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                vec![0.1, 0.2, 0.3]
+            })),
+            generate: None,
+        });
+        let fake = Arc::new(FakeDb::new(vec![(
+            "FROM file_chunk WHERE embedding",
+            rows_of(vec![obj(vec![
+                ("id", Value::from_t("file_chunk:1")),
+                ("path", Value::from_t("/src/a.go")),
+                ("content", Value::from_t("plain body")),
+                ("score", Value::from_t(0.9f64)),
+            ])]),
+        )]));
+        let svc = service(fake.clone(), Some(ai));
+        let results = svc
+            .ask_project(&ActorContext::LOCAL, "plain words only")
+            .await
+            .expect("ask_project");
+        assert_eq!(
+            embed_calls.load(Ordering::SeqCst),
+            1,
+            "no linked symbols → no second embedding"
+        );
+        let vector_passes = fake
+            .smart_calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|q| q.contains("FROM file_chunk WHERE embedding"))
+            .count();
+        assert_eq!(vector_passes, 1, "single pass on the fast path");
+        assert!(results.iter().any(|r| r.id == "file_chunk:1"));
+    }
+
+    /// A4 off mode: even with linked symbols resolved, expansion stays off.
+    #[tokio::test]
+    async fn ask_project_query_expansion_off_keeps_single_pass() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let embed_calls = Arc::new(AtomicUsize::new(0));
+        let calls = embed_calls.clone();
+        let ai: Arc<dyn AIProvider> = Arc::new(FakeAI {
+            embed: Some(Box::new(move |_text: &str| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                vec![0.1, 0.2, 0.3]
+            })),
+            generate: None,
+        });
+        let fake = Arc::new(FakeDb::new(vec![
+            (
+                "FROM file_chunk WHERE embedding",
+                rows_of(vec![obj(vec![
+                    ("id", Value::from_t("file_chunk:1")),
+                    ("path", Value::from_t("/src/calc.go")),
+                    ("content", Value::from_t("price calculator logic")),
+                    ("score", Value::from_t(0.9f64)),
+                ])]),
+            ),
+            (
+                "FROM symbol",
+                rows_of(vec![obj(vec![("name", Value::from_t("pricecalculator"))])]),
+            ),
+        ]));
+        let mut svc = service(fake.clone(), Some(ai));
+        svc.query_expansion = QueryExpansionMode::Off;
+        let results = svc
+            .ask_project(&ActorContext::LOCAL, "price calculator PriceCalculator")
+            .await
+            .expect("ask_project");
+        assert_eq!(
+            embed_calls.load(Ordering::SeqCst),
+            1,
+            "off mode never embeds the variant"
+        );
+        let vector_passes = fake
+            .smart_calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|q| q.contains("FROM file_chunk WHERE embedding"))
+            .count();
+        assert_eq!(vector_passes, 1);
+        assert!(results.iter().any(|r| r.id == "file_chunk:1"));
+    }
+
+    /// A4 fail-open: a variant-embedding failure degrades to the primary pass
+    /// without failing the ask.
+    #[tokio::test]
+    async fn ask_project_query_expansion_variant_failure_fails_open() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct VariantFailsAI(AtomicUsize);
+        #[async_trait]
+        impl AIProvider for VariantFailsAI {
+            fn name(&self) -> &str {
+                "variant-fails"
+            }
+            async fn is_functional(&self) -> bool {
+                true
+            }
+            async fn embed_text(
+                &self,
+                _text: &str,
+            ) -> std::result::Result<Vec<f32>, ibis_ai::AiError> {
+                let n = self.0.fetch_add(1, Ordering::SeqCst);
+                if n > 0 {
+                    return Err(ibis_ai::AiError::other("variant embedding down"));
+                }
+                Ok(vec![0.1, 0.2, 0.3])
+            }
+        }
+        let fake = Arc::new(FakeDb::new(vec![
+            (
+                "FROM file_chunk WHERE embedding",
+                rows_of(vec![obj(vec![
+                    ("id", Value::from_t("file_chunk:1")),
+                    ("path", Value::from_t("/src/calc.go")),
+                    ("content", Value::from_t("price calculator logic")),
+                    ("score", Value::from_t(0.9f64)),
+                ])]),
+            ),
+            (
+                "FROM symbol",
+                rows_of(vec![obj(vec![("name", Value::from_t("pricecalculator"))])]),
+            ),
+        ]));
+        let svc = service(fake, Some(Arc::new(VariantFailsAI(AtomicUsize::new(0)))));
+        let results = svc
+            .ask_project(&ActorContext::LOCAL, "price calculator PriceCalculator")
+            .await
+            .expect("primary pass survives the variant failure");
+        assert!(
+            results.iter().any(|r| r.id == "file_chunk:1"),
+            "ask still returns the primary board"
+        );
     }
 }

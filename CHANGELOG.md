@@ -4,6 +4,28 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(search): deterministic symbol-variant query expansion (A4 ddofds)** -
+  `ask_project` embeds a second, expanded query variant when linked symbols
+  resolve: the variant is the literal query plus the reunited CamelCase
+  identifier tokens (lowercase) and the linked symbol names appended
+  (case-insensitive dedup, cap 20). The vector channels run one pass per
+  embedding and merge per row with `score = max(passes)` (variant-only rows
+  join the channel, one entry per id); lexical channels keep the literal
+  query. No linked symbols = no second embedding (zero-cost fast path), a
+  variant-embedding failure degrades to the primary pass (fail-open), and
+  the extra embedding is billed on `system:search_vector`. Config
+  `search.query_expansion = "off" | "symbol_variant"` (default
+  `symbol_variant`; unknown values warn and fall back to the default).
+  Eval harness: `ibis eval retrieval --query-expansion off|symbol_variant`
+  plus a `query_expansion` field in the JSON report; the golden estate
+  seeds a `symbol` row and the dataset gains `r21_symbol_variant` (21
+  cases). Evidence (08/11, SurrealDB 4.0.0, offline and Ollama): off/on
+  parity - offline MRR 0.952 / recall@5 0.976, Ollama MRR 0.952 / recall@5
+  1.0, 21/21 ok; the live cost counter proves the variant fires (single
+  ask: 12 vs 30 tokens = primary 12 + variant 18). Caveats recorded in WQ-5:
+  symbol linking is exact-match today (a purely different wording does not
+  link), and `ask_project_at_ref` does not inherit the expansion yet.
+
 - **feat(optimization): duplicate-lookup threshold + deterministic title
   match (C9)** — ddofds fase 1: consolidation duplicate candidates scoring
   below `ai.consolidation.dup_similarity_min` (default `0.80`, clamped to

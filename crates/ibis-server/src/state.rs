@@ -175,6 +175,8 @@ impl AppState {
         service.fusion_mode = ibis_search::retrieval_boost::FusionMode::resolve(&cfg.search.fusion);
         service.candidate_window =
             (cfg.search.candidates as usize).max(ibis_search::search::VECTOR_CHANNEL_LIMIT);
+        service.query_expansion =
+            ibis_search::retrieval_boost::QueryExpansionMode::resolve(&cfg.search.query_expansion);
         *self.search.write().unwrap() = Arc::new(service);
     }
 

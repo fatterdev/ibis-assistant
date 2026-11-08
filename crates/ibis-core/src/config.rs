@@ -58,6 +58,11 @@ pub struct SearchConfig {
     /// cut, shared by the temporal rescore and the future A3 reranker.
     #[serde(rename = "candidates")]
     pub candidates: u32,
+    /// Query expansion (A4): `off` | `symbol_variant` (default). The variant
+    /// embedding fires only when linked symbols resolve (zero cost otherwise).
+    /// Unknown values resolve to symbol_variant with a warning.
+    #[serde(rename = "query_expansion")]
+    pub query_expansion: String,
 }
 
 impl Default for SearchConfig {
@@ -65,6 +70,7 @@ impl Default for SearchConfig {
         SearchConfig {
             fusion: "additive".to_string(),
             candidates: 50,
+            query_expansion: "symbol_variant".to_string(),
         }
     }
 }
@@ -1313,6 +1319,18 @@ mod tests {
         assert_eq!(empty.search.fusion, "additive");
     }
 
+    /// A4: `search.query_expansion` defaults to `symbol_variant` and accepts
+    /// the `off` escape hatch.
+    #[test]
+    fn search_query_expansion_config() {
+        let cfg: Config =
+            serde_json::from_str(r#"{"search": {"query_expansion": "off"}}"#).unwrap();
+        assert_eq!(cfg.search.query_expansion, "off");
+        assert_eq!(default_config().search.query_expansion, "symbol_variant");
+        let empty: Config = serde_json::from_str(r#"{"search": {}}"#).unwrap();
+        assert_eq!(empty.search.query_expansion, "symbol_variant");
+    }
+
     /// `ai.consolidation` (F4 §B.5): off by default, the file overlays the
     /// knob, and a partial `ai` object keeps the default interval.
     #[test]
@@ -1332,10 +1350,9 @@ mod tests {
         assert!((cfg.ai.consolidation.dup_similarity_min - 0.80).abs() < f64::EPSILON);
 
         // The C9 knob overlays like the rest of the consolidation object.
-        let cfg: Config = serde_json::from_str(
-            r#"{"ai": {"consolidation": {"dup_similarity_min": 0.9}}}"#,
-        )
-        .unwrap();
+        let cfg: Config =
+            serde_json::from_str(r#"{"ai": {"consolidation": {"dup_similarity_min": 0.9}}}"#)
+                .unwrap();
         assert!((cfg.ai.consolidation.dup_similarity_min - 0.9).abs() < f64::EPSILON);
 
         // Missing consolidation key under a present `ai` → defaults apply.

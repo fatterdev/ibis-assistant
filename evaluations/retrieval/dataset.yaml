@@ -83,3 +83,12 @@ cases:
     query: "Baobab cache reindex warms midnight"
     expected_ids: ["file_chunk:[source_file:[repo:golden, 'src/special path,file.rs'], 0]"]
     note: "case 8: path con caratteri speciali — expected ID raw round-trip"
+  # A4 (query expansion): caso con token CamelCase risolto dalla symbol
+  # table (seed PriceCalculator); la pass variante (query + token riuniti +
+  # symbol) non deve perdere l'hit atteso. Offline embedder = gate
+  # no-regression; con embedder reale il caso è già rank 1 in entrambe le
+  # modalità (parità off/on, vedi nota WQ-5).
+  - id: r21_symbol_variant
+    query: "PriceCalculator tier rounding rules"
+    expected_ids: ["file_chunk:[source_file:[repo:golden, 'src/billing/price_calculator.rs'], 0]"]
+    note: "A4: espansione symbol-variant (symbol row PriceCalculator nel seed)"

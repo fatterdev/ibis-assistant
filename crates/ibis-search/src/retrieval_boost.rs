@@ -81,6 +81,105 @@ impl FusionMode {
     }
 }
 
+/// Query expansion mode behind `search.query_expansion` (`off` |
+/// `symbol_variant` — A4). Default `symbol_variant`: the second embedding
+/// fires only when the linked-symbol lookup resolved at least one symbol,
+/// so symbol-free asks keep the single-embedding fast path (zero cost).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum QueryExpansionMode {
+    /// Single embedding of the literal query (legacy path).
+    Off,
+    /// Second embedding of the symbol-variant query when linked symbols
+    /// resolve; vector channels keep per-row `score = max(passes)`.
+    #[default]
+    SymbolVariant,
+}
+
+impl QueryExpansionMode {
+    /// Parses the `search.query_expansion` config value (`None` = unknown).
+    pub fn parse(value: &str) -> Option<QueryExpansionMode> {
+        match value.trim().to_lowercase().as_str() {
+            "off" => Some(QueryExpansionMode::Off),
+            "symbol_variant" => Some(QueryExpansionMode::SymbolVariant),
+            _ => None,
+        }
+    }
+
+    /// Resolves the config value; unknown non-empty values log a warning and
+    /// fall back to the symbol-variant default.
+    pub fn resolve(value: &str) -> QueryExpansionMode {
+        match QueryExpansionMode::parse(value) {
+            Some(mode) => mode,
+            None => {
+                if !value.trim().is_empty() {
+                    tracing::warn!(
+                        "unknown search.query_expansion value {value:?}; using symbol_variant"
+                    );
+                }
+                QueryExpansionMode::SymbolVariant
+            }
+        }
+    }
+
+    /// Config-facing name.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            QueryExpansionMode::Off => "off",
+            QueryExpansionMode::SymbolVariant => "symbol_variant",
+        }
+    }
+}
+
+/// Cap on how many linked symbol names the expansion variant may append
+/// (A4: deterministic, bounded prompt/vector size — mirrors the 20-name
+/// bind limit of `resolve_linked_symbols`).
+pub(crate) const MAX_EXPANSION_SYMBOLS: usize = 20;
+
+/// Builds the symbol-variant query list (A4 step 1): `[originale]` or
+/// `[originale, variante]` where the variant is the original query with the
+/// CamelCase tokens reunited in identifier form plus the linked symbol names
+/// appended (case-insensitive dedup). Single entry = fast path (no second
+/// embedding): no linked symbols resolved or the variant collapses into the
+/// original — the second embedding never fires without symbol signal
+/// (L3 A4 edge cases).
+pub(crate) fn expand_query(query: &str, linked_symbols: &[String]) -> Vec<String> {
+    let primary = query.trim();
+    let mut extras: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    if !linked_symbols.is_empty() {
+        // CamelCase tokens of the query reunited: "AskProject" also enters
+        // the variant as "askproject" so the embedder sees the identifier
+        // as one unit next to its parts.
+        for part in token_split_pattern().split(primary) {
+            let part = part.trim();
+            if part.is_empty() || !looks_like_identifier(part) {
+                continue;
+            }
+            let parts = split_camel_case(part);
+            if parts.len() > 1 {
+                let reunited = parts.join("").to_lowercase();
+                if reunited.len() >= 3 && seen.insert(reunited.clone()) {
+                    extras.push(reunited);
+                }
+            }
+        }
+        for sym in linked_symbols.iter().take(MAX_EXPANSION_SYMBOLS) {
+            let s = sym.trim().to_lowercase();
+            if !s.is_empty() && seen.insert(s.clone()) {
+                extras.push(s);
+            }
+        }
+    }
+    if extras.is_empty() {
+        vec![primary.to_string()]
+    } else {
+        vec![
+            primary.to_string(),
+            format!("{primary} {}", extras.join(" ")),
+        ]
+    }
+}
+
 fn token_split_pattern() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"[^a-zA-Z0-9_/.\-]+").expect("static regex"))
@@ -599,5 +698,86 @@ mod tests {
         let kws = vec!["auth".to_string()];
         apply_rrf_boost(&mut hits, &kws, &[], &[]);
         assert_eq!(hits[0].id, "hit:b", "keyword boost promotes over base");
+    }
+
+    // --- A4: query expansion -------------------------------------------------
+
+    #[test]
+    fn expand_query_appends_reunited_camel_tokens_and_symbols() {
+        let exp = expand_query(
+            "how does the PriceCalculator work",
+            &["pricecalculatorservice".to_string()],
+        );
+        assert_eq!(exp.len(), 2, "primary + variant");
+        let secondary = &exp[1];
+        assert!(
+            secondary.starts_with("how does the PriceCalculator work"),
+            "primary query stays literal: {secondary}"
+        );
+        // CamelCase tokens reunited in identifier form + linked symbols.
+        assert!(secondary.contains("pricecalculator"));
+        assert!(secondary.contains("pricecalculatorservice"));
+    }
+
+    #[test]
+    fn expand_query_dedups_reunited_token_against_symbol() {
+        // "AskProject" reunites to "askproject"; a linked symbol with the same
+        // normalized name must not be appended twice.
+        let exp = expand_query("AskProject flow", &["askproject".to_string()]);
+        assert_eq!(exp.len(), 2, "variant present");
+        assert_eq!(exp[1].matches("askproject").count(), 1, "dedup: {}", exp[1]);
+    }
+
+    #[test]
+    fn expand_query_fast_path_without_symbols() {
+        // L3 A4 edge case: empty linked symbols → no second embedding.
+        let exp = expand_query("how does AskProject work", &[]);
+        assert_eq!(exp.len(), 1, "single entry = fast path");
+        assert_eq!(exp[0], "how does AskProject work");
+    }
+
+    #[test]
+    fn expand_query_trims_primary_and_keeps_it_literal() {
+        let exp = expand_query("  trim me  ", &["sym".to_string()]);
+        assert_eq!(exp[0], "trim me");
+        assert_eq!(exp.len(), 2, "variant present");
+        assert!(exp[1].starts_with("trim me "), "{}", exp[1]);
+    }
+
+    #[test]
+    fn expand_query_caps_appended_symbols() {
+        let symbols: Vec<String> = (0..40).map(|i| format!("symbol{i}")).collect();
+        let exp = expand_query("q", &symbols);
+        assert_eq!(exp.len(), 2, "variant present");
+        assert_eq!(
+            exp[1].matches("symbol").count(),
+            MAX_EXPANSION_SYMBOLS,
+            "bounded by MAX_EXPANSION_SYMBOLS: {}",
+            exp[1]
+        );
+    }
+
+    #[test]
+    fn query_expansion_mode_parses_config_values() {
+        assert_eq!(
+            QueryExpansionMode::parse("off"),
+            Some(QueryExpansionMode::Off)
+        );
+        assert_eq!(
+            QueryExpansionMode::parse("symbol_variant"),
+            Some(QueryExpansionMode::SymbolVariant)
+        );
+        assert_eq!(QueryExpansionMode::parse("nonsense"), None);
+        assert_eq!(
+            QueryExpansionMode::resolve("nonsense"),
+            QueryExpansionMode::SymbolVariant,
+            "unknown values fall back to the default"
+        );
+        assert_eq!(
+            QueryExpansionMode::default(),
+            QueryExpansionMode::SymbolVariant
+        );
+        assert_eq!(QueryExpansionMode::Off.as_str(), "off");
+        assert_eq!(QueryExpansionMode::SymbolVariant.as_str(), "symbol_variant");
     }
 }

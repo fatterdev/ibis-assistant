@@ -196,6 +196,8 @@ pub struct EvalReport {
     pub embedder: String,
     /// Channel fusion under test (`additive` | `rrf` — A2 validation).
     pub fusion: String,
+    /// Query expansion mode under test (`off` | `symbol_variant` — A4).
+    pub query_expansion: String,
     /// RRF k under test (`Some` only for rrf runs — sweep provenance,
     /// remediation plan section 9).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -219,6 +221,7 @@ pub fn build_report(
     version: &str,
     embedder: &str,
     fusion: &str,
+    query_expansion: &str,
     seeded: bool,
     cases: Vec<CaseResult>,
 ) -> EvalReport {
@@ -245,6 +248,7 @@ pub fn build_report(
         version: version.to_string(),
         embedder: embedder.to_string(),
         fusion: fusion.to_string(),
+        query_expansion: query_expansion.to_string(),
         rrf_k: None,
         seeded,
         aggregate: EvalAggregate {
@@ -665,6 +669,11 @@ const GOLDEN_REASONING: &[GoldenReasoning] = &[GoldenReasoning {
     outcome: "the score adds a time decay term so recent knowledge outranks stale duplicates.",
 }];
 
+/// A4 (query expansion): one symbol row so the symbol-variant expansion fires
+/// on the mismatch case — `resolve_linked_symbols` matches the lowercase
+/// symbol name against the query entity tokens.
+const GOLDEN_SYMBOLS: &[(&str, &str)] = &[("g_sym_pricecalc", "PriceCalculator")];
+
 fn vars_of(pairs: Vec<(&str, Value)>) -> Vars {
     pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
 }
@@ -688,6 +697,7 @@ pub async fn seed_golden_estate(
         "commit_chunk",
         "reasoning",
         "memory",
+        "symbol",
     ] {
         db.execute(&format!("DELETE {table};"))
             .await
@@ -813,6 +823,16 @@ pub async fn seed_golden_estate(
         )
         .await
         .map_err(|e| format!("seed {}: {e}", r.id))?;
+        rows += 1;
+    }
+
+    for (id, name) in GOLDEN_SYMBOLS {
+        db.smart_query(
+            &format!("CREATE symbol:⟨{id}⟩ SET name = $name;"),
+            vars_of(vec![("name", Value::from_t(*name))]),
+        )
+        .await
+        .map_err(|e| format!("seed symbol {id}: {e}"))?;
         rows += 1;
     }
 
@@ -1192,7 +1212,15 @@ mod tests {
                 error: Some("degraded".to_string()),
             },
         ];
-        let report = build_report("ds.yaml", "1", "offline-hash-768", "additive", true, cases);
+        let report = build_report(
+            "ds.yaml",
+            "1",
+            "offline-hash-768",
+            "additive",
+            "symbol_variant",
+            true,
+            cases,
+        );
         let agg = &report.aggregate;
         assert_eq!(agg.cases, 4);
         assert_eq!(agg.cases_ok, 3);
@@ -1224,6 +1252,7 @@ mod tests {
             "1",
             "offline-hash-768",
             "additive",
+            "symbol_variant",
             false,
             all_error,
         );
@@ -1241,13 +1270,14 @@ mod tests {
             .await
             .expect("seed");
         // 6 files × (source_file + file_chunk) + 14 memories + 1 commit + 1 reasoning
-        assert_eq!(rows, 28);
+        assert_eq!(rows, 29);
         let calls = db.calls();
         for table in [
             "DELETE source_file;",
             "DELETE memory;",
             "DELETE commit_chunk;",
             "DELETE reasoning;",
+            "DELETE symbol;",
         ] {
             assert!(
                 calls.iter().any(|c| c.contains(table)),

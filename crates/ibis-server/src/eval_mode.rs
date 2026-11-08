@@ -33,6 +33,8 @@ pub struct EvalParams {
     ollama_url: String,
     /// Channel fusion under test (additive|rrf — A2 validation).
     fusion: String,
+    /// Query expansion under test (off|symbol_variant — A4).
+    query_expansion: String,
     /// RRF smoothing constant k (A2 default 60; the eval sweeps it).
     rrf_k: f64,
     seed: bool,
@@ -58,6 +60,7 @@ fn parse_args(args: &[String]) -> Result<EvalParams, String> {
         embedder: "auto".to_string(),
         ollama_url: DEFAULT_OLLAMA_URL.to_string(),
         fusion: "additive".to_string(),
+        query_expansion: "symbol_variant".to_string(),
         rrf_k: 60.0,
         seed: true,
         out: None,
@@ -98,6 +101,13 @@ fn parse_args(args: &[String]) -> Result<EvalParams, String> {
                     return Err("--fusion must be additive|rrf".to_string());
                 }
                 params.fusion = v;
+            }
+            "--query-expansion" => {
+                let v = value(&mut i, "--query-expansion")?;
+                if !matches!(v.as_str(), "off" | "symbol_variant") {
+                    return Err("--query-expansion must be off|symbol_variant".to_string());
+                }
+                params.query_expansion = v;
             }
             "--rrf-k" => {
                 params.rrf_k = value(&mut i, "--rrf-k")?
@@ -177,6 +187,8 @@ async fn run_async(p: EvalParams) -> Result<i32, String> {
     let mut service = SearchService::new(Some(db), Some(ai.clone()));
     service.fusion_mode = ibis_search::retrieval_boost::FusionMode::resolve(&p.fusion);
     service.rrf_k = p.rrf_k;
+    service.query_expansion =
+        ibis_search::retrieval_boost::QueryExpansionMode::resolve(&p.query_expansion);
     let service = Arc::new(service);
     let runner = RetrievalEvalRunner::new(service);
     let cases = runner.run(&dataset).await;
@@ -185,6 +197,7 @@ async fn run_async(p: EvalParams) -> Result<i32, String> {
         &dataset.version,
         ai.name(),
         &p.fusion,
+        &p.query_expansion,
         seeded,
         cases,
     );
