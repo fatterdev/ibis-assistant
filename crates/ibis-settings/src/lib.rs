@@ -28,8 +28,8 @@ pub mod ui;
 
 pub use engine::{
     apply, default_model_for_tier, mask_secret, probe, probe_blocking, probe_with, recommend,
-    resolve_local_model, tier_for, DiffEntry, FieldRec, HardwareReport, Recommendations, Tier,
-    UserChoices,
+    resolve_local_model, resolve_tier_models, tier_for, DiffEntry, FieldRec, HardwareReport,
+    Recommendations, Tier, UserChoices,
 };
 pub use ephemeral::{
     ensure_ephemeral, ensure_ephemeral_with_memory, open_settings_url, probe_personal_settings,

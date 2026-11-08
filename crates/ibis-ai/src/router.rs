@@ -1,5 +1,6 @@
 //! Hybrid local/cloud reasoning router.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -7,6 +8,37 @@ use async_trait::async_trait;
 use crate::error::AiError;
 use crate::traits::AIProvider;
 use crate::types::{Candidate, Content, GenerationConfig};
+
+/// D10: local model tier selected by a call-site (`local:S` … `local:XL`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LocalTier {
+    S,
+    M,
+    L,
+    XL,
+}
+
+impl LocalTier {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LocalTier::S => "S",
+            LocalTier::M => "M",
+            LocalTier::L => "L",
+            LocalTier::XL => "XL",
+        }
+    }
+
+    /// Case-insensitive tier parse (`s`, `M`, `xl`, …).
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_uppercase().as_str() {
+            "S" => Some(LocalTier::S),
+            "M" => Some(LocalTier::M),
+            "L" => Some(LocalTier::L),
+            "XL" => Some(LocalTier::XL),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct RouterConfig {
@@ -32,18 +64,33 @@ impl Default for RouterConfig {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Step {
-    Local,
+    Local(Option<LocalTier>),
     Cloud,
 }
 
-/// Routes generation between a local provider and a cloud pool:
+impl Step {
+    fn label(self) -> String {
+        match self {
+            Step::Cloud => "cloud".to_string(),
+            Step::Local(None) => "local".to_string(),
+            Step::Local(Some(tier)) => format!("local:{}", tier.as_str()),
+        }
+    }
+}
+
+/// Routes generation between local providers and a cloud pool:
 /// - hint `quality` → cloud first;
 /// - hint `auto` → cloud only when `use_cloud_when_no_gpu` and the host is CPU-only;
-/// - `local_only` → local, no fallback;
+/// - `local_only` → local, no fallback (`local_only:<tier>` keeps the tier);
 /// - `bulk`/`bulk_local` → local then cloud;
+/// - `local:S|M|L|XL` (D10) → the tier's local provider, then cloud (the
+///   CPU-only `use_cloud_when_no_gpu` preference applies per tier);
 /// - otherwise local first, cloud as fallback.
 pub struct ReasoningRouter {
     local: Option<Box<dyn AIProvider>>,
+    /// D10 per-task local models keyed by tier (`S`/`M`/`L`/`XL`); a tier
+    /// hint falls back to `local` when the map has no entry.
+    locals: HashMap<String, Box<dyn AIProvider>>,
     cloud: Option<Box<dyn AIProvider>>,
     cfg: RouterConfig,
 }
@@ -58,7 +105,31 @@ impl ReasoningRouter {
         if cfg.local_timeout.is_zero() {
             cfg.local_timeout = Duration::from_secs(120);
         }
-        ReasoningRouter { local, cloud, cfg }
+        ReasoningRouter {
+            local,
+            locals: HashMap::new(),
+            cloud,
+            cfg,
+        }
+    }
+
+    /// D10: installs the per-tier local providers. Keys are parsed
+    /// case-insensitively; unknown tier names are ignored (forward compat).
+    pub fn with_local_tiers(
+        mut self,
+        locals: impl IntoIterator<Item = (String, Box<dyn AIProvider>)>,
+    ) -> Self {
+        for (tier, provider) in locals {
+            if let Some(tier) = LocalTier::parse(&tier) {
+                self.locals.insert(tier.as_str().to_string(), provider);
+            }
+        }
+        self
+    }
+
+    fn local_provider(&self, tier: Option<LocalTier>) -> Option<&dyn AIProvider> {
+        tier.and_then(|tier| self.locals.get(tier.as_str()).map(Box::as_ref))
+            .or(self.local.as_deref())
     }
 
     async fn try_step(
@@ -74,7 +145,7 @@ impl ReasoningRouter {
                 }
                 _ => Err(AiError::CloudUnavailable),
             },
-            Step::Local => match &self.local {
+            Step::Local(tier) => match self.local_provider(tier) {
                 Some(l) if l.is_functional().await => {
                     if self.cfg.local_timeout > Duration::ZERO {
                         match tokio::time::timeout(
@@ -111,12 +182,19 @@ impl AIProvider for ReasoningRouter {
     }
 
     async fn is_functional(&self) -> bool {
-        match &self.local {
-            Some(l) if l.is_functional().await => true,
-            _ => match &self.cloud {
-                Some(c) => c.is_functional().await,
-                None => false,
-            },
+        if let Some(l) = &self.local {
+            if l.is_functional().await {
+                return true;
+            }
+        }
+        for tier in self.locals.values() {
+            if tier.is_functional().await {
+                return true;
+            }
+        }
+        match &self.cloud {
+            Some(c) => c.is_functional().await,
+            None => false,
         }
     }
 
@@ -129,21 +207,43 @@ impl AIProvider for ReasoningRouter {
         if hint.is_empty() {
             hint = "auto".to_string();
         }
-        let prefer_cloud = hint == "quality"
-            || (hint == "auto" && self.cfg.use_cloud_when_no_gpu && self.cfg.cpu_only);
+        // D10: `local:<tier>` / `local_only:<tier>` — the base keeps the
+        // existing cloud policy, the suffix picks the local provider. An
+        // unknown suffix leaves the hint untouched (backward compatible).
+        let (base, tier) = match hint.split_once(':') {
+            Some((base, suffix)) => match LocalTier::parse(suffix) {
+                Some(tier) => (base, Some(tier)),
+                None => (hint.as_str(), None),
+            },
+            None => (hint.as_str(), None),
+        };
+        let local = Step::Local(tier);
+        let tiered_local = tier.is_some() && base != "local_only";
+        let prefer_cloud = base == "quality"
+            || ((base == "auto" || tiered_local)
+                && self.cfg.use_cloud_when_no_gpu
+                && self.cfg.cpu_only);
 
         let cloud_ready = matches!(&self.cloud, Some(c) if c.is_functional().await);
         let (first, second): (Step, Option<Step>) = if prefer_cloud && cloud_ready {
-            (Step::Cloud, Some(Step::Local))
-        } else if hint == "local_only" {
-            (Step::Local, None)
-        } else if hint == "bulk" || hint == "bulk_local" {
-            (Step::Local, Some(Step::Cloud))
+            (Step::Cloud, Some(local))
+        } else if base == "local_only" {
+            (local, None)
+        } else if base == "bulk" || base == "bulk_local" || base == "local" || tier.is_some() {
+            (local, Some(Step::Cloud))
         } else if prefer_cloud {
-            (Step::Cloud, Some(Step::Local))
+            (Step::Cloud, Some(local))
         } else {
-            (Step::Local, Some(Step::Cloud))
+            (local, Some(Step::Cloud))
         };
+        tracing::debug!(
+            target: "ibis_ai::router",
+            hint = %hint,
+            tier = tier.map(LocalTier::as_str).unwrap_or("-"),
+            first = %first.label(),
+            second = second.map(Step::label).unwrap_or_else(|| "-".to_string()),
+            local_model = self.local_provider(tier).and_then(|p| p.model()).unwrap_or("-"),
+            "reasoning route"        );
 
         let first_err = match self.try_step(first, contents, &cfg).await {
             Ok(cand) => return Ok(cand),
@@ -446,5 +546,111 @@ mod tests {
             RouterConfig::default(),
         );
         assert_eq!(route_text(&r, "").await.unwrap(), "cloud");
+    }
+
+    fn tier_router(
+        default_text: &str,
+        tiers: &[(&str, &str)],
+        cloud_text: &str,
+        cfg: RouterConfig,
+    ) -> ReasoningRouter {
+        ReasoningRouter::new(
+            Some(boxed(Stub::ok("default", default_text))),
+            Some(boxed(Stub::ok("gemini", cloud_text))),
+            cfg,
+        )
+        .with_local_tiers(
+            tiers
+                .iter()
+                .map(|(tier, text)| ((*tier).to_string(), boxed(Stub::ok("ollama", text))))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    #[tokio::test]
+    async fn tier_hint_routes_to_the_tier_provider() {
+        let r = tier_router(
+            "default-model",
+            &[("S", "small"), ("M", "medium"), ("L", "large")],
+            "cloud",
+            RouterConfig::default(),
+        );
+        assert_eq!(route_text(&r, "local:S").await.unwrap(), "small");
+        assert_eq!(route_text(&r, "local:m").await.unwrap(), "medium");
+        assert_eq!(route_text(&r, "local:L").await.unwrap(), "large");
+        // Tier absent from the map falls back to the default local provider.
+        assert_eq!(route_text(&r, "local:XL").await.unwrap(), "default-model");
+    }
+
+    #[tokio::test]
+    async fn tier_hint_falls_back_to_cloud_when_tier_fails() {
+        let r = ReasoningRouter::new(
+            Some(boxed(Stub::ok("default", "default-model"))),
+            Some(boxed(Stub::ok("gemini", "cloud"))),
+            RouterConfig::default(),
+        )
+        .with_local_tiers(vec![(
+            "M".to_string(),
+            boxed(Stub::failing("ollama", "model not pulled")),
+        )]);
+        assert_eq!(route_text(&r, "local:M").await.unwrap(), "cloud");
+    }
+
+    #[tokio::test]
+    async fn local_only_tier_never_leaks_to_cloud() {
+        let cloud_calls = Arc::new(AtomicUsize::new(0));
+        let mut cloud = Stub::ok("gemini", "leaked");
+        cloud.calls = cloud_calls.clone();
+        let r = ReasoningRouter::new(
+            Some(boxed(Stub::ok("default", "default-model"))),
+            Some(boxed(cloud)),
+            RouterConfig::default(),
+        )
+        .with_local_tiers(vec![(
+            "M".to_string(),
+            boxed(Stub::failing("ollama", "model not pulled")),
+        )]);
+        let err = route_text(&r, "local_only:M").await.unwrap_err();
+        assert_eq!(err.to_string(), "model not pulled");
+        assert_eq!(cloud_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn tier_hint_prefers_cloud_on_cpu_when_enabled() {
+        let r = tier_router(
+            "default-model",
+            &[("S", "small")],
+            "cloud",
+            RouterConfig {
+                use_cloud_when_no_gpu: true,
+                cpu_only: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(route_text(&r, "local:S").await.unwrap(), "cloud");
+
+        // `local_only:S` keeps the no-cloud contract even on CPU-only.
+        let r = tier_router(
+            "default-model",
+            &[("S", "small")],
+            "cloud",
+            RouterConfig {
+                use_cloud_when_no_gpu: true,
+                cpu_only: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(route_text(&r, "local_only:S").await.unwrap(), "small");
+    }
+
+    #[tokio::test]
+    async fn unknown_tier_suffix_keeps_the_base_hint() {
+        let r = tier_router(
+            "default-model",
+            &[("S", "small")],
+            "cloud",
+            RouterConfig::default(),
+        );
+        assert_eq!(route_text(&r, "local:Q").await.unwrap(), "default-model");
     }
 }

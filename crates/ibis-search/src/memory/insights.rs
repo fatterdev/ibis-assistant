@@ -13,6 +13,9 @@ use crate::search::SearchService;
 
 pub(crate) const DEFAULT_INSIGHT_LIMIT: usize = 200;
 pub(crate) const DEFAULT_EMBEDDING_THRESHOLD: f64 = 0.82;
+/// D10 per-task routing: short cluster labels are a tier-S local task
+/// (cloud fallback preserved by the `local:` base).
+const INSIGHTS_ROUTE_HINT: &str = "local:S";
 
 /// Controls lightweight clustering over typed memories
 ///
@@ -27,7 +30,7 @@ pub struct MemoryInsightsParams {
     /// close in embedding space (local EmbedText not required — stored
     /// embeddings are reused).
     pub use_embeddings: bool,
-    /// Optionally asks the AI (bulk_local) for a short cluster label.
+    /// Optionally asks the AI (local:S) for a short cluster label.
     pub label_with_ai: bool,
 }
 
@@ -220,7 +223,7 @@ impl SearchService {
                     parts: vec![ibis_ai::types::Part { text: prompt }],
                 }],
                 ibis_ai::types::GenerationConfig {
-                    route_hint: "bulk_local".to_string(),
+                    route_hint: INSIGHTS_ROUTE_HINT.to_string(),
                     ..Default::default()
                 },
             )
@@ -342,5 +345,16 @@ pub(crate) fn float_slice(value: &ibis_db::value::Value) -> Vec<f64> {
             })
             .collect(),
         _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// D10 contract: cluster labels declare the tier-S local route.
+    #[test]
+    fn insights_route_hint_is_local_s() {
+        assert_eq!(INSIGHTS_ROUTE_HINT, "local:S");
     }
 }

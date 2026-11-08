@@ -29,6 +29,10 @@ pub const MAX_AST_RULE_YAML_BYTES: usize = 24 << 10;
 pub const AST_RULE_QUARANTINE_DIR: &str = "rules_quarantine";
 pub const AST_RULE_GEN_COOLDOWN: Duration = Duration::from_secs(30 * 60);
 
+/// D10 per-task routing: AST rule generation is a mid-tier local task
+/// (cloud fallback preserved by the `local:` base).
+const AST_RULE_ROUTE_HINT: &str = "local:M";
+
 /// Global fingerprint → last-attempt registry ( package-level
 /// `astRuleGenRecent` guarded by `astRuleGenMu`).
 fn recent_registry() -> &'static Mutex<HashMap<String, Instant>> {
@@ -209,6 +213,7 @@ impl LogAnalyzer {
         }];
         let cfg = ibis_ai::types::GenerationConfig {
             temperature: 0.1,
+            route_hint: AST_RULE_ROUTE_HINT.to_string(),
             ..Default::default()
         };
         let candidate = ai.generate_content(&contents, cfg).await?;
@@ -1047,6 +1052,12 @@ fn build_ast_rule_prompt(
 mod tests {
     use super::*;
     use std::sync::MutexGuard;
+
+    /// D10 contract: AST rule generation declares tier M.
+    #[test]
+    fn ast_rule_route_hint_is_local_m() {
+        assert_eq!(AST_RULE_ROUTE_HINT, "local:M");
+    }
 
     /// Env/cwd-global tests (IBIS_SG_ROOT, IBIS_AST_RULE_STRUCTURAL_ONLY) are
     /// process-global — all lanes serialize them behind one mutex.

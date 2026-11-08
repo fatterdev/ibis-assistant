@@ -361,6 +361,34 @@ pub fn resolve_local_model(r: &ReasoningConfig, probe: &HardwareReport) -> Strin
     default_model_for_tier(probe.tier)
 }
 
+/// D10: per-tier local models for task routing. Empty when the local lane is
+/// pinned to one model (`model` explicit or `always_smallest_local`), so every
+/// tier hint keeps falling back to the default local provider. The default
+/// model itself is omitted: the router already falls back to it.
+pub fn resolve_tier_models(r: &ReasoningConfig, default_model: &str) -> Vec<(Tier, String)> {
+    if r.always_smallest_local {
+        return Vec::new();
+    }
+    let model = r.model.trim();
+    if !model.is_empty() && !model.eq_ignore_ascii_case("auto") {
+        return Vec::new();
+    }
+    let mut tiers = Vec::new();
+    for tier in [Tier::S, Tier::M, Tier::L, Tier::XL] {
+        let model = r
+            .model_overrides
+            .get(tier.as_str())
+            .map(|m| m.trim())
+            .filter(|m| !m.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| default_model_for_tier(tier));
+        if model != default_model {
+            tiers.push((tier, model));
+        }
+    }
+    tiers
+}
+
 /// Builds recommendations from existing config + probe (`Recommend,
 /// ). The original version normalized the caller's config in
 /// place; the Rust version normalizes a local clone (same output, no hidden
@@ -745,6 +773,44 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(resolve_local_model(&r, &probe), "granite4.1:3b");
+    }
+
+    /// D10: the tier map carries every tier except the default local model.
+    #[test]
+    fn resolve_tier_models_covers_all_tiers_except_default() {
+        let mut r = ReasoningConfig {
+            model: "auto".into(),
+            ..Default::default()
+        };
+        ibis_core::reasoning::normalize_reasoning_config(&mut r, 100);
+        let tiers = resolve_tier_models(&r, "qwen2.5-coder:7b");
+        assert_eq!(
+            tiers,
+            vec![
+                (Tier::S, "granite4.1:3b".to_string()),
+                (Tier::L, "gemma4:12b".to_string()),
+                (Tier::XL, "muse-glimmer".to_string()),
+            ]
+        );
+    }
+
+    /// D10: an explicit model or `always_smallest_local` pins the local lane.
+    #[test]
+    fn resolve_tier_models_empty_when_local_lane_is_pinned() {
+        let mut r = ReasoningConfig {
+            model: "llama3.1:8b".into(),
+            ..Default::default()
+        };
+        ibis_core::reasoning::normalize_reasoning_config(&mut r, 100);
+        assert!(resolve_tier_models(&r, "llama3.1:8b").is_empty());
+
+        let mut r = ReasoningConfig {
+            model: "auto".into(),
+            always_smallest_local: true,
+            ..Default::default()
+        };
+        ibis_core::reasoning::normalize_reasoning_config(&mut r, 100);
+        assert!(resolve_tier_models(&r, "granite4.1:3b").is_empty());
     }
 
     /// Scenario: TestRecommendCloudPrimary.

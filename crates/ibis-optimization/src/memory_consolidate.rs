@@ -23,6 +23,12 @@ const NOISE_RETENTION: &str = "7d";
 /// Overridable via `ai.consolidation.dup_similarity_min`.
 pub(crate) const DUP_SIMILARITY_MIN: f64 = 0.80;
 
+/// D10 per-task routing: distillation is a mid-tier local task (cloud
+/// fallback preserved by the `local:` base). Personal observations keep the
+/// no-cloud guarantee through the `local_only:` base.
+const CONSOLIDATION_ROUTE_HINT: &str = "local:M";
+const CONSOLIDATION_PERSONAL_ROUTE_HINT: &str = "local_only:M";
+
 const VALID_CONSOLIDATION_KINDS: [&str; 9] = [
     "decision",
     "fix",
@@ -115,10 +121,11 @@ struct ProjectRow {
 }
 
 impl Optimizer {
-    /// Drains raw observations oldest-first. Uses
-    /// `bulk_local` so hybrid routing tries local Ollama before cloud,
-    /// distills durable typed memories, merges semantic duplicates, and gives
-    /// routine noise a short stale lifetime.
+    /// Drains raw observations oldest-first. Routes the distillation to the
+    /// tier-M local model (`local:M`, cloud fallback preserved; personal
+    /// observations stay `local_only:M`), distills durable typed memories,
+    /// merges semantic duplicates, and gives routine noise a short stale
+    /// lifetime.
     pub async fn consolidate_loop(
         &self,
         project_name: &str,
@@ -329,8 +336,9 @@ impl Optimizer {
             return Ok(Vec::new());
         };
         // Match candidate visibility to the observation so personal content
-        // never enters a team distill prompt (bulk_local can still fall back
-        // to cloud). Owner binds (F-002) — user-controlled value.
+        // never enters a team distill prompt (the team `local:M` hint can
+        // still fall back to cloud). Owner binds (F-002) — user-controlled
+        // value.
         let owner = observation.owner.trim();
         let (visibility_clause, bindings): (String, ibis_db::executor::Vars) = if observation
             .visibility
@@ -420,9 +428,9 @@ impl Optimizer {
             .trim()
             .eq_ignore_ascii_case("personal")
         {
-            "local_only"
+            CONSOLIDATION_PERSONAL_ROUTE_HINT
         } else {
-            "bulk_local"
+            CONSOLIDATION_ROUTE_HINT
         };
         let contents = [ibis_ai::Content {
             role: "user".to_string(),
@@ -753,6 +761,14 @@ mod tests {
     use ibis_db::value::ToSql as _;
     use ibis_db::Executor;
 
+    /// D10 contract: team distillation declares tier M, personal keeps the
+    /// tier-M provider but never falls back to cloud.
+    #[test]
+    fn consolidation_route_hints_are_tier_m() {
+        assert_eq!(CONSOLIDATION_ROUTE_HINT, "local:M");
+        assert_eq!(CONSOLIDATION_PERSONAL_ROUTE_HINT, "local_only:M");
+    }
+
     /// Builds one object row from `(key, value)` pairs (lane-H test-support
     /// shape, duplicated locally because the crate is `pub(crate)`).
     fn obj(pairs: Vec<(&str, Value)>) -> Value {
@@ -955,7 +971,7 @@ mod tests {
     /// Scenario: TestConsolidateLoopCreatesTypedMemoryUsingBulkLocal
     /// (add_memory SQL fragments updated to the lane-H bound-variable shape).
     #[tokio::test]
-    async fn consolidate_loop_creates_typed_memory_using_bulk_local() {
+    async fn consolidate_loop_creates_typed_memory_using_local_m() {
         let db = Arc::new(ConsolidateDb::new(
             vec![obj(vec![
                 ("id", Value::from_t("memory:obs1")),
@@ -985,11 +1001,7 @@ mod tests {
             .await
             .expect("ConsolidateLoop failed");
         let hints = ai.route_hints.lock().unwrap().clone();
-        assert_eq!(
-            hints,
-            vec!["bulk_local".to_string()],
-            "route hints: {hints:?}"
-        );
+        assert_eq!(hints, vec!["local:M".to_string()], "route hints: {hints:?}");
         let calls = db.sql_calls();
         assert_calls_contain(
             &calls,
@@ -1372,8 +1384,8 @@ mod tests {
         let hints = ai.route_hints.lock().unwrap().clone();
         assert_eq!(
             hints,
-            vec!["local_only".to_string()],
-            "personal observations must use local_only, got {hints:?}"
+            vec!["local_only:M".to_string()],
+            "personal observations must use local_only:M, got {hints:?}"
         );
         let calls = db.sql_calls();
         let joined = calls.join("\n");
@@ -1419,8 +1431,8 @@ mod tests {
         let hints = ai.route_hints.lock().unwrap().clone();
         assert_eq!(
             hints,
-            vec!["bulk_local".to_string()],
-            "team observations keep bulk_local, got {hints:?}"
+            vec!["local:M".to_string()],
+            "team observations keep local:M, got {hints:?}"
         );
         let calls = db.sql_calls();
         assert_calls_contain(&calls, &["visibility = 'team'"]);

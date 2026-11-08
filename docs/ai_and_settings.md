@@ -14,6 +14,7 @@ Operator guide for embeddings, hybrid reasoning, multi-cloud keys, hardware auto
 | Embeddings | Ollama `nomic-embed-text` (dedicated; never reuse chat models for vectors) |
 | Reasoning | `provider=hybrid`, `model=auto` |
 | Local auto-tier | S→`granite4.1:3b`, M→`qwen2.5-coder:7b`, L→`gemma4:12b`, XL→`muse-glimmer` |
+| Per-task routing | D10: each call site pins `local:S/M/L/XL` from `model_overrides`; an explicit `model` or `always_smallest_local=true` keeps one local model |
 | Cloud | Multi-cloud pool: Gemini, OpenAI-compatible, Claude; `routing.cloud_provider=auto` |
 | CPU-only PCs | `use_cloud_when_no_gpu=true` — quality routes prefer cloud when keys exist |
 | Plugin fallback | Context-only pack when local and cloud fail (`context_only_fallback`) |
@@ -84,6 +85,42 @@ bill at ~10% of full prompt price), so `tokens_used` accumulates **billed**
 tokens and the debug log reports the saving. Blended rate stays $0.15/1M; no
 per-model pricing in this phase. Anthropic `cache_control` is not sent in v1 —
 v1 relies on provider-automatic caching + prefix stability.
+
+## Per-task local model routing (D10)
+
+Each LLM call site declares the local complexity tier it needs; the hybrid
+router picks the matching `model_overrides` model instead of giving every task
+the single auto-tier model. Hints are case-insensitive and keep the existing
+cloud contract:
+
+| Hint | First step | Fallback |
+|------|-----------|----------|
+| `local:S` / `local:M` / `local:L` / `local:XL` | local tier model | cloud (CPU-only + `use_cloud_when_no_gpu` prefers cloud first) |
+| `local_only:<tier>` | local tier model | none (never cloud) |
+| `quality` | cloud | local |
+| `auto` / `bulk` / `bulk_local` / `local_only` | unchanged | unchanged |
+
+| Call site | Crate | Hint |
+|-----------|-------|------|
+| Memory insight labels | `ibis-search` | `local:S` |
+| Log root-cause refinement | `ibis-ingest-logs` | `local:S` |
+| RAFT synthetic QA | `ibis-optimization` | `local:S` |
+| Memory consolidation (team) | `ibis-optimization` | `local:M` |
+| Memory consolidation (personal) | `ibis-optimization` | `local_only:M` |
+| Semantic log analysis / format discovery | `ibis-ingest-logs` | `local:M` |
+| Ingest rule synthesis | `ibis-ingest-code` | `local:M` |
+| ast-grep rule generation | `ibis-ingest-logs` | `local:M` |
+| Agentic ReAct ask | `ibis-search` | `local:L` |
+
+The tier map is built at startup from `ai.reasoning.model_overrides`; a tier
+whose model equals the default local model is omitted (the router falls back to
+the default provider), and an explicit `ai.reasoning.model` or
+`always_smallest_local=true` pins the local lane to one model (no tier map).
+Providers are cheap handles: Ollama pulls a tier model only when a call site
+first uses it. One provider is pinned for the whole ReAct loop, so the model
+never switches mid-task (affinity). Routing is logged at debug level
+(`ibis_ai::router`, `hint`/`tier`/`local_model`) and the assembled map at
+startup.
 
 ## Plug-and-play keys
 

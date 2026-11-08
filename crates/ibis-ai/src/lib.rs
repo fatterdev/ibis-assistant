@@ -51,7 +51,7 @@ pub use mcp_sampling::{
 pub use ollama::OllamaProvider;
 pub use ollama_chat::OllamaChatProvider;
 pub use openai_compat::OpenAICompatProvider;
-pub use router::{ReasoningRouter, RouterConfig};
+pub use router::{LocalTier, ReasoningRouter, RouterConfig};
 pub use runner::{
     ensure_ollama, ensure_ollama_binary, find_ollama_exec, start_ollama_daemon,
     EnsureOllamaOutcome, OllamaProcess,

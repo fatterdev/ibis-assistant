@@ -423,7 +423,7 @@ pub static TOOL_SPECS: &[ToolSpec] = &[
             p!("status", "Optional status filter (default current)", String),
             p!("limit", "Max memories to cluster (default 200)", Number),
             p!("use_embeddings", "Split same kind/tag buckets by stored embedding similarity", Boolean),
-            p!("label_with_ai", "Ask local-first AI (bulk_local) for short cluster labels", Boolean),
+            p!("label_with_ai", "Ask local-first AI (local:S) for short cluster labels", Boolean),
             p!("actor", "Optional identity fallback", String),
         ],
     },

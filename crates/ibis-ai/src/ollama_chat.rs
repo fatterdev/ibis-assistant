@@ -63,6 +63,10 @@ impl AIProvider for OllamaChatProvider {
         "ollama"
     }
 
+    fn model(&self) -> Option<&str> {
+        Some(&self.model)
+    }
+
     async fn is_functional(&self) -> bool {
         !self.api_url.is_empty() && !self.model.is_empty()
     }

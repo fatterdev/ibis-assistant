@@ -44,6 +44,10 @@ pub const DEFAULT_BATCH_CHUNK_SIZE: usize = 250;
 /// chunk-processing over OOM; callers surface a clear warning.
 pub const MAX_LOG_INGEST_BYTES: usize = 32 << 20;
 
+/// D10 per-task routing: semantic log analysis and format discovery are
+/// mid-tier local tasks (cloud fallback preserved by the `local:` base).
+const ANALYZER_ROUTE_HINT: &str = "local:M";
+
 /// Progress reporter seam: the server lane attaches a
 /// throttled MCP implementation; `None` is a no-op.
 pub trait ProgressReporter: Send + Sync {
@@ -603,6 +607,7 @@ impl LogAnalyzer {
         }];
         let cfg = GenerationConfig {
             temperature: 0.1,
+            route_hint: ANALYZER_ROUTE_HINT.to_string(),
             ..Default::default()
         };
 
@@ -792,6 +797,7 @@ impl LogAnalyzer {
         }];
         let cfg = GenerationConfig {
             temperature: 0.0,
+            route_hint: ANALYZER_ROUTE_HINT.to_string(),
             ..Default::default()
         };
 
@@ -1228,6 +1234,12 @@ mod tests {
     use super::*;
     use std::io::Cursor;
     use std::sync::atomic::AtomicUsize;
+
+    /// D10 contract: analyzer and format discovery declare tier M.
+    #[test]
+    fn analyzer_route_hint_is_local_m() {
+        assert_eq!(ANALYZER_ROUTE_HINT, "local:M");
+    }
 
     /// Capturing executor for the C2/F09 canonical-id contract: records the
     /// SQL it receives and optionally fails matching statements.

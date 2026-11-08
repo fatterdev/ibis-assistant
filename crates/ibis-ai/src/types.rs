@@ -52,7 +52,9 @@ pub struct GenerationConfig {
         skip_serializing_if = "is_zero_usize"
     )]
     pub max_output_tokens: usize,
-    /// Route hint for the hybrid router: `bulk` | `quality` | `auto` | `local_only`.
+    /// Route hint for the hybrid router: `bulk` | `quality` | `auto` |
+    /// `local_only` plus the D10 per-task tiers `local:S`/`local:M`/`local:L`/
+    /// `local:XL` (and `local_only:<tier>` for privacy-bound local calls).
     #[serde(
         rename = "routeHint",
         default,

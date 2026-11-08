@@ -4,6 +4,28 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(ai): per-task local model routing on S/M/L/XL tiers (D10 ddofds)** -
+  the hybrid `ReasoningRouter` accepts `local:S`/`local:M`/`local:L`/`local:XL`
+  hints (case-insensitive) plus `local_only:<tier>` for privacy-bound calls.
+  Tier hints keep the existing contract: local tier first with cloud fallback
+  (CPU-only + `use_cloud_when_no_gpu` still prefers cloud), while
+  `local_only:<tier>` never leaves the machine. The per-tier providers are
+  built at startup from `ai.reasoning.model_overrides` (a tier equal to the
+  default local model is omitted; explicit `model` or
+  `always_smallest_local=true` pins the local lane to one model) and Ollama
+  pulls a tier model only when a call site first uses it. Call-site mapping:
+  insight labels, log root-cause refinement and RAFT QA → `local:S`; team
+  consolidation, analyzer/format discovery, ingest-rule synthesis and
+  ast-grep rule generation → `local:M` (personal consolidation uses
+  `local_only:M`, never cloud); the agentic ReAct ask → `local:L` (one
+  provider pinned for the whole loop, no mid-task model switch). Routing is
+  logged (`ibis_ai::router` `hint`/`tier`/`local_model`) and the assembled map
+  is logged at startup.
+  Tests: ibis-ai 141/141 (5 tier-routing cases), ibis-settings 23/23
+  (`resolve_tier_models`), ibis-optimization 27/27, ibis-search 123/123,
+  ibis-ingest-logs 65/65, ibis-ingest-code 45/45, ibis-server 61/61; clippy
+  `-D warnings` green.
+
 - **feat(memory): typed `details` per memory kind (C7 ddofds)** -
   `memory_add` and `memory_update` accept an optional JSON `details` object
   (stored as `DEFINE FIELD details TYPE option<object> FLEXIBLE`; nested

@@ -561,18 +561,48 @@ pub async fn assemble_ai(
             tracing::info!("Reasoning chain: {}", chain.step_names().join(" → "));
             Some(Arc::new(chain) as Arc<dyn AIProvider>)
         }
-        "hybrid" | "" => Some(Arc::new(ReasoningRouter::new(
-            local_reasoning.take(),
-            Some(Box::new(cloud_pool)),
-            RouterConfig {
-                use_cloud_when_no_gpu: cfg.ai.reasoning.routing.use_cloud_when_no_gpu,
-                cpu_only: probe.cpu_only,
-                local_timeout: std::time::Duration::from_millis(
-                    cfg.ai.reasoning.routing.local_timeout_ms.max(0) as u64,
-                ),
-                context_only: cfg.ai.reasoning.context_only_fallback,
-            },
-        )) as Arc<dyn AIProvider>),
+        "hybrid" | "" => {
+            // D10: per-task local tiers. The map is empty when the local lane
+            // is pinned to one model (explicit `model` or
+            // `always_smallest_local`); providers are cheap handles, the model
+            // is pulled by Ollama only when a tier is first used.
+            let tier_models = ibis_settings::resolve_tier_models(&cfg.ai.reasoning, &local_model);
+            if !tier_models.is_empty() {
+                tracing::info!(
+                    "Local tier routing: {}",
+                    tier_models
+                        .iter()
+                        .map(|(tier, model)| format!("{tier}={model}"))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                );
+            }
+            let tiers: Vec<(String, Box<dyn AIProvider>)> = tier_models
+                .into_iter()
+                .map(|(tier, model)| {
+                    (
+                        tier.as_str().to_string(),
+                        Box::new(OllamaChatProvider::new(&model, &cfg.ai.embedding.url))
+                            as Box<dyn AIProvider>,
+                    )
+                })
+                .collect();
+            Some(Arc::new(
+                ReasoningRouter::new(
+                    local_reasoning.take(),
+                    Some(Box::new(cloud_pool)),
+                    RouterConfig {
+                        use_cloud_when_no_gpu: cfg.ai.reasoning.routing.use_cloud_when_no_gpu,
+                        cpu_only: probe.cpu_only,
+                        local_timeout: std::time::Duration::from_millis(
+                            cfg.ai.reasoning.routing.local_timeout_ms.max(0) as u64,
+                        ),
+                        context_only: cfg.ai.reasoning.context_only_fallback,
+                    },
+                )
+                .with_local_tiers(tiers),
+            ) as Arc<dyn AIProvider>)
+        }
         other => {
             tracing::warn!("Unknown reasoning provider: {other}");
             None

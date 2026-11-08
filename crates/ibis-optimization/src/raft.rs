@@ -13,6 +13,10 @@ use crate::store::DbCostStore;
 /// (`GenerateSyntheticQA 3000-char truncation).
 const MAX_QA_SNIPPET: usize = 3000;
 
+/// D10 per-task routing: synthetic QA generation is a tier-S local task
+/// (cloud fallback preserved by the `local:` base).
+const RAFT_QA_ROUTE_HINT: &str = "local:S";
+
 /// Resolves (working repo root, anchor_mode) for a project so consolidated
 /// git-eligible claims can be committed to `.ibis/claims/` (claim store 4b).
 /// `None` keeps consolidation Surreal-only.
@@ -83,6 +87,7 @@ impl Optimizer {
                 &contents,
                 GenerationConfig {
                     temperature: 0.7,
+                    route_hint: RAFT_QA_ROUTE_HINT.to_string(),
                     ..Default::default()
                 },
             )
@@ -237,4 +242,15 @@ impl Optimizer {
 struct FileChunkRow {
     id: Option<String>,
     content: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// D10 contract: the RAFT QA call-site declares the tier-S local route.
+    #[test]
+    fn raft_qa_route_hint_is_local_s() {
+        assert_eq!(RAFT_QA_ROUTE_HINT, "local:S");
+    }
 }

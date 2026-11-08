@@ -21,6 +21,10 @@ use ibis_db::value::{SurrealValue, I64};
 
 use crate::analyzer::{LogAnalyzer, SemanticError};
 
+/// D10 per-task routing: the one-sentence root-cause refinement is a tier-S
+/// local task (cloud fallback preserved by the `local:` base).
+const ENRICH_ROUTE_HINT: &str = "local:S";
+
 /// Temporal baseline used when correlating log frames to source
 ///
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -853,6 +857,7 @@ Reply with plain text only."#,
     }];
     let cfg = ibis_ai::types::GenerationConfig {
         temperature: 0.1,
+        route_hint: ENRICH_ROUTE_HINT.to_string(),
         ..Default::default()
     };
     let cand = ai.generate_content(&contents, cfg).await.ok()?;
@@ -868,6 +873,12 @@ Reply with plain text only."#,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// D10 contract: root-cause refinement declares tier S.
+    #[test]
+    fn enrich_route_hint_is_local_s() {
+        assert_eq!(ENRICH_ROUTE_HINT, "local:S");
+    }
 
     #[test]
     fn extract_stack_location_go_paren() {

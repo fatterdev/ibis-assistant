@@ -56,6 +56,10 @@ pub const RULE_QUARANTINE_DIR: &str = "rules_quarantine";
 pub const MAX_SYNTH_PER_EXT_BATCH: usize = 2;
 pub const SYNTH_COOLDOWN: Duration = Duration::from_secs(30 * 60);
 
+/// D10 per-task routing: ingest-rule synthesis is a mid-tier local task
+/// (cloud fallback preserved by the `local:` base).
+const RULE_SYNTH_ROUTE_HINT: &str = "local:M";
+
 static SYNTH_RECENT: LazyLock<Mutex<HashMap<String, Instant>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -352,6 +356,7 @@ pub async fn synthesize_ingest_rules(
             &contents,
             ibis_ai::GenerationConfig {
                 temperature: 0.1,
+                route_hint: RULE_SYNTH_ROUTE_HINT.to_string(),
                 ..Default::default()
             },
         )
@@ -870,6 +875,12 @@ Return ONLY a JSON array:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// D10 contract: ingest-rule synthesis declares tier M.
+    #[test]
+    fn rule_synth_route_hint_is_local_m() {
+        assert_eq!(RULE_SYNTH_ROUTE_HINT, "local:M");
+    }
 
     #[test]
     fn canonicalize_generated_rule_id_matrix() {

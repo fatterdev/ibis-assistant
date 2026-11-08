@@ -12,6 +12,12 @@ use crate::types::{Candidate, Content, GenerationConfig};
 pub trait AIProvider: Send + Sync {
     fn name(&self) -> &str;
 
+    /// Concrete model identifier when the provider wraps one (used by the
+    /// D10 per-task routing log). Default `None`.
+    fn model(&self) -> Option<&str> {
+        None
+    }
+
     async fn is_functional(&self) -> bool;
 
     async fn embed_text(&self, text: &str) -> Result<Vec<f32>, AiError> {

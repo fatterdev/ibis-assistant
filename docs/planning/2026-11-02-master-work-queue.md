@@ -627,6 +627,28 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   suite completa (fixture discovery inclusa); clippy `-D warnings` verde,
   workspace lib verde.
 
+- **D10 atterrata (08/11)** — model routing per-task sui tier S/M/L/XL
+  (fase 3, parte 1). `ReasoningRouter` accetta gli hint `local:S|M|L|XL`
+  (case-insensitive) e `local_only:<tier>`: i tier hint mantengono il
+  contratto local-first → cloud (su CPU-only con `use_cloud_when_no_gpu`
+  il cloud resta preferito), `local_only:<tier>` non esce mai dalla
+  macchina. Mappa tier→provider costruita in `state.rs` da
+  `ai.reasoning.model_overrides` via `ibis_settings::resolve_tier_models`
+  (tier uguale al modello locale di default omesso → fallback al provider
+  default; `model` esplicito o `always_smallest_local` pinnano la lane
+  locale a un solo modello; provider Ollama costruiti come handle, il
+  modello si scarica solo al primo uso del tier). Mapping call-site:
+  insights, enrich e RAFT QA → `local:S`; consolidation (personale:
+  `local_only:M`), analyzer/discover_format, rule_synth e ast_rule_gen →
+  `local:M`; agentic ask → `local:L` (un provider pinnato per l'intero
+  loop ReAct, nessuno switch intra-task). Log: mappa assemblata a startup
+  + `ibis_ai::router` debug `hint`/`tier`/`local_model` per chiamata. Test:
+  ibis-ai 141/141 (5 casi tier: selezione, fallback default/cloud,
+  `local_only`, CPU prefer-cloud, suffisso ignoto), ibis-settings 23/23
+  (`resolve_tier_models`), contract per-crate sui 9 call-site,
+  ibis-optimization 27/27, ibis-search 123/123, ibis-ingest-logs 65/65,
+  ibis-ingest-code 45/45, ibis-server 61/61; clippy `-D warnings` verde.
+
 ### WQ-6 — Track B
 - Nessun sub-fase iniziata: piano integrato in [PLAN.md §9-bis](./PLAN.md)
   (approvato 03/11, sessione analisi Agent Beacon vs Microsoft Scope).

@@ -625,7 +625,7 @@
             "type": "string"
           },
           "label_with_ai": {
-            "description": "Ask local-first AI (bulk_local) for short cluster labels",
+            "description": "Ask local-first AI (local:S) for short cluster labels",
             "type": "boolean"
           },
           "limit": {

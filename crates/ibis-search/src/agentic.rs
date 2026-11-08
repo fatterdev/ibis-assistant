@@ -52,6 +52,10 @@ GUIDELINES:
 - Temporal contract: file_chunk with is_current=true is HEAD (\"how the code is now\"). commit_chunk is historical change meaning (\"why/when it changed\") — never treat it as current source. memory hits are current team truth only; ignore superseded/stale if somehow labeled. Prefer commit_chunk for change forensics.";
 
 const AGENTIC_MAX_STEPS: usize = 5;
+/// D10 per-task routing: the ReAct ask is the heaviest local task (tier L);
+/// one provider is pinned for the whole loop, so the model never switches
+/// mid-task.
+const AGENTIC_ROUTE_HINT: &str = "local:L";
 
 impl SearchService {
     /// Performs the multi-step ReAct search.
@@ -89,7 +93,7 @@ impl SearchService {
                     ibis_ai::types::GenerationConfig {
                         temperature: 0.2,
                         max_output_tokens: 2000,
-                        ..Default::default()
+                        route_hint: AGENTIC_ROUTE_HINT.to_string(),
                     },
                 )
                 .await
@@ -352,5 +356,16 @@ pub(crate) fn empty_default(value: &str, fallback: &str) -> String {
         fallback.to_string()
     } else {
         value.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// D10 contract: the agentic ReAct ask declares the tier-L local route.
+    #[test]
+    fn agentic_route_hint_is_local_l() {
+        assert_eq!(AGENTIC_ROUTE_HINT, "local:L");
     }
 }
