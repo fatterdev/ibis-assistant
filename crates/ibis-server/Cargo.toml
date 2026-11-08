@@ -38,6 +38,8 @@ tokio-util = "0.7"
 axum.workspace = true
 clap.workspace = true
 serde.workspace = true
+# B6: deterministic record ids for the L2 embedding cache (sha256 of the key).
+sha2.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

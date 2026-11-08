@@ -319,6 +319,15 @@ pub const INIT_STATEMENTS: &[&str] = &[
     "DEFINE FIELD IF NOT EXISTS severity ON TABLE log_pending_notification TYPE option<int>;",
     "DEFINE FIELD IF NOT EXISTS content ON TABLE log_pending_notification TYPE option<string>;",
     "DEFINE FIELD IF NOT EXISTS created_at ON TABLE log_pending_notification TYPE option<datetime>;",
+    // B6: persistent (L2) embedding cache — exact-key lookups only (no ANN):
+    // the key is `{model}:{dim}:{sha256(text)}` and `dim` mirrors the
+    // DiskANN DIMENSION below (EMBEDDING_DIMENSION).
+    "DEFINE TABLE IF NOT EXISTS embedding_cache SCHEMAFULL;",
+    "DEFINE FIELD IF NOT EXISTS key ON TABLE embedding_cache TYPE string;",
+    "DEFINE FIELD IF NOT EXISTS model ON TABLE embedding_cache TYPE string;",
+    "DEFINE FIELD IF NOT EXISTS dim ON TABLE embedding_cache TYPE int;",
+    "DEFINE FIELD IF NOT EXISTS embedding ON TABLE embedding_cache TYPE array<float>;",
+    "DEFINE FIELD IF NOT EXISTS created_at ON TABLE embedding_cache TYPE option<datetime>;",
     // Axon-like tables (no writer yet — future lanes declare their fields).
     "DEFINE TABLE IF NOT EXISTS symbol SCHEMAFULL;",
     "DEFINE FIELD IF NOT EXISTS name ON TABLE symbol TYPE option<string>;",
@@ -421,6 +430,9 @@ pub const INIT_STATEMENTS: &[&str] = &[
     "DEFINE INDEX IF NOT EXISTS errortype_hash ON TABLE error_type COLUMNS hash UNIQUE;",
     "DEFINE INDEX IF NOT EXISTS credential_target ON TABLE git_credential COLUMNS target UNIQUE;",
     "DEFINE INDEX IF NOT EXISTS processed_file_hash ON TABLE log_processed_file COLUMNS hash UNIQUE;",
+    // B6: the L2 embedding cache is keyed by the exact `{model}:{dim}:{hash}`
+    // string — one UNIQUE index enforces it.
+    "DEFINE INDEX IF NOT EXISTS embedding_cache_key ON TABLE embedding_cache COLUMNS key UNIQUE;",
     "DEFINE INDEX IF NOT EXISTS job_status ON TABLE batch_job COLUMNS status;",
     "DEFINE INDEX IF NOT EXISTS chunk_batch_id ON TABLE file_chunk COLUMNS batch_id;",
     "DEFINE INDEX IF NOT EXISTS chunk_batch_status ON TABLE file_chunk COLUMNS batch_status;",
@@ -474,6 +486,12 @@ pub fn generate_init_sql() -> String {
     out
 }
 
+/// Canonical embedding vector dimension. The five DiskANN index statements in
+/// `INIT_STATEMENTS` pin the same value inline (DDL literals); the L2
+/// embedding-cache key (`B6`) and any future config surface must derive from
+/// this constant. A sync test pins the DDL agreement.
+pub const EMBEDDING_DIMENSION: usize = 768;
+
 /// Initializes the database schema by defining tables, edges and indexes.
 ///
 /// Unlike the `InitSchema`, statement failures are propagated instead of only
@@ -493,4 +511,43 @@ pub async fn ensure_indexes(exec: &dyn Executor) -> Result<(), DbError> {
     tracing::info!("Ensuring database indexes...");
     exec.execute(&generate_init_sql()).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The DiskANN index DDL pins `DIMENSION 768` inline (DDL string
+    /// literals); this sync test fails loudly if the literals and
+    /// [`EMBEDDING_DIMENSION`] drift apart (B6 keys derive from the const).
+    #[test]
+    fn diskann_dimension_matches_const() {
+        assert_eq!(EMBEDDING_DIMENSION, 768);
+        let needle = format!("DIMENSION {EMBEDDING_DIMENSION}");
+        let diskann = INIT_STATEMENTS
+            .iter()
+            .filter(|s| s.contains("DISKANN"))
+            .count();
+        assert!(
+            diskann >= 5,
+            "expected the five embedding DiskANN indexes, found {diskann}"
+        );
+        for stmt in INIT_STATEMENTS.iter().filter(|s| s.contains("DISKANN")) {
+            assert!(
+                stmt.contains(&needle),
+                "DiskANN statement drifted from EMBEDDING_DIMENSION: {stmt}"
+            );
+        }
+    }
+
+    /// The B6 L2 cache table carries a UNIQUE index on the cache key — a
+    /// silently missing UNIQUE would let duplicate rows pile up.
+    #[test]
+    fn embedding_cache_key_index_is_unique() {
+        assert!(INIT_STATEMENTS.iter().any(|s| {
+            s.contains("embedding_cache_key")
+                && s.contains("UNIQUE")
+                && s.contains("embedding_cache")
+        }));
+    }
 }

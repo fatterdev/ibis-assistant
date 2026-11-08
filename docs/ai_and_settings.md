@@ -36,6 +36,55 @@ Ollama exposes no API for its concurrency settings (`/api/ps` and `/api/show`
 carry no parallelism field), so the queue defaults to the safe value and is
 overridable by hand.
 
+### Persistent embedding cache (B6, opt-in)
+
+The in-process map is L1; an **L2 disk cache on SurrealDB** survives process
+restarts and re-indexes. Opt-in via `ai.embedding.disk_cache: true` (default
+`false` — no behavior change on stock installs):
+
+| Knob | Default | Behavior |
+|------|---------|----------|
+| `ai.embedding.disk_cache` | `false` | `OllamaProvider` consults the `embedding_cache` table (exact-key lookup, no ANN) **before** the HTTP batch and writes fresh vectors back after the response. The FIFO queue still gates only HTTP calls — an L2 hit never queues. |
+| `ai.embedding.disk_cache_ttl_secs` | `2592000` (30d) | Boot-time prune of `embedding_cache` rows older than the TTL (`created_at`), same pattern as the `file_at_commit` prune. |
+
+Cache key: `{model}:{dim}:{sha256(text)}` — model and dimension are inside the
+key, so a model/dimension switch can never read stale vectors. The dimension
+must match the schema's DiskANN `DIMENSION` (768); a row with a mismatched
+length is treated as a miss. Store failures degrade transparently to the HTTP
+path (the seam is best-effort, like `CostStore`). The L1 wholesale clear stays
+as-is: the DB is strictly L2.
+
+## Prompt stability (D13)
+
+Every cloud AI call site follows one written convention, enforced by
+construction (the instructions block is a byte-stable `const` snapshot-tested
+in its own crate):
+
+> **byte-stable instructions block per call-site → variable context → query
+> last**; no timestamp or request-id may enter the prefix.
+
+| Call site | Crate | Stable prefix const |
+|-----------|-------|---------------------|
+| Semantic log analysis (`build_analyze_prompt`) | `ibis-ingest-logs` | `ANALYZE_INSTRUCTIONS` |
+| Log-format discovery (`discover_format`) | `ibis-ingest-logs` | `DISCOVER_FORMAT_INSTRUCTIONS` |
+| ast-grep rule generation (`build_ast_rule_prompt`) | `ibis-ingest-logs` | `AST_RULE_INSTRUCTIONS` |
+| Ingest rule synthesis (`build_ingest_synth_prompt`) | `ibis-ingest-code` | `INGEST_SYNTH_INSTRUCTIONS` |
+| Observation distillation (`build_distill_prompt`) | `ibis-optimization` | `DISTILL_INSTRUCTIONS` |
+
+The extension fingerprint of rule synthesis and the proposed language of the
+ast-rule prompt are variable content: they live **after** the stable prefix.
+
+### Prompt-cache billing
+
+`UsageMetadata` carries `cached_content_token_count` (provider-mapped: Gemini
+`cachedContentTokenCount`, OpenAI-compat `prompt_tokens_details.cached_tokens`,
+Claude `cache_read_input_tokens`). `CostTracker.record_usage` scales the billed
+prompt side by the blended approximation `prompt − 0.9 × cached` (cache reads
+bill at ~10% of full prompt price), so `tokens_used` accumulates **billed**
+tokens and the debug log reports the saving. Blended rate stays $0.15/1M; no
+per-model pricing in this phase. Anthropic `cache_control` is not sent in v1 —
+v1 relies on provider-automatic caching + prefix stability.
+
 ## Plug-and-play keys
 
 Enter API keys in the **wizard** or **Settings UI**; they are stored in `config.json` (plugin data dir when `runtime_mode=plugin`).
@@ -92,7 +141,9 @@ IDE packaging and shared runtime: [ide_host_and_lm_bridge.md](ide_host_and_lm_br
       "model": "nomic-embed-text",
       "url": "http://127.0.0.1:11434",
       "auto_start": true,
-      "auto_update": true
+      "auto_update": true,
+      "disk_cache": false,
+      "disk_cache_ttl_secs": 2592000
     },
     "reasoning": {
       "provider": "hybrid",

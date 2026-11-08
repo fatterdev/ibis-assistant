@@ -201,6 +201,13 @@ pub struct EmbeddingConfig {
     pub auto_start: bool,
     #[serde(rename = "auto_update")]
     pub auto_update: bool,
+    /// B6: persistent L2 embedding cache on SurrealDB (opt-in; best-effort —
+    /// when off or the DB is absent the provider degrades to the HTTP path).
+    #[serde(rename = "disk_cache")]
+    pub disk_cache: bool,
+    /// B6: TTL seconds for the L2 cache boot-time prune (default 30 days).
+    #[serde(rename = "disk_cache_ttl_secs")]
+    pub disk_cache_ttl_secs: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -450,6 +457,9 @@ impl Default for EmbeddingConfig {
             url: "http://127.0.0.1:11434".into(),
             auto_start: true,
             auto_update: true,
+            // B6: opt-in L2 disk cache — off by default.
+            disk_cache: false,
+            disk_cache_ttl_secs: 30 * 24 * 60 * 60,
         }
     }
 }
@@ -574,6 +584,9 @@ impl Default for Config {
                     url: "http://127.0.0.1:11434".into(),
                     auto_start: true,
                     auto_update: true,
+                    // B6: opt-in L2 disk cache — off by default.
+                    disk_cache: false,
+                    disk_cache_ttl_secs: 30 * 24 * 60 * 60,
                 },
                 reasoning: ReasoningConfig {
                     provider: "hybrid".into(),

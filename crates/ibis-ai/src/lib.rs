@@ -14,6 +14,7 @@ pub mod cloud_pool;
 pub mod config;
 pub mod cost;
 pub mod cursor_lm;
+pub mod embedding_cache;
 pub mod error;
 pub mod fallback;
 pub mod gemini;
@@ -36,6 +37,7 @@ pub use client::Client;
 pub use cloud_pool::{normalize_cloud_name, CloudPool};
 pub use cost::{CostStore, CostTracker};
 pub use cursor_lm::{CursorLMProvider, DEFAULT_IDE_BRIDGE_URL};
+pub use embedding_cache::{embedding_cache_key, EmbeddingCacheStore};
 pub use error::AiError;
 pub use fallback::FallbackChain;
 pub use gemini::{

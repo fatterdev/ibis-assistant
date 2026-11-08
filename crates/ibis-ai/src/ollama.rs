@@ -3,8 +3,9 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
+use crate::embedding_cache::{embedding_cache_key, EmbeddingCacheStore};
 use crate::error::AiError;
 use crate::runner::http_client;
 use crate::traits::AIProvider;
@@ -82,6 +83,13 @@ pub struct OllamaProvider {
     cache: Mutex<HashMap<String, Vec<f32>>>,
     /// Cache cap; tests shrink it to force wholesale clears deterministically.
     cache_cap: usize,
+    /// B6: optional persistent (L2) embedding cache — consulted before the
+    /// HTTP batch and written back after a fresh fetch. Best-effort: a
+    /// missing or failing store degrades to the HTTP path.
+    disk_cache: Option<Arc<dyn EmbeddingCacheStore>>,
+    /// Vector dimension inside the L2 cache key (schema DiskANN DIMENSION);
+    /// only meaningful once a store is attached via [`Self::with_disk_cache`].
+    disk_cache_dim: usize,
 }
 
 impl OllamaProvider {
@@ -97,7 +105,46 @@ impl OllamaProvider {
             http: http_client(HTTP_TIMEOUT),
             cache: Mutex::new(HashMap::new()),
             cache_cap: EMBED_CACHE_CAP,
+            disk_cache: None,
+            disk_cache_dim: 0,
         }
+    }
+
+    /// B6: attaches a persistent (L2) embedding cache. `dim` must match the
+    /// schema's DiskANN `DIMENSION` (768) — it is part of the cache key, so a
+    /// mismatched writer can never poison the lookups.
+    pub fn with_disk_cache(mut self, store: Arc<dyn EmbeddingCacheStore>, dim: usize) -> Self {
+        self.disk_cache = Some(store);
+        self.disk_cache_dim = dim.max(1);
+        self
+    }
+
+    /// L2 lookup (B6): `None` on miss, dimension mismatch, or any store
+    /// failure — the HTTP path stays the only correctness path.
+    async fn l2_get(&self, text: &str) -> Option<Vec<f32>> {
+        let store = self.disk_cache.as_ref()?;
+        let key = embedding_cache_key(&self.model, self.disk_cache_dim, text);
+        match store.get(&key).await {
+            Some(vec) if vec.len() == self.disk_cache_dim => Some(vec),
+            Some(_) => {
+                tracing::warn!(
+                    "embedding disk cache: dimension mismatch on {key} (expected {}), treating as miss",
+                    self.disk_cache_dim
+                );
+                None
+            }
+            None => None,
+        }
+    }
+
+    /// L2 write-back (B6): fire-and-forget; the adapter logs and swallows its
+    /// own failures.
+    async fn l2_put(&self, text: &str, embedding: Vec<f32>) {
+        let Some(store) = self.disk_cache.as_ref() else {
+            return;
+        };
+        let key = embedding_cache_key(&self.model, self.disk_cache_dim, text);
+        store.put(&key, embedding).await;
     }
 
     /// Test-only constructor with a shrunken cache cap so the wholesale
@@ -217,8 +264,29 @@ impl AIProvider for OllamaProvider {
         // so results never depend on the cache still holding an entry.
         let mut resolved: HashMap<String, Vec<f32>> = HashMap::new();
         if !misses.is_empty() {
-            for (text, embedding) in self.fetch_embeddings(&misses).await? {
-                resolved.insert(text, embedding);
+            // B6: the L2 disk cache is consulted before the HTTP batch — one
+            // exact-key lookup per miss, and an L2 hit never queues on the
+            // embed FIFO (the semaphore gates HTTP calls only).
+            let mut fetched: Vec<String> = Vec::new();
+            for text in &misses {
+                match self.l2_get(text).await {
+                    Some(embedding) => {
+                        resolved.insert(text.clone(), embedding);
+                    }
+                    None => fetched.push(text.clone()),
+                }
+            }
+            if !fetched.is_empty() {
+                for (text, embedding) in self.fetch_embeddings(&fetched).await? {
+                    resolved.insert(text, embedding);
+                }
+                // Write-back after the response, best-effort (B6). L2 hits
+                // are not re-written (their created_at stays the write time).
+                for text in &fetched {
+                    if let Some(embedding) = resolved.get(text) {
+                        self.l2_put(text, embedding.clone()).await;
+                    }
+                }
             }
         }
         // Hits resolve from the cache in the same lock that decides the
@@ -241,8 +309,26 @@ impl AIProvider for OllamaProvider {
             stragglers
         };
         if !stragglers.is_empty() {
-            for (text, embedding) in self.fetch_embeddings(&stragglers).await? {
-                resolved.insert(text, embedding);
+            // B6: stragglers (wiped by a concurrent wholesale clear between
+            // the passes) get the same L2 pass before hitting HTTP.
+            let mut refetched: Vec<String> = Vec::new();
+            for text in &stragglers {
+                match self.l2_get(text).await {
+                    Some(embedding) => {
+                        resolved.insert(text.clone(), embedding);
+                    }
+                    None => refetched.push(text.clone()),
+                }
+            }
+            if !refetched.is_empty() {
+                for (text, embedding) in self.fetch_embeddings(&refetched).await? {
+                    resolved.insert(text, embedding);
+                }
+                for text in &refetched {
+                    if let Some(embedding) = resolved.get(text) {
+                        self.l2_put(text, embedding.clone()).await;
+                    }
+                }
             }
         }
         Ok(texts
@@ -478,5 +564,130 @@ mod tests {
     async fn default_url() {
         let p = OllamaProvider::new("m", "");
         assert_eq!(p.api_url, "http://127.0.0.1:11434");
+    }
+
+    /// B6 fake L2 store: counts gets/puts, optionally failing gets (the
+    /// best-effort contract turns failures into misses).
+    struct FakeL2 {
+        rows: std::sync::Mutex<HashMap<String, Vec<f32>>>,
+        gets: AtomicUsize,
+        puts: AtomicUsize,
+        fail_gets: AtomicBool,
+    }
+
+    impl FakeL2 {
+        fn new() -> Self {
+            FakeL2 {
+                rows: std::sync::Mutex::new(HashMap::new()),
+                gets: AtomicUsize::new(0),
+                puts: AtomicUsize::new(0),
+                fail_gets: AtomicBool::new(false),
+            }
+        }
+
+        fn seed(&self, model: &str, dim: usize, text: &str, embedding: Vec<f32>) {
+            let key = embedding_cache_key(model, dim, text);
+            self.rows.lock().unwrap().insert(key, embedding);
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl EmbeddingCacheStore for FakeL2 {
+        async fn get(&self, key: &str) -> Option<Vec<f32>> {
+            self.gets.fetch_add(1, Ordering::SeqCst);
+            if self.fail_gets.load(Ordering::SeqCst) {
+                return None;
+            }
+            self.rows.lock().unwrap().get(key).cloned()
+        }
+
+        async fn put(&self, key: &str, embedding: Vec<f32>) {
+            self.puts.fetch_add(1, Ordering::SeqCst);
+            self.rows.lock().unwrap().insert(key.to_string(), embedding);
+        }
+    }
+
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    /// An L2 hit answers the query without any HTTP call: the provider
+    /// targets a dead URL, so the request can only succeed from the store.
+    #[tokio::test]
+    async fn l2_hit_skips_http() {
+        let store = Arc::new(FakeL2::new());
+        store.seed("m", 2, "seeded", vec![0.25, -0.75]);
+        let p = OllamaProvider::new("m", "http://127.0.0.1:9")
+            .with_disk_cache(store.clone() as Arc<dyn EmbeddingCacheStore>, 2);
+        let emb = p.embed_text("seeded").await.expect("l2 hit");
+        assert_eq!(emb, vec![0.25, -0.75]);
+        assert_eq!(store.gets.load(Ordering::SeqCst), 1);
+        assert_eq!(store.puts.load(Ordering::SeqCst), 0, "hits are not re-written");
+    }
+
+    /// After a fresh fetch the vector is written back to L2; a second
+    /// provider instance (cold L1, same store) is then served from L2 with
+    /// no further HTTP call.
+    #[tokio::test]
+    async fn l2_write_back_then_second_instance_hits_store() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let handler_hits = hits.clone();
+        let app = Router::new().route(
+            "/api/embed",
+            post(move |_req: Request| {
+                let hits = handler_hits.clone();
+                async move {
+                    hits.fetch_add(1, Ordering::SeqCst);
+                    ok(r#"{"embeddings":[[0.5,0.6]]}"#)
+                }
+            }),
+        );
+        let base_url = serve(app).await;
+        let store = Arc::new(FakeL2::new());
+        let first = OllamaProvider::new("m", &base_url)
+            .with_disk_cache(store.clone() as Arc<dyn EmbeddingCacheStore>, 2);
+        let emb = first.embed_text("fresh").await.expect("first fetch");
+        assert_eq!(emb, vec![0.5, 0.6]);
+        assert_eq!(store.puts.load(Ordering::SeqCst), 1, "write-back after fetch");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+
+        // Cold L1, same L2: no HTTP.
+        let second = OllamaProvider::new("m", &base_url)
+            .with_disk_cache(store.clone() as Arc<dyn EmbeddingCacheStore>, 2);
+        let emb = second.embed_text("fresh").await.expect("l2 hit");
+        assert_eq!(emb, vec![0.5, 0.6]);
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "second call never hits HTTP");
+    }
+
+    /// A failing store degrades to the HTTP path (best-effort contract) and
+    /// fresh results are still written back.
+    #[tokio::test]
+    async fn l2_failure_is_transparent() {
+        let store = Arc::new(FakeL2::new());
+        store.fail_gets.store(true, Ordering::SeqCst);
+        let app = Router::new().route(
+            "/api/embed",
+            post(|| async { ok(r#"{"embeddings":[[0.1,0.2]]}"#) }),
+        );
+        let base_url = serve(app).await;
+        let p = OllamaProvider::new("m", &base_url)
+            .with_disk_cache(store.clone() as Arc<dyn EmbeddingCacheStore>, 2);
+        let emb = p.embed_text("x").await.expect("http path");
+        assert_eq!(emb, vec![0.1, 0.2]);
+        assert_eq!(store.puts.load(Ordering::SeqCst), 1);
+    }
+
+    /// A row with a mismatched dimension is a miss, never a poison.
+    #[tokio::test]
+    async fn l2_dimension_mismatch_is_miss() {
+        let store = Arc::new(FakeL2::new());
+        store.seed("m", 2, "bad-dim", vec![0.1, 0.2, 0.3]); // 3 floats ≠ dim 2
+        let app = Router::new().route(
+            "/api/embed",
+            post(|| async { ok(r#"{"embeddings":[[0.7,0.8]]}"#) }),
+        );
+        let base_url = serve(app).await;
+        let p = OllamaProvider::new("m", &base_url)
+            .with_disk_cache(store.clone() as Arc<dyn EmbeddingCacheStore>, 2);
+        let emb = p.embed_text("bad-dim").await.expect("http fallback");
+        assert_eq!(emb, vec![0.7, 0.8]);
     }
 }

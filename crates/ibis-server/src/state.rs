@@ -312,6 +312,37 @@ pub struct AiAssembly {
     pub client: Arc<Client>,
 }
 
+/// Builds the Ollama embedding provider, attaching the persistent L2 cache
+/// when `ai.embedding.disk_cache` is on and a DB executor exists (B6). The
+/// dimension comes from the schema constant — the same value the DiskANN
+/// indexes pin. Boot-time prune drops rows older than the configured TTL.
+async fn ollama_provider_with_disk_cache(
+    cfg: &Config,
+    db: Option<Arc<dyn Executor>>,
+) -> OllamaProvider {
+    let provider = OllamaProvider::new(&cfg.ai.embedding.model, &cfg.ai.embedding.url);
+    if !cfg.ai.embedding.disk_cache {
+        return provider;
+    }
+    let Some(exec) = db else {
+        tracing::info!("Embedding disk_cache on but no DB executor; L2 cache disabled");
+        return provider;
+    };
+    let dim = ibis_db::schema::EMBEDDING_DIMENSION;
+    let store = Arc::new(crate::assembly::DbEmbeddingCacheStore::new(
+        exec,
+        cfg.ai.embedding.model.clone(),
+        dim,
+    )) as Arc<dyn ibis_ai::EmbeddingCacheStore>;
+    let ttl = cfg.ai.embedding.disk_cache_ttl_secs;
+    let pruned = store.prune(ttl).await;
+    tracing::info!(
+        "Embedding disk cache: L2 enabled (model {}, dim {dim}); boot prune dropped {pruned} rows older than {ttl}s",
+        cfg.ai.embedding.model
+    );
+    provider.with_disk_cache(store, dim)
+}
+
 /// Builds the AI client from config (parity with the original provider switches).
 /// `sampling` is the F0.5 MCP-sampling seam (`SamplingSessionRegistry`): the
 /// `ide_sampling`/`mcp_sampling` reasoning provider sends
@@ -362,10 +393,10 @@ pub async fn assemble_ai(
                     }
                 }
             }
-            Some(Arc::new(OllamaProvider::new(
-                &cfg.ai.embedding.model,
-                &cfg.ai.embedding.url,
-            )) as Arc<dyn AIProvider>)
+            Some(
+                Arc::new(ollama_provider_with_disk_cache(cfg, db.clone()).await)
+                    as Arc<dyn AIProvider>,
+            )
         }
         "gemini" => Some(Arc::new(GeminiProvider::new(
             effective_gemini_keys(cfg),
@@ -373,10 +404,10 @@ pub async fn assemble_ai(
         )) as Arc<dyn AIProvider>),
         other => {
             tracing::warn!("Unknown embedding provider: {other}. Defaulting to Ollama.");
-            Some(Arc::new(OllamaProvider::new(
-                &cfg.ai.embedding.model,
-                &cfg.ai.embedding.url,
-            )) as Arc<dyn AIProvider>)
+            Some(
+                Arc::new(ollama_provider_with_disk_cache(cfg, db.clone()).await)
+                    as Arc<dyn AIProvider>,
+            )
         }
     };
 

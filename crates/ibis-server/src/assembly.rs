@@ -16,6 +16,8 @@ use ibis_core::config::Config;
 use ibis_db::executor::{Executor, SurrealDbExecutor, Vars};
 use ibis_db::process::ProcessManager;
 use ibis_db::value::{RecordId, SurrealValue, Value};
+// B6: sha256 record ids for the L2 embedding cache (Digest trait in scope).
+use sha2::Digest;
 use ibis_ingest_dynamic::queue::{IngestionJob, ProcessJobFn, ProjectIngestionManager};
 use ibis_repopr::service::Service as RepoprService;
 use ibis_search::search::SearchService;
@@ -451,6 +453,119 @@ pub fn start_batch_manager(state: &Arc<AppState>) -> Option<Arc<BatchManager>> {
     ));
     manager.start();
     Some(manager)
+}
+
+/// B6: DB-backed L2 embedding cache over the executor (exact-key lookups).
+/// Record ids are the SHA-256 of the cache key — deterministic, so the UPSERT
+/// is idempotent under concurrency. Failures are logged at debug and
+/// swallowed: the seam is best-effort by contract, the HTTP path stays the
+/// only correctness path.
+pub struct DbEmbeddingCacheStore {
+    exec: Arc<dyn Executor>,
+    model: String,
+    dim: usize,
+}
+
+#[derive(Debug, SurrealValue)]
+struct EmbeddingCacheRow {
+    embedding: Option<ibis_db::value::Embedding>,
+}
+
+impl DbEmbeddingCacheStore {
+    pub fn new(exec: Arc<dyn Executor>, model: String, dim: usize) -> Self {
+        DbEmbeddingCacheStore { exec, model, dim }
+    }
+
+    /// Deterministic record id for a cache key: `embedding_cache:⟨sha256(key)⟩`.
+    fn record_id_for(&self, key: &str) -> String {
+        let sum = sha2::Sha256::digest(key.as_bytes());
+        let hash: String = sum.iter().map(|b| format!("{b:02x}")).collect();
+        format!("embedding_cache:⟨{hash}⟩")
+    }
+}
+
+#[async_trait::async_trait]
+impl ibis_ai::EmbeddingCacheStore for DbEmbeddingCacheStore {
+    async fn get(&self, key: &str) -> Option<Vec<f32>> {
+        let record_id = self.record_id_for(key);
+        let sql = format!("SELECT embedding FROM {record_id};");
+        let outcome = match self.exec.execute(&sql).await {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                tracing::debug!("embedding cache get failed (best-effort): {e}");
+                return None;
+            }
+        };
+        let rows = match ibis_db::value::decode_row_list::<EmbeddingCacheRow>(
+            outcome.first().unwrap_or(&Value::None),
+            &sql,
+        ) {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::debug!("embedding cache decode failed (best-effort): {e}");
+                return None;
+            }
+        };
+        let vec = rows.first().and_then(|r| r.embedding.as_ref())?;
+        if vec.0.len() != self.dim {
+            tracing::debug!(
+                "embedding cache row dimension mismatch on {key} ({} != {})",
+                vec.0.len(),
+                self.dim
+            );
+            return None;
+        }
+        Some(vec.0.clone())
+    }
+
+    async fn put(&self, key: &str, embedding: Vec<f32>) {
+        if embedding.len() != self.dim {
+            tracing::debug!("embedding cache put skipped: dimension mismatch for {key}");
+            return;
+        }
+        let record_id = self.record_id_for(key);
+        let sql = format!(
+            "UPSERT {record_id} SET key = $key, model = $model, dim = $dim, embedding = $vec, created_at = time::now();"
+        );
+        let mut vars = Vars::new();
+        vars.insert("key".into(), Value::from_t(key));
+        vars.insert("model".into(), Value::from_t(self.model.clone()));
+        vars.insert("dim".into(), Value::from_t(self.dim as i64));
+        vars.insert(
+            "vec".into(),
+            Value::from_t(
+                embedding
+                    .iter()
+                    .map(|f| Value::from_t(*f))
+                    .collect::<Vec<Value>>(),
+            ),
+        );
+        if let Err(e) = self.exec.smart_query(&sql, vars).await {
+            tracing::debug!("embedding cache put failed (best-effort): {e}");
+        }
+    }
+
+    async fn prune(&self, ttl_secs: u64) -> usize {
+        // 4.0 semantics (live-probed): `RETURN AFTER` on DELETE yields NONE
+        // (the rows are gone post-op); `RETURN BEFORE` restores the
+        // deleted-row list, which is the documented contract for the count.
+        let sql = format!(
+            "DELETE embedding_cache WHERE created_at < time::now() - {ttl_secs}s RETURN BEFORE;"
+        );
+        let outcome = match self.exec.execute(&sql).await {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                tracing::debug!("embedding cache prune failed (best-effort): {e}");
+                return 0;
+            }
+        };
+        ibis_db::value::decode_row_list::<EmbeddingCacheRow>(
+            outcome.first().unwrap_or(&Value::None),
+            &sql,
+        )
+        .map(|rows| rows.len())
+        .unwrap_or(0)
+    }
 }
 
 /// DB-backed chunk store for the batch manager (lane-C trait adapter over
