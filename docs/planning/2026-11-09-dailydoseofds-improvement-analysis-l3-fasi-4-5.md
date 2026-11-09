@@ -9,6 +9,10 @@
 
 **Stato:** fasi 0–3 complete (ultimo commit `d74b63e`). Questo documento specifica le fasi 4–5 limitatamente a C8, E14 ed E15.
 
+**Aggiornamento 09/11 (sera):** **C8 step 1–4** ed **E15** implementati in run parallela (core deterministico + trust/citazioni; zero LLM nei due stream). Unit test e live test verdi (incluse idempotenza/split/merge e read-only end-to-end); fixture discovery rigenerata. Restano **E14** (consumatore: budget/no-progress/completion, config `search.agentic.*`) e **C8 step 5–6** (sintesi LLM `local:M`, hook `refresh_stale_after_ingest`, config `ai.observations`, eval observations + gate A1).
+
+**Review fixes 09/11 (notte):** chiusi i finding della review: binding raw dei record `source_file` array-key per la famiglia `symbol`; protezione overflow/estrazione troncata (niente archive/supersede/reactivate su finestre parziali); `valid_until = NONE` e `confidence` aggiornata nelle transizioni strutturali; embedding retry sul contenuto LLM salvato; quoting sicuro dei target `derived_from` (`issue:⟨IBIS-42⟩`) e escaping del blocco `EVIDENCE:`; `CITATION_PROTOCOL` E14.5 e `stop_reason=MaxSteps`; live suite serializzata con copertura symbol/issue/split/merge/reactivation. `cargo fmt`, `cargo test --workspace` e `cargo clippy --workspace --all-targets -- -D warnings` verdi.
+
 **Struttura:** due specifiche prodotte in parallelo e riconciliate in questo merge:
 - **Parte I — C8** (indipendente): pattern recognition Observations deterministico.
 - **Parte II — E14 + E15** (accoppiati): E15 produce citazioni/trust/coverage, E14 li consuma per budget, no-progress e completion check.
@@ -257,7 +261,7 @@ evidence_hash = hex(sha256(
 ))[..32]
 
 canonical_members  = per membro ordinato per id:
-                     id \x1f kind \x1f status \x1f sha256(content) \x1f sha256(canonical_json(details))
+                     id \x1f kind \x1f status \x1f sha256(title) \x1f sha256(content) \x1f sha256(canonical_json(details))
 canonical_signatures = firme ordinate, join \x1f
 canonical_refs       = evidence_refs ordinate, join \x1f
 ```
@@ -629,7 +633,7 @@ Default **off**, coerente con `ai.consolidation` (`config.rs:200-209`) e con la 
 | `signature_symbol_token_match` | match solo se tutti i token del simbolo compaiono; nessun match su sottostringhe. |
 | `signature_hash_is_stable_and_scope_partitioned` | stesso input → stesso hash; progetto/scope diversi → hash diversi; 32 hex. |
 | `canonical_json_is_key_sorted` | due oggetti con ordine di inserimento diverso → stesso hash. |
-| `evidence_hash_ignores_updated_at` | cambia `content`/`details`/`status` → cambia; cambia solo `updated_at` → non cambia. |
+| `evidence_hash_tracks_semantic_fields` | cambia `title`/`content`/`details`/`status` → cambia; l’ordine di input è irrilevante; `updated_at` non è un input. |
 | `union_find_merges_shared_memory` | due bucket che condividono una memoria → una componente. |
 | `union_find_is_order_independent` | input permutato → stesso output (ids e ordine). |
 | `hub_signature_is_excluded` | grado 11 → firma esclusa, nessuna componente gigante. |

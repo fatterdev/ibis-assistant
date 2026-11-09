@@ -308,32 +308,49 @@ impl Optimizer {
     /// daemon-owned loop discovers its work in the store, so team clients
     /// can capture for repos unknown to the server config). One pass per
     /// project keeps `consolidate_loop`'s per-project filter intact.
+    ///
+    /// C8 §4.9: two discovery branches, deduplicated in Rust — the raw
+    /// backlog (non-derived `current` observations) plus the derived backlog
+    /// (stale observations, fallback summaries pending an upgrade, rows
+    /// without an embedding). Without the second branch a project whose only
+    /// work is derived observations would never run the pass.
+    ///
+    /// The derived branch is bounded to `kind = 'observation'` and
+    /// `status IN ['current', 'stale']`: archived/superseded derived rows
+    /// (which can still carry `generated_by = 'fallback'` or no embedding)
+    /// must not keep their project selected forever.
     pub async fn pending_observation_projects(&self) -> Result<Vec<String>, String> {
         let db = self.db.as_ref().ok_or("database not connected")?;
-        let query = "SELECT project FROM memory WHERE kind = 'observation' AND status = 'current' GROUP BY project;";
-        let outcome = db
-            .execute(query)
-            .await
-            .map_err(|e| format!("select observation projects: {e}"))?;
-        let rows = ibis_db::value::decode_row_list::<ProjectRow>(
-            outcome.first().unwrap_or(&Value::None),
-            query,
-        )
-        .map_err(|e| format!("decode observation projects: {e}"))?;
-        Ok(rows
-            .into_iter()
-            .filter_map(|row| {
-                let rid = row.project?;
+        let raw_query = "SELECT project FROM memory WHERE kind = 'observation' AND status = 'current' AND (store = NONE OR store != 'derived') GROUP BY project;";
+        let derived_query = "SELECT project FROM memory WHERE kind = 'observation' AND store = 'derived' AND status IN ['current', 'stale'] AND (status = 'stale' OR details.generated_by = 'fallback' OR embedding = NONE) GROUP BY project;";
+        let mut projects: Vec<String> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for query in [raw_query, derived_query] {
+            let outcome = db
+                .execute(query)
+                .await
+                .map_err(|e| format!("select observation projects: {e}"))?;
+            let rows = ibis_db::value::decode_row_list::<ProjectRow>(
+                outcome.first().unwrap_or(&Value::None),
+                query,
+            )
+            .map_err(|e| format!("decode observation projects: {e}"))?;
+            for row in rows {
+                let Some(rid) = row.project else { continue };
                 let plain = ibis_db::ids::record_id_to_plain(&rid);
                 // `repo:<key>` — the key is the sanitized project name
                 // (`sanitize_id` output is idempotent, so passing it back
                 // into `consolidate_loop` re-derives the same record).
-                plain
-                    .strip_prefix("repo:")
-                    .map(|name| name.trim().to_string())
-            })
-            .filter(|name| !name.is_empty())
-            .collect())
+                let Some(name) = plain.strip_prefix("repo:") else {
+                    continue;
+                };
+                let name = name.trim().to_string();
+                if !name.is_empty() && seen.insert(name.clone()) {
+                    projects.push(name);
+                }
+            }
+        }
+        Ok(projects)
     }
 
     async fn select_observations(
@@ -342,10 +359,18 @@ impl Optimizer {
         project_name: &str,
         max_items: usize,
     ) -> Result<Vec<ConsolidationObservation>, String> {
-        let mut where_parts = vec!["kind = 'observation'", "status = 'current'"]
-            .into_iter()
-            .map(str::to_string)
-            .collect::<Vec<_>>();
+        // C8 §4.9: derived observations (the observation engine's rows) are
+        // NOT raw distillation input — without this exclusion the
+        // consolidation would distill its own artifacts and the daemon would
+        // treat them as perpetual backlog.
+        let mut where_parts = vec![
+            "kind = 'observation'",
+            "status = 'current'",
+            "(store = NONE OR store != 'derived')",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
         let project = project_name.trim();
         if !project.is_empty() {
             where_parts.push(format!(
@@ -927,6 +952,7 @@ mod tests {
     use ibis_ai::AIProvider;
     use ibis_db::executor::{QueryOutcome, Vars};
     use ibis_db::value::Object;
+    use ibis_db::value::RecordId;
     use ibis_db::value::ToSql as _;
     use ibis_db::Executor;
 
@@ -1048,6 +1074,10 @@ mod tests {
     struct ConsolidateDb {
         observations: Vec<Value>,
         duplicates: Vec<Value>,
+        /// `pending_observation_projects` raw branch rows.
+        pending_raw: Vec<Value>,
+        /// `pending_observation_projects` derived branch rows.
+        pending_derived: Vec<Value>,
         calls: std::sync::Mutex<Vec<(String, Vars)>>,
     }
 
@@ -1056,8 +1086,17 @@ mod tests {
             ConsolidateDb {
                 observations,
                 duplicates,
+                pending_raw: Vec::new(),
+                pending_derived: Vec::new(),
                 calls: std::sync::Mutex::new(Vec::new()),
             }
+        }
+
+        /// C8 §4.9: the two discovery branches of the daemon backlog.
+        fn pending(mut self, raw: Vec<Value>, derived: Vec<Value>) -> Self {
+            self.pending_raw = raw;
+            self.pending_derived = derived;
+            self
         }
 
         fn sql_calls(&self) -> Vec<String> {
@@ -1087,6 +1126,12 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push((sql.to_string(), Vars::new()));
+            if sql.contains("GROUP BY project") {
+                if sql.contains("store = 'derived'") {
+                    return Ok(QueryOutcome::Single(arr(self.pending_derived.clone())));
+                }
+                return Ok(QueryOutcome::Single(arr(self.pending_raw.clone())));
+            }
             if sql.contains("kind = 'observation'") {
                 return Ok(QueryOutcome::Single(arr(self.observations.clone())));
             }
@@ -1283,6 +1328,225 @@ mod tests {
                 .contains("guard an empty discovery_root"),
             "content binding: {:?}",
             add_vars[0].get("content")
+        );
+    }
+
+    /// C8 §4.9: `select_observations` (the distillation drain) must exclude
+    /// derived observations — otherwise the consolidation would distill the
+    /// observation engine's own artifacts and the daemon would see a
+    /// perpetual backlog.
+    #[tokio::test]
+    async fn select_observations_excludes_derived() {
+        let db = Arc::new(ConsolidateDb::new(Vec::new(), Vec::new()));
+        let opt = optimizer(db.clone(), Arc::new(ConsolidateAi::new(vec![])));
+        let exec: Arc<dyn Executor> = db.clone();
+        let observations = opt
+            .select_observations(&exec, "obs_repo", 5)
+            .await
+            .expect("select observations");
+        assert!(observations.is_empty());
+        let calls = db.sql_calls();
+        let query = calls
+            .iter()
+            .find(|q| q.contains("kind = 'observation'"))
+            .expect("selection query");
+        assert!(
+            query.contains("(store = NONE OR store != 'derived')"),
+            "the drain must exclude derived observations: {query}"
+        );
+        assert!(query.contains("status = 'current'"), "{query}");
+    }
+
+    /// C8 §4.9: the daemon discovers work from BOTH discovery branches — the
+    /// raw backlog and the derived backlog (stale / fallback summary /
+    /// missing embedding) — deduplicated in Rust. Without the second branch a
+    /// project whose only work is derived observations never runs the pass.
+    #[tokio::test]
+    async fn pending_projects_includes_stale_derived() {
+        let repo_row = |key: &str| {
+            obj(vec![(
+                "project",
+                Value::RecordId(RecordId::new("repo", key)),
+            )])
+        };
+        let db = Arc::new(ConsolidateDb::new(Vec::new(), Vec::new()).pending(
+            vec![repo_row("raw_repo")],
+            vec![repo_row("stale_repo"), repo_row("raw_repo")],
+        ));
+        let opt = optimizer(db.clone(), Arc::new(ConsolidateAi::new(vec![])));
+        let projects = opt
+            .pending_observation_projects()
+            .await
+            .expect("pending projects");
+        assert_eq!(
+            projects,
+            vec!["raw_repo".to_string(), "stale_repo".to_string()]
+        );
+
+        let calls = db.sql_calls();
+        let raw = calls
+            .iter()
+            .find(|q| {
+                q.contains("GROUP BY project") && q.contains("(store = NONE OR store != 'derived')")
+            })
+            .expect("raw branch");
+        assert!(
+            raw.contains("(store = NONE OR store != 'derived')"),
+            "{raw}"
+        );
+        let derived = calls
+            .iter()
+            .find(|q| q.contains("store = 'derived'"))
+            .expect("derived branch");
+        assert!(derived.contains("kind = 'observation'"), "{derived}");
+        assert!(
+            derived.contains("status IN ['current', 'stale']"),
+            "archived/superseded rows must be excluded: {derived}"
+        );
+        assert!(derived.contains("status = 'stale'"), "{derived}");
+        assert!(
+            derived.contains("details.generated_by = 'fallback'"),
+            "{derived}"
+        );
+        assert!(derived.contains("embedding = NONE"), "{derived}");
+    }
+
+    /// One simulated `memory` row for the discovery predicates.
+    struct BacklogRow {
+        project: &'static str,
+        kind: &'static str,
+        status: &'static str,
+        store: Option<&'static str>,
+        generated_by: Option<&'static str>,
+        has_embedding: bool,
+    }
+
+    /// Predicate-aware fake for `pending_observation_projects`: evaluates the
+    /// same bounds as the SQL against simulated rows, so the
+    /// archived/superseded exclusion is exercised as behavior and not only
+    /// asserted as query text.
+    struct BacklogDb(Vec<BacklogRow>);
+
+    #[async_trait]
+    impl Executor for BacklogDb {
+        async fn execute(&self, sql: &str) -> Result<QueryOutcome, ibis_db::DbError> {
+            if !sql.contains("GROUP BY project") {
+                return Ok(QueryOutcome::Single(Value::None));
+            }
+            let derived = sql.contains("store = 'derived'");
+            let mut projects: Vec<Value> = Vec::new();
+            let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            for row in &self.0 {
+                let pending = if derived {
+                    row.kind == "observation"
+                        && row.store == Some("derived")
+                        && matches!(row.status, "current" | "stale")
+                        && (row.status == "stale"
+                            || row.generated_by == Some("fallback")
+                            || !row.has_embedding)
+                } else {
+                    row.kind == "observation"
+                        && row.status == "current"
+                        && row.store != Some("derived")
+                };
+                if pending && seen.insert(row.project) {
+                    projects.push(obj(vec![(
+                        "project",
+                        Value::RecordId(RecordId::new("repo", row.project)),
+                    )]));
+                }
+            }
+            Ok(QueryOutcome::Single(arr(projects)))
+        }
+
+        async fn smart_query(
+            &self,
+            _sql: &str,
+            _vars: Vars,
+        ) -> Result<QueryOutcome, ibis_db::DbError> {
+            Ok(QueryOutcome::Single(Value::None))
+        }
+    }
+
+    /// Review fix: archived/superseded derived rows with a fallback summary or
+    /// no embedding must not keep their project selected forever; current and
+    /// stale derived rows still select theirs.
+    #[tokio::test]
+    async fn pending_projects_excludes_archived_and_superseded_derived() {
+        let db = Arc::new(BacklogDb(vec![
+            BacklogRow {
+                project: "archived_repo",
+                kind: "observation",
+                status: "archived",
+                store: Some("derived"),
+                generated_by: Some("fallback"),
+                has_embedding: false,
+            },
+            BacklogRow {
+                project: "superseded_repo",
+                kind: "observation",
+                status: "superseded",
+                store: Some("derived"),
+                generated_by: None,
+                has_embedding: false,
+            },
+            // Archived raw rows stay excluded by the unchanged raw branch.
+            BacklogRow {
+                project: "archived_raw_repo",
+                kind: "observation",
+                status: "archived",
+                store: None,
+                generated_by: None,
+                has_embedding: true,
+            },
+            BacklogRow {
+                project: "stale_repo",
+                kind: "observation",
+                status: "stale",
+                store: Some("derived"),
+                generated_by: None,
+                has_embedding: true,
+            },
+            BacklogRow {
+                project: "fallback_repo",
+                kind: "observation",
+                status: "current",
+                store: Some("derived"),
+                generated_by: Some("fallback"),
+                has_embedding: true,
+            },
+            BacklogRow {
+                project: "noembed_repo",
+                kind: "observation",
+                status: "current",
+                store: Some("derived"),
+                generated_by: None,
+                has_embedding: false,
+            },
+            BacklogRow {
+                project: "raw_repo",
+                kind: "observation",
+                status: "current",
+                store: None,
+                generated_by: None,
+                has_embedding: true,
+            },
+        ]));
+        let opt = Optimizer::new(Some(db as Arc<dyn Executor>), None, None);
+
+        let projects = opt
+            .pending_observation_projects()
+            .await
+            .expect("pending projects");
+        assert_eq!(
+            projects,
+            vec![
+                "raw_repo".to_string(),
+                "stale_repo".to_string(),
+                "fallback_repo".to_string(),
+                "noembed_repo".to_string(),
+            ],
+            "archived/superseded derived rows must not select their project"
         );
     }
 

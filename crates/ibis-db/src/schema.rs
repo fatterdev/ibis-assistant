@@ -473,11 +473,15 @@ pub const INIT_STATEMENTS: &[&str] = &[
     "DEFINE FIELD IF NOT EXISTS in ON TABLE supersedes TYPE record<memory> REFERENCE MATERIALIZE INTO memory.supersedes_edges;",
     "DEFINE FIELD IF NOT EXISTS out ON TABLE supersedes TYPE record<memory> REFERENCE MATERIALIZE INTO memory.superseded_by_edges;",
     // `derived_from` materializes the memory side only (out is a union).
+    // C8: the union includes `memory` so a derived observation can link its
+    // member memories (the observation→member edges). The field is
+    // REMOVE+DEFINE on every boot, so extending the union is effective on
+    // pre-existing databases too.
     "DEFINE TABLE IF NOT EXISTS derived_from TYPE RELATION SCHEMAFULL;",
     "REMOVE FIELD IF EXISTS in ON TABLE derived_from;",
     "REMOVE FIELD IF EXISTS out ON TABLE derived_from;",
     "DEFINE FIELD IF NOT EXISTS in ON TABLE derived_from TYPE record<memory> REFERENCE MATERIALIZE INTO memory.derived_from_edges;",
-    "DEFINE FIELD IF NOT EXISTS out ON TABLE derived_from TYPE record<source_file | file_chunk | commit | issue>;",
+    "DEFINE FIELD IF NOT EXISTS out ON TABLE derived_from TYPE record<source_file | file_chunk | commit | issue | memory>;",
     "DEFINE TABLE IF NOT EXISTS part_of_workstream TYPE RELATION IN memory OUT workstream SCHEMAFULL;",
     // Memory absorption: indexes
     "DEFINE INDEX IF NOT EXISTS memory_kind ON TABLE memory COLUMNS kind;",

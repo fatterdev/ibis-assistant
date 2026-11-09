@@ -220,11 +220,12 @@ pub static TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "memory_list",
-        description: "Browse memories by kind/status/visibility/workstream without embeddings (metadata list, most recent first). Use memory_search for semantic queries.",
+        description: "Browse memories by kind/status/visibility/store/workstream without embeddings (metadata list, most recent first). Use memory_search for semantic queries.",
         properties: &[
             p!("kind", "Optional comma-separated kind filter", String),
             p!("status", "Optional status filter (empty = all; the explicit all marker is equivalent)", String),
             p!("visibility", "team|personal|all (default: team + caller's own personal)", String),
+            p!("store", "Optional store filter: git|derived|all (default all)", String),
             p!("workstream", "Optional workstream name or id: only memories linked to it via part_of_workstream", String),
             p!("limit", "Optional max results (default 100)", Number),
             p!("actor", "Optional identity fallback", String),
@@ -246,7 +247,7 @@ pub static TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "memory_update",
-        description: "Patch fields on an existing memory. Does not create a supersedes edge; use memory_add(supersedes=...) to replace a memory.",
+        description: "Patch fields on an existing memory. Does not create a supersedes edge; use memory_add(supersedes=...) to replace a memory. Derived observations (store=derived) are read-only: edit the source memories and the next observation pass regenerates them.",
         properties: &[
             p!("id", "Memory record ID (required)", String),
             p!("content", "Optional new content", String),
@@ -263,7 +264,7 @@ pub static TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "memory_delete",
-        description: "Soft-delete (archive) or hard-delete a memory. Hard delete requires owner == actor.",
+        description: "Soft-delete (archive) or hard-delete a memory. Hard delete requires owner == actor; derived observations (store=derived) cannot be archived and can be hard-deleted only by a trusted local actor.",
         properties: &[
             p!("id", "Memory record ID (required)", String),
             p!("hard", "true = permanently delete; default false (archive)", Boolean),
@@ -352,12 +353,13 @@ pub static TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "capture_observation",
-        description: "Cheap, un-classified capture of a raw observation (kind=observation). Use sparingly for genuinely new, reusable findings; a later consolidation pass classifies these.",
+        description: "Cheap, un-classified capture of a raw observation (kind=observation). Use sparingly for genuinely new, reusable findings; a later consolidation pass classifies these. Optional citations_json attaches structured agentic-ask evidence as a stable, bounded EVIDENCE block inside the content.",
         properties: &[
             p!("project_name", "Target project/repo scope", String),
             p!("text", "Raw observation text (required)", String),
             p!("source", "agent|tool|user (default agent)", String),
             p!("session_id", "Optional session identifier grouping observations", String),
+            p!("citations_json", "Optional JSON array of AgenticCitation evidence entries (ask_project citations); rendered as a bounded EVIDENCE block (max 20, 160-rune excerpts)", String),
             p!("actor", "Optional identity fallback", String),
         ],
     },
@@ -371,7 +373,7 @@ pub static TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "memory_share",
-        description: "Promote a memory's visibility to team. Only the owner may share their own memory; demoting back to personal is not supported.",
+        description: "Promote a memory's visibility to team. Only the owner may share their own memory; demoting back to personal is not supported. Derived observations cannot be shared (their visibility is part of the signature scope).",
         properties: &[
             p!("id", "Memory record ID (required)", String),
             p!("visibility", "Must be 'team' (required)", String),
@@ -380,7 +382,7 @@ pub static TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "memory_export",
-        description: "Export memories as JSON or markdown from this runtime's SurrealDB. Defaults to visibility=team so other owners' personal rows are never exported. Pass visibility=personal|all with a trusted actor (loopback/stdio) to include your own personal memories. Use with memory_import to transfer between plugin-isolated (%LOCALAPPDATA%\\ibis\\plugin), personal (127.0.0.1 daemon), and server runtimes. SurrealDB stays the source of truth; markdown also backs optional .ibis/memory projection.",
+        description: "Export memories as JSON or markdown from this runtime's SurrealDB. Defaults to visibility=team so other owners' personal rows are never exported. Pass visibility=personal|all with a trusted actor (loopback/stdio) to include your own personal memories. Use with memory_import to transfer between plugin-isolated (%LOCALAPPDATA%\\ibis\\plugin), personal (127.0.0.1 daemon), and server runtimes. SurrealDB stays the source of truth; markdown also backs optional .ibis/memory projection. Derived observations (store=derived) are excluded: they are regenerated from their evidence graph.",
         properties: &[
             p!("project_name", "Target project/repo scope", String),
             p!("kind", "Optional kind filter", String),

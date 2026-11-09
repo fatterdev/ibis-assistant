@@ -523,6 +523,8 @@ async fn memory_list(State(st): State<ApiState>, req: Request, export: bool) -> 
         kinds: split_filter(&query_value(req.uri().query(), "kind").unwrap_or_default()),
         status: query_value(req.uri().query(), "status").unwrap_or_default(),
         visibility: query_value(req.uri().query(), "visibility").unwrap_or_default(),
+        // C8 §4.10: store filter passthrough (`git|derived|all`, default all).
+        store: query_value(req.uri().query(), "store").unwrap_or_default(),
         workstream: String::new(),
         limit,
         actor: String::new(),

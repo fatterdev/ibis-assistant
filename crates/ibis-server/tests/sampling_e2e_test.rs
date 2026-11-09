@@ -9,11 +9,15 @@
 // what this gate exercises (F0.5 keeps sampling as the primary reasoning via).
 #![allow(deprecated)]
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use ibis_ai::{AIProvider, Client, CursorLMProvider, FallbackChain, McpSamplingProvider};
 use ibis_core::config::Config;
+use ibis_db::value::{Object as DbObject, Value as DbValue};
+use ibis_db::{DbError, Executor, QueryOutcome, Vars};
+use ibis_search::search::SearchService;
 use ibis_server::mcp_server::IbisServer;
 use ibis_server::sampling::SamplingSessionRegistry;
 use ibis_server::state::AppState;
@@ -27,12 +31,16 @@ use rmcp::{service::serve_client, ErrorData as McpError, ServiceExt};
 use serde_json::json;
 
 /// An MCP client that declares the `sampling` capability and answers
-/// `sampling/createMessage` with a canned assistant turn.
+/// `sampling/createMessage` with a canned assistant turn (or the next
+/// scripted turn, for multi-step agentic scenarios).
 #[derive(Clone)]
 struct SamplingTestClient {
     info: ClientConfig,
     calls: Arc<AtomicUsize>,
     last_question: Arc<Mutex<String>>,
+    /// Scripted assistant turns consumed in order; empty = the default
+    /// single-turn `FINAL ANSWER`.
+    script: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl ClientHandler for SamplingTestClient {
@@ -62,10 +70,16 @@ impl ClientHandler for SamplingTestClient {
             })
             .unwrap_or_default();
         *self.last_question.lock().unwrap() = question;
+        let reply = self
+            .script
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or_else(|| "FINAL ANSWER: sampled via mcp".to_string());
         Ok(CreateMessageResult::new(
             SamplingMessage::new(
                 Role::Assistant,
-                SamplingMessageContentBlock::text("FINAL ANSWER: sampled via mcp"),
+                SamplingMessageContentBlock::text(reply.as_str()),
             ),
             "vscode-claude".to_string(),
         ))
@@ -118,15 +132,21 @@ async fn test_state(registry: Arc<SamplingSessionRegistry>) -> Arc<AppState> {
 impl TestClient {
     /// Connects with the sampling-capable handler.
     async fn connect_sampling(state: Arc<AppState>) -> TestClient {
-        Self::connect(state, true).await
+        Self::connect(state, true, Vec::new()).await
+    }
+
+    /// Connects with the sampling-capable handler and a scripted sequence of
+    /// assistant turns (multi-step agentic scenarios).
+    async fn connect_sampling_scripted(state: Arc<AppState>, script: Vec<String>) -> TestClient {
+        Self::connect(state, true, script).await
     }
 
     /// Connects with a default (sampling-less) client handler.
     async fn connect_plain(state: Arc<AppState>) -> TestClient {
-        Self::connect(state, false).await
+        Self::connect(state, false, Vec::new()).await
     }
 
-    async fn connect(state: Arc<AppState>, sampling: bool) -> TestClient {
+    async fn connect(state: Arc<AppState>, sampling: bool, script: Vec<String>) -> TestClient {
         let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
         let server = tokio::spawn(async move {
             let service = IbisServer::new(state, false);
@@ -154,6 +174,7 @@ impl TestClient {
             info,
             calls: Arc::new(AtomicUsize::new(0)),
             last_question: Arc::new(Mutex::new(String::new())),
+            script: Arc::new(Mutex::new(script.into_iter().collect())),
         };
         let service = match serve_client(handler.clone(), client_stream).await {
             Ok(service) => service,
@@ -186,16 +207,85 @@ impl TestClient {
 /// The F0.5 reasoning stack wired the way `assemble_ai` does for
 /// `ide_sampling`: the chain `sampling → lm_bridge` (the bridge points at a
 /// dead loopback port, so the sampling leg serves the request).
-fn sampling_chain(registry: Arc<SamplingSessionRegistry>) -> Arc<Client> {
-    let steps: Vec<Arc<dyn AIProvider>> = vec![
-        Arc::new(McpSamplingProvider::new(registry.clone())),
+fn sampling_steps(registry: Arc<SamplingSessionRegistry>) -> Vec<Arc<dyn AIProvider>> {
+    vec![
+        Arc::new(McpSamplingProvider::new(registry)),
         Arc::new(CursorLMProvider::new("http://127.0.0.1:1")),
-    ];
+    ]
+}
+
+fn sampling_chain(registry: Arc<SamplingSessionRegistry>) -> Arc<Client> {
     Arc::new(Client::new(
         None,
-        Some(Arc::new(FallbackChain::new(steps, false))),
+        Some(Arc::new(FallbackChain::new(
+            sampling_steps(registry),
+            false,
+        ))),
         None,
     ))
+}
+
+/// Embedding-only AI for the citation scenario: retrieval needs vectors while
+/// the reasoning leg stays the MCP sampling chain.
+struct EmbeddingStub;
+
+#[async_trait::async_trait]
+impl AIProvider for EmbeddingStub {
+    fn name(&self) -> &str {
+        "test-embedding"
+    }
+
+    async fn is_functional(&self) -> bool {
+        true
+    }
+
+    async fn embed_text(&self, _text: &str) -> Result<Vec<f32>, ibis_ai::AiError> {
+        Ok(vec![0.1, 0.2, 0.3])
+    }
+}
+
+fn db_obj(pairs: Vec<(&str, DbValue)>) -> DbValue {
+    let mut obj = DbObject::new();
+    for (key, value) in pairs {
+        obj.insert(key, value);
+    }
+    DbValue::Object(obj)
+}
+
+/// Minimal HEAD `file_chunk` fixture: the two channels return the same two
+/// current sources, every other statement decodes as an empty result (the
+/// same shape the in-crate `FakeDb` serves to the search tests).
+struct CitationFixtureDb;
+
+#[async_trait::async_trait]
+impl Executor for CitationFixtureDb {
+    async fn execute(&self, _sql: &str) -> Result<QueryOutcome, DbError> {
+        Ok(QueryOutcome::Single(DbValue::None))
+    }
+
+    async fn smart_query(&self, sql: &str, _vars: Vars) -> Result<QueryOutcome, DbError> {
+        if !sql.contains("FROM file_chunk") {
+            return Ok(QueryOutcome::Single(DbValue::None));
+        }
+        Ok(QueryOutcome::Single(DbValue::from_t(vec![
+            db_obj(vec![
+                ("id", DbValue::from_t("file_chunk:init")),
+                ("path", DbValue::from_t("/src/init.rs")),
+                ("content", DbValue::from_t("fn init() { run(); }")),
+                ("hash", DbValue::from_t("h-init")),
+                ("current_hash", DbValue::from_t("h-init")),
+                ("score", DbValue::from_t(0.9f64)),
+            ]),
+            db_obj(vec![
+                ("id", DbValue::from_t("file_chunk:bootstrap")),
+                ("path", DbValue::from_t("/src/bootstrap.rs")),
+                ("content", DbValue::from_t("fn bootstrap() { init(); }")),
+                ("hash", DbValue::from_t("h-boot")),
+                ("current_hash", DbValue::from_t("h-boot")),
+                ("score", DbValue::from_t(0.8f64)),
+            ]),
+        ])))
+    }
 }
 
 #[tokio::test]
@@ -230,6 +320,18 @@ async fn ask_project_reasons_through_mcp_sampling() {
     );
     assert!(text.contains("\"answer\""), "agentic JSON shape: {text}");
 
+    // E15: the payload always carries `citations` + `trust`; a sampled answer
+    // with no citation markers is the honest low/weak no-evidence state.
+    let payload: serde_json::Value = serde_json::from_str(&text).expect("agentic payload is JSON");
+    assert!(payload.get("trust").is_some(), "trust present: {text}");
+    assert!(
+        payload.get("citations").is_some(),
+        "citations present: {text}"
+    );
+    assert_eq!(payload["trust"]["level"], "low");
+    assert_eq!(payload["trust"]["coverage"], 0.0);
+    assert_eq!(payload["trust"]["weak_context"], true);
+
     // Exactly one sampling request answered by the IDE-side handler, with
     // the agentic system prompt + question as the user turn.
     assert_eq!(client.handler.calls.load(Ordering::SeqCst), 1);
@@ -243,6 +345,92 @@ async fn ask_project_reasons_through_mcp_sampling() {
         "sampling request carries the agentic user turn: {:?}",
         client.handler.last_question.lock().unwrap()
     );
+    client.shutdown().await;
+}
+
+/// Positive citation path: the sampled model searches, receives the `[S1]` /
+/// `[S2]` observation prefix, then answers citing both ids. The deterministic
+/// assessment must cover the claims (coverage > 0, level above `low`) instead
+/// of the honest no-evidence state asserted by the test above.
+#[tokio::test]
+async fn ask_project_cites_observed_evidence() {
+    let registry = Arc::new(SamplingSessionRegistry::new());
+    let state = test_state(registry.clone()).await;
+
+    // Retrieval needs an embedding provider and a HEAD file_chunk fixture;
+    // the reasoning leg stays the MCP sampling chain (same fallback steps).
+    let hybrid = Arc::new(Client::new(
+        Some(Arc::new(EmbeddingStub)),
+        Some(Arc::new(FallbackChain::new(
+            sampling_steps(registry.clone()),
+            false,
+        ))),
+        None,
+    ));
+    *state.search.write().unwrap() = Arc::new(SearchService::new(
+        Some(Arc::new(CitationFixtureDb)),
+        Some(Arc::new(ibis_server::state::ClientAIAdapter(hybrid))),
+    ));
+
+    let client = TestClient::connect_sampling_scripted(
+        state,
+        vec![
+            "THOUGHT: I need the init code.\nSEARCH: \"init flow\"".to_string(),
+            "FINAL ANSWER: The init flow is implemented in the init module [S1]. The bootstrap wiring is implemented in the bootstrap module [S2]."
+                .to_string(),
+        ],
+    )
+    .await;
+    let peer = client.peer();
+
+    let result = peer
+        .call_tool(
+            rmcp::model::CallToolRequestParams::new("ask_project").with_arguments(
+                json!({ "query": "how does init work?" })
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .await
+        .expect("ask_project over sampling");
+    assert!(
+        !result.is_error.unwrap_or(false),
+        "ask_project failed: {result:?}"
+    );
+    let text = match result.content.first() {
+        Some(rmcp::model::ContentBlock::Text(t)) => t.text.clone(),
+        other => panic!("expected text content, got {other:?}"),
+    };
+    let payload: serde_json::Value = serde_json::from_str(&text).expect("agentic payload is JSON");
+
+    let citations = payload["citations"]
+        .as_array()
+        .unwrap_or_else(|| panic!("citations array: {text}"));
+    assert_eq!(citations.len(), 2, "two observed sources: {text}");
+    assert_eq!(citations[0]["citation_id"], "S1");
+    assert_eq!(citations[1]["citation_id"], "S2");
+    assert!(
+        payload["trust"]["coverage"].as_f64().unwrap_or(0.0) > 0.0,
+        "cited claims must be covered: {text}"
+    );
+    assert_ne!(
+        payload["trust"]["level"], "low",
+        "cited current evidence is above the low bucket: {text}"
+    );
+    assert_eq!(payload["invalid_citations"], 0, "no invented ids: {text}");
+    assert_eq!(payload["stop_reason"], "final_answer");
+    assert_eq!(payload["sources"].as_array().map(Vec::len), Some(2));
+
+    // Two sampling turns: the SEARCH turn and the citing FINAL ANSWER.
+    assert_eq!(client.handler.calls.load(Ordering::SeqCst), 2);
+    let first_question = client.handler.last_question.lock().unwrap().clone();
+    assert_eq!(
+        first_question.matches("CITATION PROTOCOL:").count(),
+        1,
+        "the citation block reaches the model exactly once: {first_question}"
+    );
+
     client.shutdown().await;
 }
 

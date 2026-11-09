@@ -65,6 +65,12 @@ pub fn required_details_keys(kind: &str) -> &'static [&'static str] {
         "fix" => &["root_cause"],
         "constraint" => &["applies_to"],
         "rule" => &["enforcement"],
+        // C8: the three invariants a hand-written observation cannot
+        // fabricate — signature identity, evidence identity, membership.
+        // Safe for `capture_observation`/distillation because validation
+        // passes on null details and those writers never set them for
+        // observation rows.
+        "observation" => &["signature_hash", "evidence_hash", "members"],
         _ => &[],
     }
 }

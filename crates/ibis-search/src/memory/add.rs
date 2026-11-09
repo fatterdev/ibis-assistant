@@ -107,6 +107,12 @@ impl SearchService {
                 SearchError::other(format!("invalid superseded memory id: {supersedes}"))
             })?;
             let target = self.memory_for_governance(&supersedes).await?;
+            if super::is_derived_observation(&target) {
+                return Err(SearchError::other(format!(
+                    "observation {} is derived from its evidence; only the observation engine may supersede it (split/merge of its component)",
+                    target.id
+                )));
+            }
             if target.visibility == "personal" && target.owner != trusted_actor {
                 return Err(SearchError::other(format!(
                     "personal memory {} may be superseded only by owner {:?}; share it first",

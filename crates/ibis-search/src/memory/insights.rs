@@ -95,6 +95,9 @@ impl SearchService {
                 sql
             },
             vis_filter,
+            // C8 §4.9: derived observations have their own read surface; mixing
+            // them into the kind+tag buckets would be noise.
+            "(store = NONE OR store != 'derived')".to_string(),
         ];
         let clean_kinds = super::non_empty_strings(&params.kinds);
         if !clean_kinds.is_empty() {
@@ -356,5 +359,32 @@ mod tests {
     #[test]
     fn insights_route_hint_is_local_s() {
         assert_eq!(INSIGHTS_ROUTE_HINT, "local:S");
+    }
+
+    #[tokio::test]
+    async fn insights_excludes_derived_observations() {
+        let fake = std::sync::Arc::new(crate::test_support::FakeDb::new(vec![(
+            "FROM memory",
+            crate::test_support::rows_of(vec![]),
+        )]));
+        let svc = SearchService::new(Some(fake.clone()), Some(crate::test_support::fake_ai()));
+        svc.memory_insights(
+            &crate::ActorContext::LOCAL,
+            &MemoryInsightsParams::default(),
+        )
+        .await
+        .expect("insights");
+        let sql = fake
+            .smart_calls
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|query| query.contains("FROM memory"))
+            .cloned()
+            .expect("insights query");
+        assert!(
+            sql.contains("(store = NONE OR store != 'derived')"),
+            "derived observations have their own read surface: {sql}"
+        );
     }
 }

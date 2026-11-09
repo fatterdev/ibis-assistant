@@ -528,6 +528,7 @@ async fn memory_list(
                 kinds,
                 status: get_string_arg(args, "status"),
                 visibility: get_string_arg(args, "visibility"),
+                store: get_string_arg(args, "store"),
                 workstream: get_string_arg(args, "workstream"),
                 limit,
                 actor: get_string_arg(args, "actor"),
@@ -911,6 +912,15 @@ async fn capture_observation(
         Ok(p) => p,
         Err(e) => return e,
     };
+    // E15.5: optional structured evidence. Parsed before any write so an
+    // invalid payload never leaves a partial capture behind.
+    let citations = match ibis_search::memory::capture::parse_citations_json(&get_string_arg(
+        args,
+        "citations_json",
+    )) {
+        Ok(citations) => citations,
+        Err(e) => return error_result(e),
+    };
     let service = state.search();
     match service
         .capture_observation(
@@ -921,6 +931,7 @@ async fn capture_observation(
                 source: get_string_arg(args, "source"),
                 session_id: get_string_arg(args, "session_id"),
                 owner: get_string_arg(args, "actor"),
+                citations,
             },
         )
         .await

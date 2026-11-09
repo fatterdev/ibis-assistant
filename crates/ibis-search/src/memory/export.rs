@@ -48,7 +48,15 @@ impl SearchService {
             &visibility,
             &actor_ctx.resolve_trusted_actor(&params.actor),
         )?;
-        let mut where_parts = vec!["status = $status".to_string(), vis_filter];
+        let mut where_parts = vec![
+            "status = $status".to_string(),
+            vis_filter,
+            // C8 §4.6: derived observations are excluded from exports and the
+            // `.ibis/memory` projection — an observation without its evidence
+            // graph is meaningless, and an import would recreate it writable
+            // (`memory_import` does not copy `store`).
+            "(store = NONE OR store != 'derived')".to_string(),
+        ];
         bindings.push((
             "status".into(),
             ibis_db::value::Value::from_t(status.as_str()),

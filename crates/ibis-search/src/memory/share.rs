@@ -19,6 +19,12 @@ impl SearchService {
             return Err(SearchError::other(format!("invalid memory id: {id}")));
         }
         let memory = self.memory_for_governance(id).await?;
+        if super::is_derived_observation(&memory) {
+            return Err(SearchError::other(format!(
+                "observation {} is derived from its evidence; its visibility is part of the signature scope and cannot be shared (edit the source memories instead)",
+                memory.id
+            )));
+        }
         let actor = actor_ctx.resolve_trusted_actor(explicit_actor);
         if memory.owner != actor {
             return Err(SearchError::other(format!(

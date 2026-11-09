@@ -14,6 +14,7 @@
 //! it — `None` never errors, it serves the git-native channels.
 
 pub mod agentic;
+pub mod agentic_trust;
 pub mod commit_meaning;
 pub mod error;
 pub mod graph;

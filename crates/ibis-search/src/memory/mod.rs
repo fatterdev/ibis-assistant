@@ -46,6 +46,7 @@ pub mod import;
 pub mod insights;
 pub mod kdiff;
 pub mod lifecycle;
+pub mod observations;
 pub mod projection;
 pub mod queries;
 pub mod rules;
@@ -66,6 +67,18 @@ pub const TABLE_MEMORY: &str = "memory";
 pub const STORE_GIT: &str = "git";
 /// `store` marker: Surreal-only row.
 pub const STORE_SURREAL: &str = "surreal";
+/// `store` marker: derived row (C8) — a regenerable artefact whose source of
+/// truth is the evidence graph; edits are refused (the next pass rewrites it).
+pub const STORE_DERIVED: &str = "derived";
+
+/// C8: the read-only predicate for derived observations. `store='derived'`
+/// is the SoT/mutability axis extension; the kind guard keeps the marker
+/// scoped to the observation engine's rows (a hand-written `derived` fact is
+/// not a machine artefact and stays writable). Server-side guards use this;
+/// clients receive the plain `store` marker.
+pub(crate) fn is_derived_observation(memory: &Memory) -> bool {
+    memory.store == STORE_DERIVED && memory.kind == "observation"
+}
 
 /// Summary length for semantic memory hits.
 pub(crate) const MEMORY_SEARCH_SUMMARY_RUNES: usize = 240;
@@ -352,6 +365,10 @@ pub struct MemoryListParams {
     pub kinds: Vec<String>,
     pub status: String,
     pub visibility: String,
+    /// C8 §4.10: optional store filter (`git` | `derived` | `all`, default
+    /// `all`). `surreal` is not a filter value because legacy rows carry
+    /// `store = NONE`.
+    pub store: String,
     /// Optional workstream (name or id): only memories linked through the
     /// `part_of_workstream` edge (`in` = memory, `out` = workstream).
     pub workstream: String,
@@ -388,6 +405,12 @@ impl crate::search::SearchService {
         let db = self.require_db()?;
         require_memory_record_id(&params.id)?;
         let memory = self.memory_for_governance(&params.id).await?;
+        if is_derived_observation(&memory) {
+            return Err(crate::SearchError::other(format!(
+                "observation {} is derived from its evidence; edit the source memories and let the next pass regenerate it",
+                memory.id
+            )));
+        }
         if memory.store == STORE_GIT
             && (params.content.is_some()
                 || params.title.is_some()
@@ -542,6 +565,12 @@ impl crate::search::SearchService {
         let db = self.require_db()?;
         require_memory_record_id(id)?;
         let memory = self.memory_for_governance(id).await?;
+        if is_derived_observation(&memory) {
+            return Err(SearchError::other(format!(
+                "observation {} is derived from its evidence and cannot be archived (the next pass would resurrect it); edit the source memories, or hard-delete it as a trusted local actor",
+                memory.id
+            )));
+        }
         if memory.store == STORE_GIT {
             let key = memory_record_key(&memory.id).unwrap_or_else(|_| memory.id.clone());
             return Err(SearchError::other(format!(
@@ -580,7 +609,24 @@ impl crate::search::SearchService {
             )));
         }
         let resolved_actor = mutation_actor(actor_ctx, &memory, actor);
-        if memory.owner.trim() != resolved_actor {
+        if is_derived_observation(&memory) {
+            // C8 §4.6: a derived observation is a regenerable artefact — hard
+            // deletion is the maintenance escape hatch, available only to a
+            // trusted local actor (never remote/untrusted, never anonymous).
+            let trusted = actor_ctx.resolve_trusted_actor(actor);
+            if trusted.is_empty() || actor_ctx.actor_is_remote_untrusted() {
+                return Err(SearchError::other(format!(
+                    "observation {} is derived from its evidence; hard delete requires a trusted local actor",
+                    memory.id
+                )));
+            }
+            tracing::warn!(
+                target: "observation_manual_delete",
+                observation = %memory.id,
+                actor = %trusted,
+                "derived observation hard-deleted manually; the next observation pass may regenerate it"
+            );
+        } else if memory.owner.trim() != resolved_actor {
             return Err(SearchError::other(format!(
                 "hard delete requires owner {:?}; resolved actor is {:?}",
                 memory.owner, resolved_actor
@@ -620,6 +666,20 @@ impl crate::search::SearchService {
             let (filter, more) = temporal::memory_status_filter_sql(status);
             where_parts.push(filter);
             bindings.extend(more);
+        }
+        // C8 §4.10: optional store filter (`git` | `derived` | `all`). The
+        // explicit `derived` value is how browse surfaces the machine-derived
+        // observations; `all` keeps the historical unfiltered browse.
+        let store = params.store.trim().to_lowercase();
+        match store.as_str() {
+            "" | "all" => {}
+            "git" => where_parts.push(format!("store = '{STORE_GIT}'")),
+            "derived" => where_parts.push(format!("store = '{STORE_DERIVED}'")),
+            other => {
+                return Err(SearchError::other(format!(
+                    "store must be git, derived, or all, got {other:?}"
+                )));
+            }
         }
         // F4 §A.3: the optional workstream filter resolves the argument
         // (name or id) to a validated record id and selects memories
@@ -777,7 +837,7 @@ impl crate::search::SearchService {
         };
 
         let sql = format!(
-            "SELECT id, kind, title, string::slice(content, 0, {MEMORY_SEARCH_SUMMARY_RUNES}) AS content, status, confidence, visibility, owner, tags, branch, valid_from, valid_until, created_at, updated_at, details, vector::similarity::cosine(embedding, $vec) AS score FROM memory WHERE {} ORDER BY vector::distance::cosine(embedding, $vec) LIMIT {fetch_limit};",
+            "SELECT id, kind, title, string::slice(content, 0, {MEMORY_SEARCH_SUMMARY_RUNES}) AS content, status, confidence, visibility, owner, tags, branch, valid_from, valid_until, created_at, updated_at, store, details, vector::similarity::cosine(embedding, $vec) AS score FROM memory WHERE {} ORDER BY vector::distance::cosine(embedding, $vec) LIMIT {fetch_limit};",
             where_parts.join(" AND ")
         );
         bindings.push(("vec".into(), crate::commit_meaning::vec_value_f32(&vector)));
