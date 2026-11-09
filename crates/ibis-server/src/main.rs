@@ -753,6 +753,7 @@ fn build_search_service(
     service.rerank_mode = ibis_search::rerank::RerankMode::resolve(&cfg.search.rerank);
     service.schema_enforcement =
         ibis_search::memory::details::SchemaEnforcement::resolve(&cfg.memory.schema_enforcement);
+    service.agentic = ibis_search::agentic::AgenticSettings::from_config(&cfg.search.agentic);
     Arc::new(service)
 }
 

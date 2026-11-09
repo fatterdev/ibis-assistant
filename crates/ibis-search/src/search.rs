@@ -149,6 +149,9 @@ pub struct SearchService {
     /// warn (default) accepts partial details with a warning, strict
     /// rejects writes missing a kind's required keys.
     pub schema_enforcement: SchemaEnforcement,
+    /// Agentic ReAct loop brakes (`search.agentic`, E14): max steps, token
+    /// budget, repeated-search cap and the citation completion check.
+    pub agentic: crate::agentic::AgenticSettings,
     /// Process-local TTL cache of ancestor sets (lazily created).
     pub(crate) ancestor_cache: std::sync::OnceLock<ibis_git::AncestorCache>,
 }
@@ -169,6 +172,7 @@ impl Default for SearchService {
             query_expansion: QueryExpansionMode::default(),
             rerank_mode: RerankMode::default(),
             schema_enforcement: SchemaEnforcement::default(),
+            agentic: crate::agentic::AgenticSettings::default(),
             ancestor_cache: std::sync::OnceLock::new(),
         }
     }

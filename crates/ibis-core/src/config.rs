@@ -83,6 +83,12 @@ pub struct SearchConfig {
     /// Unknown values resolve to off with a warning.
     #[serde(rename = "rerank")]
     pub rerank: String,
+    /// Agentic ReAct loop brakes (E14): `search.agentic.*` — max steps,
+    /// token budget, repeated-search cap and the citation completion check.
+    /// Raw values are clamped/warned in
+    /// `ibis_search::agentic::AgenticSettings`.
+    #[serde(rename = "agentic")]
+    pub agentic: AgenticConfig,
 }
 
 impl Default for SearchConfig {
@@ -92,6 +98,50 @@ impl Default for SearchConfig {
             candidates: 50,
             query_expansion: "symbol_variant".to_string(),
             rerank: "off".to_string(),
+            agentic: AgenticConfig::default(),
+        }
+    }
+}
+
+/// Agentic loop knobs (`search.agentic`, E14). Retrocompatible: a config
+/// without the block loads the defaults; unknown keys are ignored. The
+/// resolution (clamp + warn) lives in `ibis_search::agentic::AgenticSettings`,
+/// so these raw values never fail the boot.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct AgenticConfig {
+    /// Hard cap on `generate_content` calls per ask (clamped to [1, 10];
+    /// default 5 — the historical `AGENTIC_MAX_STEPS`).
+    #[serde(rename = "max_steps")]
+    pub max_steps: u32,
+    /// Raw-token budget per ask: `0` = brake off; positive values are
+    /// clamped to [4000, 500000] (default 120000 — the observed worst case
+    /// of 5 steps is ~110–140k cumulative tokens).
+    #[serde(rename = "token_budget")]
+    pub token_budget: u32,
+    /// Maximum consecutive executions of the same normalized query
+    /// (clamped to [1, 5]; default 2). The brake is not disableable: the
+    /// next repetition gets a nudge, the one after stops the loop.
+    #[serde(rename = "max_repeated_searches")]
+    pub max_repeated_searches: u32,
+    /// Citation-based completion check: `off` | `warn` (default) | `enforce`.
+    /// Unknown/empty values resolve to `warn`.
+    #[serde(rename = "completion_check")]
+    pub completion_check: String,
+    /// Coverage threshold (base-1000 rounded) used by `enforce` and logged
+    /// by `warn` (clamped to [0.0, 1.0]; default 0.60).
+    #[serde(rename = "completion_min_coverage")]
+    pub completion_min_coverage: f64,
+}
+
+impl Default for AgenticConfig {
+    fn default() -> Self {
+        AgenticConfig {
+            max_steps: 5,
+            token_budget: 120_000,
+            max_repeated_searches: 2,
+            completion_check: "warn".to_string(),
+            completion_min_coverage: 0.60,
         }
     }
 }
@@ -1417,6 +1467,59 @@ mod tests {
         assert_eq!(default_config().search.rerank, "off");
         let empty: Config = serde_json::from_str(r#"{"search": {}}"#).unwrap();
         assert_eq!(empty.search.rerank, "off");
+    }
+
+    /// E14: `search.agentic.*` defaults (max_steps 5, token_budget 120000,
+    /// max_repeated_searches 2, completion_check warn, min coverage 0.60)
+    /// and the retrocompatible missing-block path.
+    #[test]
+    fn agentic_config_defaults() {
+        let cfg = default_config();
+        assert_eq!(cfg.search.agentic.max_steps, 5);
+        assert_eq!(cfg.search.agentic.token_budget, 120_000);
+        assert_eq!(cfg.search.agentic.max_repeated_searches, 2);
+        assert_eq!(cfg.search.agentic.completion_check, "warn");
+        assert!((cfg.search.agentic.completion_min_coverage - 0.60).abs() < f64::EPSILON);
+
+        let empty: Config = serde_json::from_str(r#"{"search": {}}"#).unwrap();
+        assert_eq!(empty.search.agentic, AgenticConfig::default());
+    }
+
+    /// E14: full JSON override of every `search.agentic` key.
+    #[test]
+    fn agentic_config_overrides() {
+        let cfg: Config = serde_json::from_str(
+            r#"{"search": {"agentic": {
+                "max_steps": 7,
+                "token_budget": 40000,
+                "max_repeated_searches": 4,
+                "completion_check": "enforce",
+                "completion_min_coverage": 0.75
+            }}}"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.search.agentic.max_steps, 7);
+        assert_eq!(cfg.search.agentic.token_budget, 40_000);
+        assert_eq!(cfg.search.agentic.max_repeated_searches, 4);
+        assert_eq!(cfg.search.agentic.completion_check, "enforce");
+        assert!((cfg.search.agentic.completion_min_coverage - 0.75).abs() < f64::EPSILON);
+    }
+
+    /// E14: a partial block keeps the missing keys at their defaults; an
+    /// unknown `completion_check` value parses as-is (the resolution and the
+    /// warn are `AgenticSettings::from_config`'s job, not the parse).
+    #[test]
+    fn agentic_config_missing_block_uses_defaults() {
+        let cfg: Config =
+            serde_json::from_str(r#"{"search": {"agentic": {"max_steps": 3}}}"#).unwrap();
+        assert_eq!(cfg.search.agentic.max_steps, 3);
+        assert_eq!(cfg.search.agentic.token_budget, 120_000);
+        assert_eq!(cfg.search.agentic.completion_check, "warn");
+
+        let cfg: Config =
+            serde_json::from_str(r#"{"search": {"agentic": {"completion_check": "bogus"}}}"#)
+                .unwrap();
+        assert_eq!(cfg.search.agentic.completion_check, "bogus");
     }
 
     /// `ai.consolidation` (F4 §B.5): off by default, the file overlays the

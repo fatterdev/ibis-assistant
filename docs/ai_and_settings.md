@@ -200,6 +200,41 @@ and a prior run scored 1.000, so the residual is sampling variance at temp
 consolidation decision through `decide()`) is a later phase driven by the
 shadow agreement numbers.
 
+## Agentic ask loop (E14)
+
+`ask_project`'s ReAct lane (SEARCH / FINAL ANSWER over the hybrid ask) is
+bounded by `search.agentic.*`. The block is optional — a config without it
+loads the defaults; raw values are clamped with a warning at service build,
+never failing the boot:
+
+| Knob | Default | Behavior |
+|------|---------|----------|
+| `search.agentic.max_steps` | `5` | Hard cap on model calls per ask (clamped `[1, 10]`). |
+| `search.agentic.token_budget` | `120000` | Raw-token budget per ask (`0` = brake off; positive values clamped `[4000, 500000]`). Checked **before** every call with a 2000-token output reservation; the loop stops with `budget_exhausted=true`, keeps the evidence gathered so far and answers with an explicit budget message (or the best pending answer during a repair). Budget counts raw tokens (prompt + candidates); the D13 cache discount applies to billing only. |
+| `search.agentic.max_repeated_searches` | `2` | Max consecutive executions of the same normalized query (clamped `[1, 5]`). After N executions the next repetition gets an actionable nudge (search not executed); a following repetition stops the loop with `stop_reason=no_progress`. A/B/A resets the counter. |
+| `search.agentic.completion_check` | `warn` | `off` \| `warn` \| `enforce`. `warn` logs coverage and accepts; `enforce` demands citation coverage ≥ threshold and asks the same model for **one** repair turn (never a verifier LLM). |
+| `search.agentic.completion_min_coverage` | `0.60` | Coverage threshold (clamped `[0, 1]`, compared in base 1000). |
+
+The flag payload is additive on `AgenticResult`: `budget_exhausted`,
+`completion_checked`, `repair_turns`, `invalid_citations`,
+`search_unavailable`, `stop_reason` (`final_answer`, `max_steps`,
+`budget_exhausted`, `no_progress`, `completion_low_coverage`, `ai_error`,
+`context_only`, `empty_query`). An empty query short-circuits **before** any
+AI/DB call (`stop_reason=empty_query`); a mid-loop AI error after ≥1 step is
+best-effort (`ai_error`/`context_only` with the evidence gathered), and with
+zero completed steps it propagates as before. A disconnected database sets
+`search_unavailable=true` and skips further search attempts (the model is
+told to answer from the evidence it has).
+
+`trust`/`citations` (E15) are the deterministic grounding signal in the same
+payload: `citations` is the citable catalog (`S1`..`S20`, first-observation
+order, deduped), `trust.coverage` is the share of answer claims carrying at
+least one valid citation id, and `trust.level`/`score` blend coverage with
+source ratio, top score, freshness, kind diversity and citation count (base
+1000, no LLM). Trust measures citation presence, not entailment: treat it as
+a signal, not a guarantee. `ask_project`/agentic calls are never response-
+cached (D12) and always route `local:L` (D10), repair included.
+
 ## Plug-and-play keys
 
 Enter API keys in the **wizard** or **Settings UI**; they are stored in `config.json` (plugin data dir when `runtime_mode=plugin`).
@@ -291,6 +326,15 @@ IDE packaging and shared runtime: [ide_host_and_lm_bridge.md](ide_host_and_lm_br
     "response_cache": {
       "enabled": false,
       "ttl_secs": 604800
+    }
+  },
+  "search": {
+    "agentic": {
+      "max_steps": 5,
+      "token_budget": 120000,
+      "max_repeated_searches": 2,
+      "completion_check": "warn",
+      "completion_min_coverage": 0.6
     }
   }
 }
