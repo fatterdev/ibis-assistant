@@ -254,3 +254,5 @@ D12 (response cache) ──usa──► chiavi con HEAD/rules hash ──dipende
 ## Prossimo passo
 
 Convertire le fasi 0–1 (A1, poi A2 + C9 + D13 + B6) in un piano di implementazione passo-passo con milestone, ordine dei commit e criteri di accettazione per step (ogni spec di questo documento è già il contratto funzionale del corrispondente milestone). Le fasi 2–3 partono solo con la baseline A1 verde.
+
+**Aggiornamento 09/11:** fasi 0–3 complete (A1, A2, A3, A4, C9, D13, B6, C7, D10, D11, D12). Le specifiche L3 delle fasi 4–5 per C8, E14 ed E15 sono in [2026-11-09-dailydoseofds-improvement-analysis-l3-fasi-4-5.md](./2026-11-09-dailydoseofds-improvement-analysis-l3-fasi-4-5.md).
