@@ -4,6 +4,32 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(memory): observation synthesis, ingest hook and eval gate (C8 steps
+  5-6, ddofds)** - the deterministic observation engine now has its opt-in LLM
+  stage. `Optimizer::observations_pass` runs at the tail of
+  `consolidate_loop`: `Full` reconcile per scope (team + personal owners,
+  capped), then one bounded synthesis per derived backlog row (stale /
+  `generated_by=fallback` / embedding-less) with the D13 byte-stable
+  `OBSERVATION_INSTRUCTIONS`, `local:M` (`local_only:M` for personal), JSON
+  name+summary with one retry on invalid/foreign ids, deterministic fallback
+  when the provider is absent or fails, content embedding via the provider,
+  bucket `system:memory_observations` and a `max_llm_summaries_per_pass` cap
+  (default 10). The ingest hook (`refresh_stale_after_ingest`) reconciles
+  `InvalidateOnly` after the staleness/anchors passes: zero LLM, zero
+  embedding, zero creates. New `ai.observations` config (opt-in, family
+  whitelist with warn-on-unknown, clamped limits, optional D11
+  `observation_accept.v1` shadow). `ibis eval observations` +
+  `evaluations/observations/dataset.yaml`: 8 golden cases pin exact
+  memberships, scope isolation, hub defense, split/merge supersession and the
+  `signature_hash` values (8/8 against the live 4.0.0 engine) plus a CI step
+  in `retrieval-eval`. `DbCostStore` now UPSERTs so the new bucket materializes
+  on the first pass; embedding writes rejected by the engine degrade to a
+  write without the vector (summary never lost, vector retried next pass).
+  Tests: ibis-optimization 63/63 unit + 1 live synthesis/idempotence,
+  ibis-search 213/213 unit + 12 live observations, ibis-core config matrix,
+  A1 retrieval baseline unchanged (21/21, MRR 0.952 / r@5 0.976 / r@15 1.0),
+  clippy `-D warnings` green.
+
 - **feat(ai): exact-match response cache with invalidation context (D12
   ddofds)** - new `ibis_ai::response_cache` seam: `ResponseCacheStore`
   (`get`/`put`/`prune`, best-effort like B6), a `CachedGenerate` provider

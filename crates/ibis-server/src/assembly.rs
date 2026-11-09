@@ -352,6 +352,32 @@ pub async fn refresh_stale_after_ingest(
         Ok(_) => {}
         Err(e) => tracing::warn!("PromoteDirtyAnchors after ingest: {e}"),
     }
+    // C8 step 6 — derived-observation hook: InvalidateOnly reconcile once the
+    // staleness/anchors passes are final (7 bounded queries + union-find;
+    // zero LLM, zero embedding, zero CREATE). Opt-in; a failure warns and the
+    // ingest job continues, like every other step.
+    if service.observations.enabled {
+        match service
+            .reconcile_observations_for_project(
+                project_name,
+                ibis_search::memory::observations::ReconcileMode::InvalidateOnly,
+                &service.observations,
+            )
+            .await
+        {
+            Ok(reports) => {
+                let stale: usize = reports.iter().map(|report| report.stale).sum();
+                let archive: usize = reports.iter().map(|report| report.archive).sum();
+                if stale + archive > 0 {
+                    tracing::info!(
+                        "ReconcileObservations: marked {stale} stale, archived {archive} in {} scope(s)",
+                        reports.len()
+                    );
+                }
+            }
+            Err(e) => tracing::warn!("ReconcileObservations after ingest: {e}"),
+        }
+    }
     match service.prune_file_at_commit_cache().await {
         Ok(pr) if pr > 0 => {
             tracing::info!("PruneFileAtCommitCache: dropped {pr} cached reads older than TTL");

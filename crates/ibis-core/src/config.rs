@@ -249,6 +249,69 @@ impl Default for ResponseCacheConfig {
     }
 }
 
+/// Derived-observation engine knobs (`ai.observations`, C8): opt-in, off by
+/// default — `enabled = false` turns off both the ingest hook
+/// (`InvalidateOnly`) and the consolidation-pass synthesis (`Full`), and
+/// existing derived rows stay inert. Bottoms out in
+/// `ibis_search::memory::observations::ObservationSettings::from_config`
+/// (clamp + family whitelist; never fails the boot).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ObservationsConfig {
+    /// Master switch (both the hook and the pass).
+    pub enabled: bool,
+    /// Minimum component size (singletons never persist).
+    #[serde(rename = "min_cluster_size")]
+    pub min_cluster_size: u32,
+    /// Components larger than this are dropped, never truncated.
+    #[serde(rename = "max_members")]
+    pub max_members: u32,
+    /// Signature degree above which the signature is excluded (hub defense).
+    #[serde(rename = "hub_degree_max")]
+    pub hub_degree_max: u32,
+    /// Per-repo cluster cap per reconcile pass.
+    #[serde(rename = "max_clusters_per_repo")]
+    pub max_clusters_per_repo: u32,
+    /// Eligible memories examined per pass (Q1 bound).
+    #[serde(rename = "max_members_examined")]
+    pub max_members_examined: u32,
+    /// Scope cap per project pass: `team` + up to `max_scopes - 1` owners.
+    #[serde(rename = "max_scopes_per_project")]
+    pub max_scopes_per_project: u32,
+    /// LLM summaries per pass (the token-spending cap).
+    #[serde(rename = "max_llm_summaries_per_pass")]
+    pub max_llm_summaries_per_pass: u32,
+    /// Family whitelist (`fix_root_cause` | `issue` | `symbol` | `file`);
+    /// unknown names are dropped with a warning at resolution.
+    pub families: Vec<String>,
+    /// D11 shadow measurement of the deterministic accept filters (log-only,
+    /// default off; rubric `observation_accept.v1`).
+    #[serde(rename = "decide_shadow")]
+    pub decide_shadow: bool,
+}
+
+impl Default for ObservationsConfig {
+    fn default() -> Self {
+        ObservationsConfig {
+            enabled: false,
+            min_cluster_size: 2,
+            max_members: 12,
+            hub_degree_max: 10,
+            max_clusters_per_repo: 25,
+            max_members_examined: 500,
+            max_scopes_per_project: 8,
+            max_llm_summaries_per_pass: 10,
+            families: vec![
+                "fix_root_cause".to_string(),
+                "issue".to_string(),
+                "symbol".to_string(),
+                "file".to_string(),
+            ],
+            decide_shadow: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct AIConfig {
@@ -257,6 +320,7 @@ pub struct AIConfig {
     pub consolidation: ConsolidationConfig,
     pub decide: DecideConfig,
     pub response_cache: ResponseCacheConfig,
+    pub observations: ObservationsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -695,6 +759,7 @@ impl Default for Config {
                 consolidation: ConsolidationConfig::default(),
                 decide: DecideConfig::default(),
                 response_cache: ResponseCacheConfig::default(),
+                observations: ObservationsConfig::default(),
             },
             gemini_default_rpm: 100,
             redmine_concurrency: 10,
@@ -1491,6 +1556,53 @@ mod tests {
         // Missing section under a present `ai` → cache stays off.
         let cfg: Config = serde_json::from_str(r#"{"ai": {"decide": {"shadow": false}}}"#).unwrap();
         assert!(!cfg.ai.response_cache.enabled);
+    }
+
+    /// C8: `ai.observations` is opt-in, off by default, and overlays like
+    /// the rest of the `ai` object.
+    #[test]
+    fn ai_observations_config() {
+        let dflt = default_config();
+        assert!(!dflt.ai.observations.enabled);
+        assert_eq!(dflt.ai.observations.min_cluster_size, 2);
+        assert_eq!(dflt.ai.observations.max_members, 12);
+        assert_eq!(dflt.ai.observations.hub_degree_max, 10);
+        assert_eq!(dflt.ai.observations.max_clusters_per_repo, 25);
+        assert_eq!(dflt.ai.observations.max_members_examined, 500);
+        assert_eq!(dflt.ai.observations.max_scopes_per_project, 8);
+        assert_eq!(dflt.ai.observations.max_llm_summaries_per_pass, 10);
+        assert_eq!(
+            dflt.ai.observations.families,
+            vec![
+                "fix_root_cause".to_string(),
+                "issue".to_string(),
+                "symbol".to_string(),
+                "file".to_string()
+            ]
+        );
+        assert!(!dflt.ai.observations.decide_shadow);
+
+        let cfg: Config = serde_json::from_str(
+            r#"{"ai": {"observations": {
+                "enabled": true,
+                "max_llm_summaries_per_pass": 3,
+                "families": ["file", "bogus"]
+            }}}"#,
+        )
+        .unwrap();
+        assert!(cfg.ai.observations.enabled);
+        assert_eq!(cfg.ai.observations.max_llm_summaries_per_pass, 3);
+        assert_eq!(
+            cfg.ai.observations.families,
+            vec!["file".to_string(), "bogus".to_string()],
+            "resolution (and the warn) happens in ibis-search"
+        );
+        // Partial object keeps the other defaults.
+        assert_eq!(cfg.ai.observations.max_members, 12);
+
+        // Missing section under a present `ai` → stays off.
+        let cfg: Config = serde_json::from_str(r#"{"ai": {"decide": {"shadow": false}}}"#).unwrap();
+        assert!(!cfg.ai.observations.enabled);
     }
 
     #[test]

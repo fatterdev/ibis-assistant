@@ -973,6 +973,11 @@ async fn memory_consolidate(
         );
         // D11: shadow mode ships on (`ai.decide.shadow`).
         optimizer.decide_shadow = state.config().ai.decide.shadow;
+        // C8: the observation engine is opt-in (`ai.observations.enabled`).
+        optimizer.observations =
+            ibis_search::memory::observations::ObservationSettings::from_config(
+                &state.config().ai.observations,
+            );
         match optimizer.consolidate_loop(&project, max_items).await {
             Err(err) => tracing::error!("Memory consolidation failed: {err}"),
             Ok(()) => {

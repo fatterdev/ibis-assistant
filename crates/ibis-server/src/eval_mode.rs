@@ -24,6 +24,9 @@ use ibis_optimization::decide_eval::{
 use ibis_optimization::eval::{
     build_report, load_dataset, seed_golden_estate, OfflineEmbedder, RetrievalEvalRunner,
 };
+use ibis_optimization::observations_eval::{
+    build_observations_report, load_observations_dataset, ObservationEvalRunner,
+};
 use ibis_search::SearchService;
 
 const DEFAULT_SURREAL_URL: &str = "ws://127.0.0.1:38000";
@@ -40,6 +43,18 @@ const DEFAULT_OPENAI_COMPAT_URL: &str = "https://api.openai.com/v1";
 enum EvalTarget {
     Retrieval(EvalParams),
     Decisions(DecisionParams),
+    Observations(ObservationParams),
+}
+
+/// `ibis eval observations` knobs (C8 deterministic cluster gate).
+struct ObservationParams {
+    dataset: String,
+    url: String,
+    ns: String,
+    db: String,
+    user: String,
+    pass: String,
+    out: Option<String>,
 }
 
 /// `ibis eval decisions` knobs (D11 calibration runner).
@@ -282,12 +297,56 @@ fn parse_unit_interval(value: &str, name: &str) -> Result<f64, String> {
     Ok(parsed)
 }
 
+/// Parses `observations --dataset <path> [flags]` (C8 deterministic gate).
+fn parse_observations_args(args: &[String]) -> Result<ObservationParams, String> {
+    if args.first().map(String::as_str) != Some("observations") {
+        return Err(
+            "unknown eval target (expected: ibis eval observations --dataset <path>)".to_string(),
+        );
+    }
+    let mut params = ObservationParams {
+        dataset: String::new(),
+        url: std::env::var("IBIS_SPIKE_SURREAL_URL").unwrap_or_else(|_| DEFAULT_SURREAL_URL.into()),
+        ns: "ibis_eval".to_string(),
+        db: "observations_golden".to_string(),
+        user: "root".to_string(),
+        pass: "root".to_string(),
+        out: None,
+    };
+    let mut i = 1;
+    while i < args.len() {
+        let flag = args[i].as_str();
+        let value = |i: &mut usize, name: &str| -> Result<String, String> {
+            *i += 1;
+            args.get(*i)
+                .cloned()
+                .ok_or_else(|| format!("{name} requires a value"))
+        };
+        match flag {
+            "--dataset" => params.dataset = value(&mut i, "--dataset")?,
+            "--url" => params.url = value(&mut i, "--url")?,
+            "--ns" => params.ns = value(&mut i, "--ns")?,
+            "--db" => params.db = value(&mut i, "--db")?,
+            "--user" => params.user = value(&mut i, "--user")?,
+            "--pass" => params.pass = value(&mut i, "--pass")?,
+            "--out" => params.out = Some(value(&mut i, "--out")?),
+            other => return Err(format!("unknown eval flag: {other}")),
+        }
+        i += 1;
+    }
+    if params.dataset.is_empty() {
+        return Err("--dataset <path> is required".to_string());
+    }
+    Ok(params)
+}
+
 fn parse_eval_args(args: &[String]) -> Result<EvalTarget, String> {
     match args.first().map(String::as_str) {
         Some("retrieval") => Ok(EvalTarget::Retrieval(parse_retrieval_args(args)?)),
         Some("decisions") => Ok(EvalTarget::Decisions(parse_decisions_args(args)?)),
+        Some("observations") => Ok(EvalTarget::Observations(parse_observations_args(args)?)),
         _ => Err(
-            "unknown eval target (expected: ibis eval retrieval|decisions --dataset <path>)"
+            "unknown eval target (expected: ibis eval retrieval|decisions|observations --dataset <path>)"
                 .to_string(),
         ),
     }
@@ -311,6 +370,7 @@ fn run_eval(args: &[String]) -> Result<i32, String> {
     match target {
         EvalTarget::Retrieval(params) => runtime.block_on(run_retrieval_async(params)),
         EvalTarget::Decisions(params) => runtime.block_on(run_decisions_async(params)),
+        EvalTarget::Observations(params) => runtime.block_on(run_observations_async(params)),
     }
 }
 
@@ -521,6 +581,48 @@ async fn run_decisions_async(p: DecisionParams) -> Result<i32, String> {
     Ok(0)
 }
 
+/// C8 deterministic gate: one seeded estate per dataset case over a live
+/// engine, reconciled in `Full` mode for every scope. No LLM is involved; the
+/// synthesis pass is covered by unit tests.
+async fn run_observations_async(p: ObservationParams) -> Result<i32, String> {
+    let db: Arc<dyn Executor> = Arc::new(
+        SurrealDbExecutor::connect(&p.url, &p.ns, &p.db, &p.user, &p.pass)
+            .await
+            .map_err(|e| format!("connect {} (ns {}, db {}): {e}", p.url, p.ns, p.db))?,
+    );
+    ibis_db::schema::init_schema(db.as_ref())
+        .await
+        .map_err(|e| format!("init schema: {e}"))?;
+    let dataset = load_observations_dataset(&p.dataset)?;
+    let settings = ibis_search::memory::observations::ObservationSettings::from_config(
+        &ibis_core::config::ObservationsConfig::default(),
+    );
+    let runner = ObservationEvalRunner::new(db.clone(), settings);
+    let cases = runner.run(&dataset).await;
+    let report = build_observations_report(&p.dataset, &dataset, cases);
+    let json = serde_json::to_string_pretty(&report).map_err(|e| format!("report: {e}"))?;
+    println!("{json}");
+    if let Some(out) = &p.out {
+        if let Some(parent) = std::path::Path::new(out).parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+            }
+        }
+        std::fs::write(out, format!("{json}\n"))
+            .map_err(|e| format!("write report {}: {e}", out))?;
+    }
+
+    if report.aggregate.failures > 0 {
+        eprintln!(
+            "eval: {} of {} observation cases failed",
+            report.aggregate.failures, report.aggregate.cases
+        );
+        return Ok(1);
+    }
+    Ok(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,14 +634,27 @@ mod tests {
     fn retrieval(list: &[&str]) -> Result<EvalParams, String> {
         match parse_eval_args(&args(list))? {
             EvalTarget::Retrieval(params) => Ok(params),
-            EvalTarget::Decisions(_) => panic!("expected the retrieval target"),
+            EvalTarget::Decisions(_) | EvalTarget::Observations(_) => {
+                panic!("expected the retrieval target")
+            }
         }
     }
 
     fn decisions(list: &[&str]) -> Result<DecisionParams, String> {
         match parse_eval_args(&args(list))? {
             EvalTarget::Decisions(params) => Ok(params),
-            EvalTarget::Retrieval(_) => panic!("expected the decisions target"),
+            EvalTarget::Retrieval(_) | EvalTarget::Observations(_) => {
+                panic!("expected the decisions target")
+            }
+        }
+    }
+
+    fn observations(list: &[&str]) -> Result<ObservationParams, String> {
+        match parse_eval_args(&args(list))? {
+            EvalTarget::Observations(params) => Ok(params),
+            EvalTarget::Retrieval(_) | EvalTarget::Decisions(_) => {
+                panic!("expected the observations target")
+            }
         }
     }
 
@@ -548,7 +663,7 @@ mod tests {
         assert_eq!(
             parse_eval_args(&args(&[])).err(),
             Some(
-                "unknown eval target (expected: ibis eval retrieval|decisions --dataset <path>)"
+                "unknown eval target (expected: ibis eval retrieval|decisions|observations --dataset <path>)"
                     .to_string()
             )
         );
@@ -556,6 +671,36 @@ mod tests {
         assert!(retrieval(&["retrieval", "--dataset", "d.yaml"]).is_ok());
         assert!(decisions(&["decisions"]).is_err());
         assert!(decisions(&["decisions", "--dataset", "d.yaml"]).is_ok());
+        assert!(observations(&["observations"]).is_err());
+        assert!(observations(&["observations", "--dataset", "d.yaml"]).is_ok());
+    }
+
+    #[test]
+    fn parse_observation_flags_and_defaults() {
+        let p = observations(&["observations", "--dataset", "d.yaml"]).expect("parse");
+        assert_eq!(p.ns, "ibis_eval");
+        assert_eq!(p.db, "observations_golden");
+        assert_eq!(p.user, "root");
+        assert_eq!(p.pass, "root");
+
+        let p = observations(&[
+            "observations",
+            "--dataset",
+            "d.yaml",
+            "--url",
+            "ws://127.0.0.1:39000",
+            "--db",
+            "custom",
+            "--out",
+            "o.json",
+        ])
+        .expect("parse");
+        assert_eq!(p.url, "ws://127.0.0.1:39000");
+        assert_eq!(p.db, "custom");
+        assert_eq!(p.out.as_deref(), Some("o.json"));
+
+        assert!(observations(&["observations", "--dataset", "d.yaml", "--wat"]).is_err());
+        assert!(observations(&["observations", "--dataset"]).is_err());
     }
 
     #[test]

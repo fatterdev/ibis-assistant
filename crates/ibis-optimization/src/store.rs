@@ -1,8 +1,8 @@
 //! Cost accounting over the typed executor.
 //!
 //! The search crate carries the same adapter privately; this crate needs its
-//! own because it builds a tracker for `system:memory_consolidation` and
-//! `system:optimizer_raft` usage rows.
+//! own because it builds a tracker for `system:memory_observations`,
+//! `system:memory_consolidation` and `system:optimizer_raft` usage rows.
 
 use std::sync::Arc;
 
@@ -21,7 +21,7 @@ impl CostStore for DbCostStore {
         if !ibis_db::ids::is_safe_record_id(record_id) {
             return Ok(());
         }
-        let sql = format!("UPDATE {record_id} SET tokens_used += {total};");
+        let sql = format!("UPSERT {record_id} SET tokens_used += {total};");
         self.0
             .execute(&sql)
             .await

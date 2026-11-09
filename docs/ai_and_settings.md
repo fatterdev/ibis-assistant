@@ -200,6 +200,56 @@ and a prior run scored 1.000, so the residual is sampling variance at temp
 consolidation decision through `decide()`) is a later phase driven by the
 shadow agreement numbers.
 
+## Derived observations (C8, opt-in)
+
+The observation engine distills the structural graph (shared `root_cause`,
+shared issue, shared symbol, shared file) into derived `kind=observation`
+rows: `store=derived`, deterministic ids (`obs_<signature_hash>`), read-only
+against every mutation surface (edit the source memories and let the next
+pass regenerate). Opt-in via `ai.observations.enabled: true` (default
+`false`); disabled leaves every existing row inert.
+
+| Knob | Default | Behavior |
+|------|---------|----------|
+| `ai.observations.enabled` | `false` | Master switch for the ingest hook and the synthesis pass. |
+| `ai.observations.min_cluster_size` / `max_members` | `2` / `12` | Components below the minimum are dropped; above the cap they are dropped whole, never truncated. |
+| `ai.observations.hub_degree_max` | `10` | Signatures touching more memories are excluded (a hub cannot swallow the repo). |
+| `ai.observations.max_clusters_per_repo` | `25` | Per-repo cluster cap per reconcile pass. |
+| `ai.observations.max_members_examined` | `500` | Eligible-memory bound of the extraction. |
+| `ai.observations.max_scopes_per_project` | `8` | Scope cap per project pass: `team` plus up to 7 personal owners. |
+| `ai.observations.max_llm_summaries_per_pass` | `10` | LLM synthesis cap (the only token-spending stage; bucket `system:memory_observations`). |
+| `ai.observations.families` | all four | Whitelist of `fix_root_cause` \| `issue` \| `symbol` \| `file`; unknown names are dropped with a warning, an all-unknown list falls back to all families. |
+| `ai.observations.decide_shadow` | `false` | D11 shadow measurement of the deterministic accept filters (`observation_accept.v1`, log-only, `local_only:S`). |
+
+Two phases, one algorithm: the **ingest hook** runs a deterministic
+`InvalidateOnly` reconcile after the staleness/anchors passes (seven bounded
+queries + union-find; zero LLM, zero embedding, zero creates — it marks
+changed rows `stale` and archives vanished ones), and the **consolidation
+pass** (`memory_consolidate`, tool and daemon alike) runs `Full`: reconcile +
+one LLM summary per backlog row (`local:M`; personal `local_only:M`;
+temperature 0.001, 512 tokens, one retry on invalid JSON/foreign ids) with a
+deterministic fallback when the provider is absent or fails, then the content
+embedding. Evidence is hashed: an unchanged row is a no-op (zero LLM), an
+embedding-less `llm` row retries the vector only.
+
+Reading surface: derived rows appear in `memory_list` (`store=derived`),
+`memory_search` (semantic), the `ask_project` memory channel and
+`memory_expand` (members via `derived_from`). They are excluded from
+`memory_export` and the `.ibis/memory` projection (a derived row without its
+graph is meaningless and would re-import writable). Hard delete stays
+available to a trusted local actor as maintenance.
+
+Deterministic gate (no LLM, live engine):
+
+```bash
+ibis eval observations --dataset evaluations/observations/dataset.yaml \
+  --url ws://127.0.0.1:38000
+```
+
+Eight golden cases pin exact memberships, scope isolation, hub defense,
+split/merge supersession and the `signature_hash` values (a hash-domain
+change requires regenerating the pins).
+
 ## Plug-and-play keys
 
 Enter API keys in the **wizard** or **Settings UI**; they are stored in `config.json` (plugin data dir when `runtime_mode=plugin`).
@@ -291,6 +341,18 @@ IDE packaging and shared runtime: [ide_host_and_lm_bridge.md](ide_host_and_lm_br
     "response_cache": {
       "enabled": false,
       "ttl_secs": 604800
+    },
+    "observations": {
+      "enabled": false,
+      "min_cluster_size": 2,
+      "max_members": 12,
+      "hub_degree_max": 10,
+      "max_clusters_per_repo": 25,
+      "max_members_examined": 500,
+      "max_scopes_per_project": 8,
+      "max_llm_summaries_per_pass": 10,
+      "families": ["fix_root_cause", "issue", "symbol", "file"],
+      "decide_shadow": false
     }
   }
 }

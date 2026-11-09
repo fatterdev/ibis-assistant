@@ -204,6 +204,8 @@ fn print_help() {
     println!("  eval decisions --dataset <path> --provider ollama|openai_compat --model <id>");
     println!("               [--min-agreement X]");
     println!("               Bounded-decision calibration over the labeled is_noise dataset");
+    println!("  eval observations --dataset <path> [--url <surreal-ws>]");
+    println!("               Deterministic C8 cluster gate (exact memberships + hashes)");
     println!("\nExample:");
     println!("  {bin_name} run -port 3030");
 }
@@ -753,6 +755,8 @@ fn build_search_service(
     service.rerank_mode = ibis_search::rerank::RerankMode::resolve(&cfg.search.rerank);
     service.schema_enforcement =
         ibis_search::memory::details::SchemaEnforcement::resolve(&cfg.memory.schema_enforcement);
+    service.observations =
+        ibis_search::memory::observations::ObservationSettings::from_config(&cfg.ai.observations);
     Arc::new(service)
 }
 

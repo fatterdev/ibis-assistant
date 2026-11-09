@@ -90,6 +90,11 @@ async fn run_pass(state: &Arc<AppState>) {
     // D11: shadow mode ships on (`ai.decide.shadow`); it never changes the
     // consolidation behavior, only the `decide_shadow` log line.
     optimizer.decide_shadow = state.config().ai.decide.shadow;
+    // C8: the observation engine is opt-in (`ai.observations.enabled`) and
+    // rides the same pass (reconcile Full + synthesis).
+    optimizer.observations = ibis_search::memory::observations::ObservationSettings::from_config(
+        &state.config().ai.observations,
+    );
     let projects = match optimizer.pending_observation_projects().await {
         Ok(projects) => projects,
         Err(err) => {

@@ -29,6 +29,8 @@
 pub mod decide_eval;
 pub mod eval;
 pub mod memory_consolidate;
+pub mod observations;
+pub mod observations_eval;
 pub mod raft;
 pub mod store;
 
@@ -45,6 +47,19 @@ pub use memory_consolidate::{
     build_is_noise_state, decide_shadow_record, is_noise_question, parse_consolidation_decision,
     ConsolidationDecision, ConsolidationObservation, DecideShadow, DuplicateMemory,
     IS_NOISE_QUESTION_ID, IS_NOISE_RUBRIC_VERSION,
+};
+pub use observations::{
+    build_observation_prompt, observation_accept_question, parse_and_validate_summary,
+    parse_observation_summary, ObservationDecideShadow, ObservationEvidenceLine,
+    ObservationPassReport, ObservationSummary, ObservationSynthCandidate,
+    OBSERVATION_ACCEPT_QUESTION_ID, OBSERVATION_ACCEPT_RUBRIC_VERSION, OBSERVATION_INSTRUCTIONS,
+    OBSERVATION_SUMMARY_BUCKET,
+};
+pub use observations_eval::{
+    build_observations_report, load_observations_dataset, ObservationCaseResult,
+    ObservationEvalAggregate, ObservationEvalCase, ObservationEvalDataset, ObservationEvalExisting,
+    ObservationEvalExpectation, ObservationEvalFile, ObservationEvalMemory, ObservationEvalReport,
+    ObservationEvalRunner, ObservationEvalSupersede, EVAL_PROJECT,
 };
 pub use raft::Optimizer;
 pub use store::DbCostStore;

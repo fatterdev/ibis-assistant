@@ -37,10 +37,11 @@ jobs:
       - run: node ide-host/src/session_test.mjs
       - run: node ide-host/src/http_actor_test.mjs
 
-  # A1 retrieval eval (ddofds fase 0): golden dataset over a live SurrealDB
-  # sidecar with the deterministic offline embedder. The 4.0 baseline is
-  # recorded in docs/planning/2026-11-02-a1-retrieval-eval-plan.md — the 0.75
-  # floor catches gross ranking regressions.
+  # A1 retrieval eval (ddofds fase 0) + C8 observations eval (fase 5): golden
+  # datasets over a live SurrealDB sidecar with the deterministic offline
+  # embedder (retrieval) and no LLM at all (observations). The 4.0 retrieval
+  # baseline is recorded in docs/planning/2026-11-02-a1-retrieval-eval-plan.md
+  # - the 0.75 floor catches gross ranking regressions.
   retrieval-eval:
     runs-on: ubuntu-24.04
     steps:
@@ -59,12 +60,14 @@ jobs:
       - run: cargo build -p ibis-server
       - name: Retrieval eval (offline embedder)
         run: ./target/debug/ibis eval retrieval --dataset evaluations/retrieval/dataset.yaml --embedder offline --min-recall-5 0.75 --out artifacts/eval/retrieval-offline.json
+      - name: Observations eval (deterministic clusters)
+        run: ./target/debug/ibis eval observations --dataset evaluations/observations/dataset.yaml --out artifacts/eval/observations.json
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: retrieval-eval-report
-          path: artifacts/eval/retrieval-offline.json
+          path: artifacts/eval/
 
   # Live SurrealDB integration gate (remediation plan section 10): the live
   # suites of every crate that owns SurrealQL run against the pinned v4.0.0
@@ -102,5 +105,9 @@ jobs:
         run: cargo test -p ibis-ingest-logs --test live_logs
       - name: Live tests (ibis-search)
         run: cargo test -p ibis-search --test live_memory_estate
+      - name: Live tests (ibis-search observations)
+        run: cargo test -p ibis-search --test live_observations
+      - name: Live tests (ibis-optimization observations)
+        run: cargo test -p ibis-optimization --test live_observations
       - name: Live tests (ibis-server)
         run: cargo test -p ibis-server --test live_commit_txn

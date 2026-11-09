@@ -29,7 +29,7 @@
 //! by id, signatures by `(family_priority, key)`, components by
 //! `(member_count desc, anchor asc)`.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use sha2::{Digest, Sha256};
 
@@ -108,6 +108,136 @@ impl Default for ObservationLimits {
             max_clusters_per_repo: 25,
             max_members_examined: OBSERVATION_MAX_EXAMINED,
         }
+    }
+}
+
+/// Every v1 family in anchor order (the `ai.observations.families` whitelist
+/// default).
+pub const OBSERVATION_FAMILIES: [&str; 4] = [
+    FAMILY_FIX_ROOT_CAUSE,
+    FAMILY_ISSUE,
+    FAMILY_SYMBOL,
+    FAMILY_FILE,
+];
+
+/// Resolved `ai.observations` knobs (C8 step 6). `enabled = false` by
+/// default: the ingest hook and the synthesis pass stay inert until an
+/// operator opts in, exactly like `ai.consolidation`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObservationSettings {
+    /// Master switch for the ingest hook (`InvalidateOnly`) and the
+    /// consolidation-pass synthesis (`Full`).
+    pub enabled: bool,
+    /// Structural extractor tunables (L3 §4.4).
+    pub limits: ObservationLimits,
+    /// Families allowed to produce signatures (whitelist; unknown names are
+    /// dropped with a warning at config resolution).
+    pub families: Vec<String>,
+    /// Scope cap per project pass: `team` plus up to `max_scopes - 1`
+    /// personal owners; the rest wait for the next pass.
+    pub max_scopes_per_project: usize,
+    /// Maximum LLM summaries per pass (the token-spending cap).
+    pub max_llm_summaries_per_pass: usize,
+    /// Optional D11 shadow measurement of the deterministic cluster filters
+    /// (`observation_accept.v1`); default off, log-only.
+    pub decide_shadow: bool,
+}
+
+impl Default for ObservationSettings {
+    fn default() -> Self {
+        ObservationSettings {
+            enabled: false,
+            limits: ObservationLimits::default(),
+            families: OBSERVATION_FAMILIES
+                .iter()
+                .map(|family| family.to_string())
+                .collect(),
+            max_scopes_per_project: 8,
+            max_llm_summaries_per_pass: 10,
+            decide_shadow: false,
+        }
+    }
+}
+
+impl ObservationSettings {
+    /// Resolves the raw `ai.observations` block (C8 step 6): clamp every
+    /// numeric knob, whitelist the families. Never fails the boot; every
+    /// clamp/unknown value logs a warning.
+    pub fn from_config(cfg: &ibis_core::config::ObservationsConfig) -> Self {
+        let mut families: Vec<String> = Vec::new();
+        for raw in &cfg.families {
+            let family = raw.trim().to_lowercase();
+            if OBSERVATION_FAMILIES.contains(&family.as_str()) {
+                if !families.contains(&family) {
+                    families.push(family);
+                }
+            } else {
+                tracing::warn!("unknown ai.observations.families value {raw:?}; dropped")
+            }
+        }
+        if families.is_empty() {
+            tracing::warn!(
+                "ai.observations.families resolved empty; using all families (an empty \
+                 whitelist would archive every derived observation)"
+            );
+            families = OBSERVATION_FAMILIES
+                .iter()
+                .map(|family| family.to_string())
+                .collect();
+        }
+        let clamp = |value: u32, min: u32, max: u32, key: &str| -> u32 {
+            let clamped = value.clamp(min, max);
+            if clamped != value {
+                tracing::warn!("{key} {value} clamped to {clamped}");
+            }
+            clamped
+        };
+        let limits = ObservationLimits {
+            min_cluster_size: clamp(
+                cfg.min_cluster_size,
+                2,
+                50,
+                "ai.observations.min_cluster_size",
+            ) as usize,
+            max_members: clamp(cfg.max_members, 2, 100, "ai.observations.max_members") as usize,
+            hub_degree_max: clamp(cfg.hub_degree_max, 1, 500, "ai.observations.hub_degree_max")
+                as usize,
+            max_clusters_per_repo: clamp(
+                cfg.max_clusters_per_repo,
+                1,
+                500,
+                "ai.observations.max_clusters_per_repo",
+            ) as usize,
+            max_members_examined: clamp(
+                cfg.max_members_examined,
+                1,
+                OBSERVATION_MAX_EXAMINED as u32,
+                "ai.observations.max_members_examined",
+            ) as usize,
+        };
+        ObservationSettings {
+            enabled: cfg.enabled,
+            limits,
+            families,
+            max_scopes_per_project: clamp(
+                cfg.max_scopes_per_project,
+                1,
+                64,
+                "ai.observations.max_scopes_per_project",
+            ) as usize,
+            max_llm_summaries_per_pass: clamp(
+                cfg.max_llm_summaries_per_pass,
+                1,
+                100,
+                "ai.observations.max_llm_summaries_per_pass",
+            ) as usize,
+            decide_shadow: cfg.decide_shadow,
+        }
+    }
+
+    /// True when `family` is in the resolved whitelist.
+    pub fn family_allowed(&self, family: &str) -> bool {
+        self.families.iter().any(|allowed| allowed == family)
     }
 }
 
@@ -1486,7 +1616,8 @@ struct SignatureInputs {
     refs: BTreeMap<String, BTreeSet<String>>,
 }
 
-fn build_signature_inputs(graph: &Extraction) -> SignatureInputs {
+fn build_signature_inputs(graph: &Extraction, families: &[String]) -> SignatureInputs {
+    let allow = |family: &str| families.iter().any(|allowed| allowed == family);
     let mut files_by_memory: BTreeMap<&str, Vec<&ObsFileEdge>> = BTreeMap::new();
     for edge in &graph.file_edges {
         files_by_memory
@@ -1517,7 +1648,7 @@ fn build_signature_inputs(graph: &Extraction) -> SignatureInputs {
         let mut signatures: BTreeSet<Signature> = BTreeSet::new();
         let mut member_refs: BTreeSet<String> = BTreeSet::new();
 
-        if memory.kind == "fix" {
+        if allow(FAMILY_FIX_ROOT_CAUSE) && memory.kind == "fix" {
             if let Some(signature) = fix_root_cause_signature(&memory.root_cause) {
                 signatures.insert(signature);
             }
@@ -1525,26 +1656,32 @@ fn build_signature_inputs(graph: &Extraction) -> SignatureInputs {
 
         if let Some(edges) = files_by_memory.get(memory.id.as_str()) {
             for edge in edges {
-                if let Some(signature) = file_signature(&edge.rel_path) {
-                    signatures.insert(signature);
+                if allow(FAMILY_FILE) {
+                    if let Some(signature) = file_signature(&edge.rel_path) {
+                        signatures.insert(signature);
+                    }
                 }
                 member_refs.insert(edge.file_id.clone());
-                if let Some(symbols) = graph.symbols.get(&edge.file_id) {
-                    let text = format!("{} {}", memory.title, memory.content);
-                    for symbol in symbols {
-                        if symbol_tokens_match(&text, &symbol.symbol_name) {
-                            if let Some(signature) =
-                                symbol_signature(&edge.rel_path, &symbol.symbol_name)
-                            {
-                                signatures.insert(signature);
+                if allow(FAMILY_SYMBOL) {
+                    if let Some(symbols) = graph.symbols.get(&edge.file_id) {
+                        let text = format!("{} {}", memory.title, memory.content);
+                        for symbol in symbols {
+                            if symbol_tokens_match(&text, &symbol.symbol_name) {
+                                if let Some(signature) =
+                                    symbol_signature(&edge.rel_path, &symbol.symbol_name)
+                                {
+                                    signatures.insert(signature);
+                                }
                             }
                         }
                     }
                 }
             }
         }
-        if let Some(signature) = file_signature(&memory.source_path) {
-            signatures.insert(signature);
+        if allow(FAMILY_FILE) {
+            if let Some(signature) = file_signature(&memory.source_path) {
+                signatures.insert(signature);
+            }
         }
 
         let mut commits: BTreeSet<String> = BTreeSet::new();
@@ -1558,15 +1695,17 @@ fn build_signature_inputs(graph: &Extraction) -> SignatureInputs {
             commits.insert(memory.introduced_in.clone());
             member_refs.insert(memory.introduced_in.clone());
         }
-        for commit in &commits {
-            if let Some(edges) = issues_by_commit.get(commit.as_str()) {
-                for edge in edges {
-                    if let Some(issue) = graph.issues.get(&edge.issue_id) {
-                        if let Some(signature) =
-                            issue_signature(&issue.provider, &issue.external_key)
-                        {
-                            signatures.insert(signature);
-                            member_refs.insert(edge.issue_id.clone());
+        if allow(FAMILY_ISSUE) {
+            for commit in &commits {
+                if let Some(edges) = issues_by_commit.get(commit.as_str()) {
+                    for edge in edges {
+                        if let Some(issue) = graph.issues.get(&edge.issue_id) {
+                            if let Some(signature) =
+                                issue_signature(&issue.provider, &issue.external_key)
+                            {
+                                signatures.insert(signature);
+                                member_refs.insert(edge.issue_id.clone());
+                            }
                         }
                     }
                 }
@@ -2051,17 +2190,55 @@ impl SearchService {
         scope: &str,
         mode: ReconcileMode,
     ) -> Result<ReconcileReport> {
+        let scope = ObsScope::parse(scope)?;
+        let settings = ObservationSettings::default();
+        self.reconcile_observations_inner(
+            project_name,
+            &scope,
+            mode,
+            &settings.limits,
+            &settings.families,
+        )
+        .await
+    }
+
+    /// Reconcile with the resolved `ai.observations` settings (C8 step 6):
+    /// limits + family whitelist from one source.
+    pub async fn reconcile_observations_with_settings(
+        &self,
+        project_name: &str,
+        scope: &ObsScope,
+        mode: ReconcileMode,
+        settings: &ObservationSettings,
+    ) -> Result<ReconcileReport> {
+        self.reconcile_observations_inner(
+            project_name,
+            scope,
+            mode,
+            &settings.limits,
+            &settings.families,
+        )
+        .await
+    }
+
+    async fn reconcile_observations_inner(
+        &self,
+        project_name: &str,
+        scope: &ObsScope,
+        mode: ReconcileMode,
+        limits: &ObservationLimits,
+        families: &[String],
+    ) -> Result<ReconcileReport> {
         let db = self.require_db()?;
         let project = project_name.trim();
         if project.is_empty() {
             return Err(SearchError::other("project_name is required"));
         }
-        let scope = ObsScope::parse(scope)?;
         let mut report = ReconcileReport {
             scope: scope.label(),
             ..Default::default()
         };
-        if let ObsScope::Personal(owner) = &scope {
+        if let ObsScope::Personal(owner) = scope {
             if owner.is_empty() {
                 tracing::warn!(
                     "reconcile_observations: personal scope with empty owner skipped (not identifiable)"
@@ -2069,14 +2246,13 @@ impl SearchService {
                 return Ok(report);
             }
         }
-        let limits = ObservationLimits::default();
         let project_key = ibis_db::ids::sanitize_id(project);
 
         let graph = self
-            .extract_observation_graph(db, project, &scope, &limits)
+            .extract_observation_graph(db, project, scope, limits)
             .await?;
-        let signature_inputs = build_signature_inputs(&graph);
-        let component_set = build_components(&signature_inputs.inputs, &limits);
+        let signature_inputs = build_signature_inputs(&graph, families);
+        let component_set = build_components(&signature_inputs.inputs, limits);
 
         for signature in &component_set.hub_excluded {
             tracing::info!(
@@ -2136,7 +2312,7 @@ impl SearchService {
             .map(|component| {
                 compute_component(
                     &project_key,
-                    &scope,
+                    scope,
                     component,
                     &signature_inputs.members,
                     &signature_inputs.refs,
@@ -2327,6 +2503,96 @@ impl SearchService {
 
         Ok(report)
     }
+
+    /// C8 step 6 hook: reconcile every scope of one project in `mode`
+    /// (`InvalidateOnly` from the ingest hook; the synthesis pass drives
+    /// `Full` per scope itself). Returns one report per scope.
+    pub async fn reconcile_observations_for_project(
+        &self,
+        project_name: &str,
+        mode: ReconcileMode,
+        settings: &ObservationSettings,
+    ) -> Result<Vec<ReconcileReport>> {
+        let db = self.require_db()?;
+        let scopes = observation_scopes_for_project(
+            db.as_ref(),
+            project_name,
+            settings.max_scopes_per_project,
+        )
+        .await?;
+        let mut reports = Vec::with_capacity(scopes.len());
+        for scope in &scopes {
+            reports.push(
+                self.reconcile_observations_with_settings(project_name, scope, mode, settings)
+                    .await?,
+            );
+        }
+        Ok(reports)
+    }
+}
+
+/// Discovers the reconcile scopes of one project: `team` first, then every
+/// distinct personal owner holding eligible evidence (empty owners skipped),
+/// capped at `max_scopes` total. Shared by the ingest hook and the synthesis
+/// pass so both walk the exact same scope set.
+pub async fn observation_scopes_for_project(
+    db: &dyn Executor,
+    project_name: &str,
+    max_scopes: usize,
+) -> Result<Vec<ObsScope>> {
+    let project = project_name.trim();
+    if project.is_empty() {
+        return Err(SearchError::other(
+            "observation scopes require a project name",
+        ));
+    }
+    let repo_id = repo_record_id(project);
+    let mut vars = Vars::new();
+    let kinds: Vec<Value> = OBSERVATION_KINDS
+        .iter()
+        .map(|kind| Value::from_t(*kind))
+        .collect();
+    vars.insert("kinds".into(), Value::from_t(kinds));
+    let query = format!(
+        "SELECT owner FROM {TABLE_MEMORY} \
+         WHERE project = {repo_id} AND status = 'current' AND kind IN $kinds \
+         AND (store = NONE OR store != 'derived') AND visibility = 'personal' \
+         GROUP BY owner;"
+    );
+    let outcome = db
+        .smart_query(&query, vars)
+        .await
+        .map_err(|e| SearchError::other(format!("observation scopes: {e}")))?;
+    let rows = rows::normalize_rows(&outcome)
+        .ok_or_else(|| SearchError::other("observation scopes: unexpected result shape"))?;
+    let mut owners: Vec<String> = Vec::new();
+    let mut seen = HashSet::new();
+    for row in rows::object_rows(&rows) {
+        let owner = rows::scalar_string(rows::field(row, "owner"))
+            .trim()
+            .to_string();
+        // An owner-less personal scope is not identifiable (L3 edge case).
+        if owner.is_empty() || !seen.insert(owner.clone()) {
+            continue;
+        }
+        owners.push(owner);
+    }
+    owners.sort();
+    let max_scopes = max_scopes.max(1);
+    let mut scopes = vec![ObsScope::Team];
+    for owner in owners {
+        if scopes.len() >= max_scopes {
+            tracing::warn!(
+                target: "observation_scopes_truncated",
+                project = project,
+                cap = max_scopes,
+                "observation scope cap reached; remaining personal scopes deferred"
+            );
+            break;
+        }
+        scopes.push(ObsScope::Personal(owner));
+    }
+    Ok(scopes)
 }
 
 #[cfg(test)]
@@ -4064,5 +4330,113 @@ mod tests {
             .cloned()
             .expect("memory window");
         assert!(sql.contains("updated_at, store, details"), "{sql}");
+    }
+
+    // ------------------------------------------------------------------
+    // C8 step 6 — ai.observations resolution + scope discovery
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn observation_settings_from_config_clamps_and_whitelists() {
+        let dflt =
+            ObservationSettings::from_config(&ibis_core::config::ObservationsConfig::default());
+        assert_eq!(dflt, ObservationSettings::default());
+
+        let resolved = ObservationSettings::from_config(&ibis_core::config::ObservationsConfig {
+            enabled: true,
+            min_cluster_size: 1,
+            max_members: 999,
+            hub_degree_max: 0,
+            max_clusters_per_repo: 0,
+            max_members_examined: 9999,
+            max_scopes_per_project: 0,
+            max_llm_summaries_per_pass: 0,
+            families: vec!["file".into(), "bogus".into(), "file".into()],
+            decide_shadow: true,
+        });
+        assert!(resolved.enabled);
+        assert_eq!(resolved.limits.min_cluster_size, 2);
+        assert_eq!(resolved.limits.max_members, 100);
+        assert_eq!(resolved.limits.hub_degree_max, 1);
+        assert_eq!(resolved.limits.max_clusters_per_repo, 1);
+        assert_eq!(
+            resolved.limits.max_members_examined,
+            OBSERVATION_MAX_EXAMINED
+        );
+        assert_eq!(resolved.max_scopes_per_project, 1);
+        assert_eq!(resolved.max_llm_summaries_per_pass, 1);
+        assert_eq!(resolved.families, vec![FAMILY_FILE.to_string()]);
+        assert!(resolved.family_allowed(FAMILY_FILE));
+        assert!(!resolved.family_allowed(FAMILY_FIX_ROOT_CAUSE));
+        assert!(resolved.decide_shadow);
+
+        // An all-unknown whitelist falls back to every family (never an
+        // accidental archive-everything configuration).
+        let all_unknown =
+            ObservationSettings::from_config(&ibis_core::config::ObservationsConfig {
+                families: vec!["wat".into()],
+                ..Default::default()
+            });
+        assert_eq!(all_unknown.families.len(), OBSERVATION_FAMILIES.len());
+    }
+
+    #[test]
+    fn family_whitelist_restricts_signature_extraction() {
+        let graph = Extraction {
+            memories: vec![ObsMemoryRow {
+                id: "memory:mem_a".to_string(),
+                kind: "fix".to_string(),
+                title: "Crash on empty discovery".to_string(),
+                content: "The wizard crashes on an empty discovery root.".to_string(),
+                details: serde_json::json!({ "root_cause": ROOT_CAUSE }),
+                root_cause: ROOT_CAUSE.to_string(),
+                source_path: "src/wizard.rs".to_string(),
+                introduced_in: String::new(),
+            }],
+            ..Default::default()
+        };
+        let all = build_signature_inputs(
+            &graph,
+            &OBSERVATION_FAMILIES
+                .iter()
+                .map(|family| family.to_string())
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(all.inputs[0].signatures.len(), 2, "fix + file");
+        let only_file = build_signature_inputs(&graph, &[FAMILY_FILE.to_string()]);
+        assert_eq!(only_file.inputs[0].signatures.len(), 1);
+        assert_eq!(only_file.inputs[0].signatures[0].family, FAMILY_FILE);
+    }
+
+    #[tokio::test]
+    async fn observation_scopes_are_team_first_sorted_and_capped() {
+        let fake = Arc::new(FakeDb::new(vec![(
+            "SELECT owner FROM memory",
+            rows_of(vec![
+                obj(vec![("owner", Value::from_t("bob"))]),
+                obj(vec![("owner", Value::from_t("alice"))]),
+                obj(vec![("owner", Value::from_t(""))]),
+                obj(vec![("owner", Value::from_t("alice"))]),
+            ]),
+        )]));
+        let scopes = observation_scopes_for_project(fake.as_ref(), PROJ, 2)
+            .await
+            .expect("scopes");
+        assert_eq!(
+            scopes,
+            vec![ObsScope::Team, ObsScope::Personal("alice".to_string())],
+            "team first, owners sorted, empty owner skipped, cap respected"
+        );
+        let all = observation_scopes_for_project(fake.as_ref(), PROJ, 8)
+            .await
+            .expect("scopes");
+        assert_eq!(
+            all,
+            vec![
+                ObsScope::Team,
+                ObsScope::Personal("alice".to_string()),
+                ObsScope::Personal("bob".to_string())
+            ]
+        );
     }
 }

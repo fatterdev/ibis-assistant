@@ -44,6 +44,10 @@ pub struct Optimizer {
     /// `ai.decide.shadow` by the server (product default true); the bare
     /// constructor stays off so library callers opt in.
     pub decide_shadow: bool,
+    /// C8: derived-observation settings (`ai.observations`), resolved by the
+    /// server wiring; the bare constructor keeps both the ingest hook and the
+    /// synthesis pass disabled.
+    pub observations: ibis_search::memory::observations::ObservationSettings,
 }
 
 impl Optimizer {
@@ -63,6 +67,7 @@ impl Optimizer {
             dup_similarity_min: crate::memory_consolidate::DUP_SIMILARITY_MIN,
             schema_enforcement: ibis_search::memory::details::SchemaEnforcement::default(),
             decide_shadow: false,
+            observations: ibis_search::memory::observations::ObservationSettings::default(),
         }
     }
 

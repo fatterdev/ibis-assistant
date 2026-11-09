@@ -292,6 +292,25 @@ impl Optimizer {
                 decision.kind
             );
         }
+
+        // C8 step 5: derived-observation reconcile + synthesis, in the same
+        // pass (opt-in via `ai.observations.enabled`; default off). A failure
+        // never fails the consolidation — the deterministic lifecycle keeps
+        // staleness correct without the LLM stage.
+        if self.observations.enabled {
+            match self.observations_pass(project_name).await {
+                Ok(report) => tracing::info!(
+                    "ObservationsPass: {} scope(s), {} summarized, {} fallback, {} embedding retry, {} deferred, {} failed",
+                    report.scopes,
+                    report.summarized,
+                    report.fallbacks,
+                    report.embedding_retries,
+                    report.deferred,
+                    report.failed
+                ),
+                Err(err) => tracing::warn!("ObservationsPass for {project_name}: {err}"),
+            }
+        }
         Ok(())
     }
 

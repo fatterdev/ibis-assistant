@@ -1,0 +1,276 @@
+# C8 derived-observations golden dataset (`ibis eval observations`).
+#
+# Each case seeds one memory estate in a scratch namespace, runs the
+# deterministic reconcile (`Full`) for every scope, and compares exact
+# memberships, statuses, scope isolation and the pinned `signature_hash`
+# values (project `golden`; a hash-domain change requires regenerating the
+# pins — the runner fails loudly on drift).
+#
+# Case map (L3 fasi 4-5 §Test / observations_eval_exact_clusters):
+#   o01 same root_cause · o02 shared file · o03 shared issue · o04 hub ·
+#   o05 singleton · o06 scope isolation · o07 split · o08 merge
+version: "1"
+cases:
+  - id: o01_fix_root_cause
+    note: Two fixes with the same root_cause become one observation.
+    memories:
+      - id: g_fix_a
+        kind: fix
+        title: Wizard crashes on empty discovery root
+        content: The discovery wizard panicked when the root was empty.
+        root_cause: empty discovery root
+      - id: g_fix_b
+        kind: fix
+        title: Empty root breaks the discovery wizard
+        content: Guard the discovery root before the wizard step runs.
+        root_cause: empty discovery root
+    expected:
+      - anchor: "fix_root_cause|empty discovery root"
+        members: [g_fix_a, g_fix_b]
+        signature_hash: "fe5b60c129189ef09c4f468bac3f6814"
+
+  - id: o02_shared_file
+    note: Two memories anchored to the same source file share the file family.
+    memories:
+      - id: g_file_a
+        kind: decision
+        title: Discovery module owns the wizard steps
+        content: All wizard steps live in the discovery module.
+        source_path: src/wizard/discovery.rs
+      - id: g_file_b
+        kind: fact
+        title: The wizard registers steps statically
+        content: Steps are registered at module load time.
+        source_path: src/wizard/discovery.rs
+    expected:
+      - anchor: "file|src/wizard/discovery.rs"
+        members: [g_file_a, g_file_b]
+        signature_hash: "64835d810e0c2811b734a7613546da77"
+
+  - id: o03_shared_issue
+    note: Two memories implemented through the same issue share the issue family.
+    memories:
+      - id: g_issue_a
+        kind: fact
+        title: Retry budget is bounded
+        content: The retry loop stops after three attempts.
+        commit: c0ffee1
+        issue: "github#123"
+      - id: g_issue_b
+        kind: decision
+        title: Backoff strategy for provider failures
+        content: Exponential backoff caps at two seconds.
+        commit: c0ffee1
+        issue: "github#123"
+    expected:
+      - anchor: "issue|github#123"
+        members: [g_issue_a, g_issue_b]
+        signature_hash: "838a93ee33bab2158190b5c2060f5f47"
+
+  - id: o04_hub_defense
+    note: An 11-member file hub is excluded; the genuine fix pair still clusters.
+    memories:
+      - id: g_hub_01
+        kind: fact
+        title: Hub fact 01
+        content: Shared hub content 01.
+        source_path: src/main.rs
+      - id: g_hub_02
+        kind: fact
+        title: Hub fact 02
+        content: Shared hub content 02.
+        source_path: src/main.rs
+      - id: g_hub_03
+        kind: fact
+        title: Hub fact 03
+        content: Shared hub content 03.
+        source_path: src/main.rs
+      - id: g_hub_04
+        kind: fact
+        title: Hub fact 04
+        content: Shared hub content 04.
+        source_path: src/main.rs
+      - id: g_hub_05
+        kind: fact
+        title: Hub fact 05
+        content: Shared hub content 05.
+        source_path: src/main.rs
+      - id: g_hub_06
+        kind: fact
+        title: Hub fact 06
+        content: Shared hub content 06.
+        source_path: src/main.rs
+      - id: g_hub_07
+        kind: fact
+        title: Hub fact 07
+        content: Shared hub content 07.
+        source_path: src/main.rs
+      - id: g_hub_08
+        kind: fact
+        title: Hub fact 08
+        content: Shared hub content 08.
+        source_path: src/main.rs
+      - id: g_hub_09
+        kind: fact
+        title: Hub fact 09
+        content: Shared hub content 09.
+        source_path: src/main.rs
+      - id: g_hub_10
+        kind: fact
+        title: Hub fact 10
+        content: Shared hub content 10.
+        source_path: src/main.rs
+      - id: g_hub_11
+        kind: fact
+        title: Hub fact 11
+        content: Shared hub content 11.
+        source_path: src/main.rs
+      - id: g_fix_hub_a
+        kind: fix
+        title: Cli panics on empty flag value
+        content: Empty --name crashed the cli.
+        root_cause: empty discovery root
+      - id: g_fix_hub_b
+        kind: fix
+        title: Empty flag breaks the cli step
+        content: Guard the flag before the wizard step runs.
+        root_cause: empty discovery root
+    expected:
+      - anchor: "fix_root_cause|empty discovery root"
+        members: [g_fix_hub_a, g_fix_hub_b]
+        signature_hash: "fe5b60c129189ef09c4f468bac3f6814"
+
+  - id: o05_singleton_dropped
+    note: A single eligible memory never persists a component.
+    memories:
+      - id: g_solo
+        kind: fix
+        title: One-off flake
+        content: A one-off flake with no sibling evidence.
+        root_cause: one off flake
+    expected: []
+
+  - id: o06_scope_isolation
+    note: Team and personal evidence never mix; each scope gets its own row.
+    memories:
+      - id: g_team_a
+        kind: fix
+        title: Team scope leak fix A
+        content: Team fix with the shared root cause.
+        root_cause: scope leak
+      - id: g_team_b
+        kind: fix
+        title: Team scope leak fix B
+        content: Another team fix with the shared root cause.
+        root_cause: scope leak
+      - id: g_pers_a
+        kind: fix
+        title: Personal scope leak fix A
+        content: Personal fix with the shared root cause.
+        root_cause: scope leak
+        visibility: personal
+        owner: alice
+      - id: g_pers_b
+        kind: fix
+        title: Personal scope leak fix B
+        content: Another personal fix with the shared root cause.
+        root_cause: scope leak
+        visibility: personal
+        owner: alice
+    expected:
+      - anchor: "fix_root_cause|scope leak"
+        members: [g_team_a, g_team_b]
+        signature_hash: "dd47f2b79ebebdaaee80c46fd593d783"
+      - anchor: "fix_root_cause|scope leak"
+        members: [g_pers_a, g_pers_b]
+        visibility: personal
+        owner: alice
+        signature_hash: "2da96aea71b19fd8aa815b7e17f51d3d"
+
+  - id: o07_split
+    note: A vanished signature with a shared core of 2 is superseded by the new component.
+    existing:
+      - key: old_split
+        anchor: "file|src/legacy.rs"
+        members: [g_split_a, g_split_b, g_split_c]
+        title: Legacy file cluster
+        content: Seeded pre-existing observation.
+    memories:
+      - id: g_split_a
+        kind: fix
+        title: Split core fix A
+        content: Shares the split core root cause.
+        root_cause: split core
+      - id: g_split_b
+        kind: fix
+        title: Split core fix B
+        content: Also shares the split core root cause.
+        root_cause: split core
+      - id: g_split_c
+        kind: fix
+        title: Unrelated old member
+        content: Carries a root cause that forms no cluster.
+        root_cause: unrelated old member
+    expected:
+      - anchor: "fix_root_cause|split core"
+        members: [g_split_a, g_split_b]
+        signature_hash: "abf74ae723fd2e9d34521e4c9ba85875"
+      - anchor: "file|src/legacy.rs"
+        members: [g_split_a, g_split_b, g_split_c]
+        status: superseded
+        signature_hash: "0dc694a314c5bc576422309df358f0e6"
+    supersedes:
+      - new: "fix_root_cause|split core"
+        old: "file|src/legacy.rs"
+
+  - id: o08_merge
+    note: One new component with a shared core of 2 supersedes both old rows.
+    existing:
+      - key: old_x
+        anchor: "fix_root_cause|alpha cause"
+        members: [g_merge_a, g_merge_b]
+        title: Old alpha cluster
+        content: Seeded pre-existing observation.
+      - key: old_y
+        anchor: "fix_root_cause|beta cause"
+        members: [g_merge_c, g_merge_d]
+        title: Old beta cluster
+        content: Seeded pre-existing observation.
+    memories:
+      - id: g_merge_a
+        kind: fix
+        title: Merge fix A
+        content: First memory of the merged pattern.
+        root_cause: common
+      - id: g_merge_b
+        kind: fix
+        title: Merge fix B
+        content: Second memory of the merged pattern.
+        root_cause: common
+      - id: g_merge_c
+        kind: fix
+        title: Merge fix C
+        content: Third memory of the merged pattern.
+        root_cause: common
+      - id: g_merge_d
+        kind: fix
+        title: Merge fix D
+        content: Fourth memory of the merged pattern.
+        root_cause: common
+    expected:
+      - anchor: "fix_root_cause|common"
+        members: [g_merge_a, g_merge_b, g_merge_c, g_merge_d]
+        signature_hash: "0b9156242e343e2361e3b60c57215f8c"
+      - anchor: "fix_root_cause|alpha cause"
+        members: [g_merge_a, g_merge_b]
+        status: superseded
+        signature_hash: "c774499975dcdcb036dec7fd14db8c94"
+      - anchor: "fix_root_cause|beta cause"
+        members: [g_merge_c, g_merge_d]
+        status: superseded
+        signature_hash: "e11857fb8c43659ee911670e250d86fd"
+    supersedes:
+      - new: "fix_root_cause|common"
+        old: "fix_root_cause|alpha cause"
+      - new: "fix_root_cause|common"
+        old: "fix_root_cause|beta cause"

@@ -181,6 +181,9 @@ impl AppState {
         service.schema_enforcement = ibis_search::memory::details::SchemaEnforcement::resolve(
             &cfg.memory.schema_enforcement,
         );
+        service.observations = ibis_search::memory::observations::ObservationSettings::from_config(
+            &cfg.ai.observations,
+        );
         *self.search.write().unwrap() = Arc::new(service);
     }
 

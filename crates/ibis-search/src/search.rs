@@ -149,6 +149,9 @@ pub struct SearchService {
     /// warn (default) accepts partial details with a warning, strict
     /// rejects writes missing a kind's required keys.
     pub schema_enforcement: SchemaEnforcement,
+    /// Derived-observation engine (`ai.observations` — C8 step 6): the
+    /// ingest hook reads `enabled` + limits from here; default off.
+    pub observations: crate::memory::observations::ObservationSettings,
     /// Process-local TTL cache of ancestor sets (lazily created).
     pub(crate) ancestor_cache: std::sync::OnceLock<ibis_git::AncestorCache>,
 }
@@ -169,6 +172,7 @@ impl Default for SearchService {
             query_expansion: QueryExpansionMode::default(),
             rerank_mode: RerankMode::default(),
             schema_enforcement: SchemaEnforcement::default(),
+            observations: crate::memory::observations::ObservationSettings::default(),
             ancestor_cache: std::sync::OnceLock::new(),
         }
     }
