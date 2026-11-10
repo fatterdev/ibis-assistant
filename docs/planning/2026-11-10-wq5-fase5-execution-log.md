@@ -18,7 +18,7 @@
 |---|---|---|
 | 1 | E16 — schema `task` + modello puro + config `tasks.*` + probe live UNIQUE/NONE | done (`ba89f4c`) |
 | 2 | E16 — `DbTaskStore` + runner + `PassCheckpoint` + recovery/prune + shutdown | done (`f9b00d5`) |
-| 3 | E16 — tool `memory_consolidate` + risorse `ibis://tasks` + notifiche + fixture | da fare |
+| 3 | E16 - tool `memory_consolidate` + risorse `ibis://tasks` + notifiche + fixture | done (`90bf10e`) |
 | 4 | F17 — feature `otel`, config, registry, shutdown, CI | da fare |
 | 5 | F17 — span `mcp.tool`, `ai.generate`, `ai.embed`, `memory.consolidate` | da fare |
 | 6 | G19 — renderer + merge marker + scrittura atomica + `--check`/`--dry-run` | da fare |
@@ -53,6 +53,18 @@
 - **Live:** `crates/ibis-server/tests/live_tasks.rs` 4/4 su 4.0.0 — claim/reclaim/fencing/checkpoint, recovery 3 reclaim poi failed, shutdown requeue, prune `RETURN BEFORE`.
 - **Unit:** 7/7 runner con fake store/pass; `cargo test --workspace --no-fail-fast` 84 suite, 0 failure; clippy `-D warnings` verde.
 - **Aperto (follow-up dichiarati):** test loop-level “item N+1 non parte dopo lease lost” (oggi test diretto su `should_continue`), test `observations_pass` con budget residuo 0, asserzione della proiezione `maybe_project_memory`; prossimo step 3.
+
+## Step 3 — E16 superfici: tool, risorse, notifiche (2026-11-10)
+
+- **Commit:** `90bf10e` `feat(tasks): tool, task resources and notifications (E16 ddofds)`.
+- **Tool `memory_consolidate`:** stessi argomenti; `begin` create+claim restituisce subito; testi “started” / “Resumed … attempt N” / “already running … status running, attempt N” con id; `database not connected` prima dello spawn; actor in `requested_by`; il pass usa il progetto salvato nel task.
+- **Risorse:** `ibis://tasks` (attivi, JSON) e `ibis://tasks/{id}`; template `ibis://tasks/{id}` (4 totali); collection `ibis://tasks` in `resources/list`; id JSON reso `task:<hex>`; DB assente = resource not found.
+- **Notifiche:** `ResourceTaskEvents` su create/claim/finish/requeue (non checkpoint), fire di `ibis://tasks` + varianti plain/hex/guillemet del per-id; collegato al boot e al `bind_db` plugin.
+- **Fixture:** rigenerata solo per la descrizione di `memory_consolidate` (diff 1 riga); contract 58 invariato.
+- **Test:** `resources_protocol_test` 5/5 (template 4, list 3), `curator_app_test` 3/3, `discovery_snapshot_test` verde, `live_tasks` 5/5 (begin claim-once + JSON row).
+- **Gate completo:** fmt ok; clippy `-D warnings` ok; workspace **84 suite, 0 failure**; `cargo build -p ibis-server` ok; retrieval **21/21** MRR 0.952 / r@5 0.976 / r@15 1.0; observations **8/8** (primo run 7/8 per errore transitorio di transazione sul sidecar in-memory, rerun verde); live 4.0.0: `live_surreal` 12/12, `live_memory_estate` 13/13, `live_observations` (search) 12/12 + (optimization) 1/1, `live_commit_txn` 2/2, `live_tasks` 5/5.
+- **Aperto:** test live diretto di `read_parsed` (`task_resources_read_rows`) e della notifica `resource_updated_fires_on_state_change`; oggi coperti parse/JSON unit + live row serialization. Prossimo step 4 (F17).
+
 
 
 
