@@ -39,16 +39,19 @@ pub fn enabled(cfg: &Config) -> bool {
 /// Starts the loop when the gate passes; when an operator opted in but the
 /// runtime cannot honor it, the reason is logged (the setting must never be
 /// silently dead).
-pub fn start(state: &Arc<AppState>, shutdown: CancellationToken) {
+pub fn start(
+    state: &Arc<AppState>,
+    shutdown: CancellationToken,
+) -> Option<tokio::task::JoinHandle<()>> {
     let cfg = state.config();
     if !enabled(&cfg) {
-        return;
+        return None;
     }
     if state.db().is_none() {
         tracing::warn!(
             "Consolidation loop enabled but no database is connected — not started (degraded mode)"
         );
-        return;
+        return None;
     }
     let interval = Duration::from_secs(cfg.ai.consolidation.interval_secs.max(MIN_INTERVAL_SECS));
     tracing::info!(
@@ -56,7 +59,7 @@ pub fn start(state: &Arc<AppState>, shutdown: CancellationToken) {
         interval.as_secs()
     );
     let state = state.clone();
-    tokio::spawn(async move {
+    Some(tokio::spawn(async move {
         // First tick fires immediately: a daemon restart drains its backlog
         // right away. `Delay` keeps a slow pass from bursting catch-up ticks,
         // and the single-task select keeps passes strictly sequential.
@@ -69,7 +72,7 @@ pub fn start(state: &Arc<AppState>, shutdown: CancellationToken) {
             }
         }
         tracing::info!("Consolidation loop stopped");
-    });
+    }))
 }
 
 /// One pass: discover the projects that still hold `current` observations
@@ -102,21 +105,87 @@ async fn run_pass(state: &Arc<AppState>) {
             return;
         }
     };
-    if projects.is_empty() {
+    // E16 §4.2: queued tasks run first (their params/checkpoint are the
+    // resume source), then discovery adds new projects. A queued task for a
+    // project with no backlog still runs and releases its `active_key`.
+    let mut queue: Vec<String> = Vec::new();
+    if let Some(tasks) = state.tasks() {
+        match tasks.active().await {
+            Ok(active) => {
+                for row in active {
+                    if let Some(project) = row.project {
+                        if !queue.contains(&project) {
+                            queue.push(project);
+                        }
+                    }
+                }
+            }
+            Err(err) => tracing::warn!("ConsolidationLoop: active task discovery failed: {err}"),
+        }
+    }
+    for project in projects {
+        if !queue.contains(&project) {
+            queue.push(project);
+        }
+    }
+    if queue.is_empty() {
         return;
     }
-    tracing::info!("ConsolidationLoop: pass over {} project(s)", projects.len());
-    for project in projects {
-        match optimizer
-            .consolidate_loop(&project, MAX_ITEMS_PER_PROJECT)
+    tracing::info!("ConsolidationLoop: pass over {} project(s)", queue.len());
+    for project in queue {
+        let Some(tasks) = state.tasks() else {
+            match optimizer
+                .consolidate_loop(&project, MAX_ITEMS_PER_PROJECT, None)
+                .await
+            {
+                Err(err) => tracing::warn!("ConsolidationLoop: pass for {project} failed: {err}"),
+                Ok(()) => {
+                    tracing::info!("ConsolidationLoop: pass for {project} completed");
+                    state.maybe_project_memory(&project).await;
+                }
+            }
+            continue;
+        };
+        let max_summaries = state
+            .config()
+            .ai
+            .observations
+            .max_llm_summaries_per_pass
+            .max(1) as usize;
+        match tasks
+            .run_project(
+                &optimizer,
+                &project,
+                MAX_ITEMS_PER_PROJECT,
+                max_summaries,
+                "ibis.consolidation_loop",
+            )
             .await
         {
-            Err(err) => tracing::warn!("ConsolidationLoop: pass for {project} failed: {err}"),
-            Ok(()) => {
-                tracing::info!("ConsolidationLoop: pass for {project} completed");
+            Ok(crate::tasks::TaskRunOutcome::Completed { task_id }) => {
+                tracing::info!("ConsolidationLoop: pass for {project} completed ({task_id})");
                 // Same projection refresh as the memory_consolidate tool.
                 state.maybe_project_memory(&project).await;
             }
+            Ok(crate::tasks::TaskRunOutcome::Degraded { reason }) => {
+                tracing::warn!(
+                    "ConsolidationLoop: pass for {project} ran without a lease: {reason}"
+                );
+                state.maybe_project_memory(&project).await;
+            }
+            Ok(crate::tasks::TaskRunOutcome::AlreadyRunning { task_id }) => {
+                tracing::info!("ConsolidationLoop: pass for {project} already running ({task_id})");
+            }
+            Ok(crate::tasks::TaskRunOutcome::Requeued { task_id }) => {
+                tracing::info!("ConsolidationLoop: pass for {project} requeued ({task_id})");
+            }
+            Ok(crate::tasks::TaskRunOutcome::LeaseLost { task_id }) => {
+                tracing::warn!("ConsolidationLoop: lease lost for {project} ({task_id})");
+            }
+            Ok(crate::tasks::TaskRunOutcome::Failed { task_id, error }) => {
+                tracing::warn!("ConsolidationLoop: pass for {project} failed ({task_id}): {error}");
+            }
+            Err(err) => tracing::warn!("ConsolidationLoop: pass for {project} failed: {err}"),
         }
     }
 }

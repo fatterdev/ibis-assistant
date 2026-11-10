@@ -978,7 +978,7 @@ async fn memory_consolidate(
             ibis_search::memory::observations::ObservationSettings::from_config(
                 &state.config().ai.observations,
             );
-        match optimizer.consolidate_loop(&project, max_items).await {
+        match optimizer.consolidate_loop(&project, max_items, None).await {
             Err(err) => tracing::error!("Memory consolidation failed: {err}"),
             Ok(()) => {
                 tracing::info!(

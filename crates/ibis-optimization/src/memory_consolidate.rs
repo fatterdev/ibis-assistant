@@ -15,6 +15,7 @@ use ibis_search::search::SearchService;
 
 use crate::raft::Optimizer;
 use crate::store::DbCostStore;
+use crate::tasks::PassCheckpoint;
 
 const DEFAULT_CONSOLIDATION_ITEMS: usize = 20;
 const NOISE_RETENTION: &str = "7d";
@@ -161,6 +162,7 @@ impl Optimizer {
         &self,
         project_name: &str,
         max_items: usize,
+        checkpoint: Option<&dyn PassCheckpoint>,
     ) -> Result<(), String> {
         let db = self.db.as_ref().ok_or("database not connected")?;
         if self.ai.is_none() {
@@ -180,6 +182,9 @@ impl Optimizer {
             observations.len(),
             project_name
         );
+        if let Some(cp) = checkpoint {
+            cp.items_total(observations.len());
+        }
 
         let memory_service: Option<Arc<SearchService>> = match &self.search {
             Some(s) => Some(s.clone()),
@@ -191,7 +196,12 @@ impl Optimizer {
         // D11: a failing decide shadow disables the measurement for the rest
         // of the pass (missing tier-S model, malformed output) and logs once.
         let mut shadow_skipped = false;
+        let mut stopped = false;
         for (index, observation) in observations.iter().enumerate() {
+            if checkpoint.is_some_and(|cp| !cp.should_continue()) {
+                stopped = true;
+                break;
+            }
             let duplicates = match self
                 .find_duplicate_memories(db, project_name, observation)
                 .await
@@ -224,6 +234,9 @@ impl Optimizer {
                             "ConsolidateLoop: distillation failed for {}: {e}",
                             observation.id
                         );
+                        if let Some(cp) = checkpoint {
+                            cp.item_done(&observation.id, "error", observations.len());
+                        }
                         continue;
                     }
                 },
@@ -265,6 +278,9 @@ impl Optimizer {
                         observation.id
                     );
                 }
+                if let Some(cp) = checkpoint {
+                    cp.item_done(&observation.id, "noise", observations.len());
+                }
                 continue;
             }
             let Some(memory_service) = &memory_service else {
@@ -282,6 +298,9 @@ impl Optimizer {
                     "ConsolidateLoop: persistence failed for {}: {e}",
                     observation.id
                 );
+                if let Some(cp) = checkpoint {
+                    cp.item_done(&observation.id, "error", observations.len());
+                }
                 continue;
             }
             tracing::info!(
@@ -291,14 +310,17 @@ impl Optimizer {
                 observation.id,
                 decision.kind
             );
+            if let Some(cp) = checkpoint {
+                cp.item_done(&observation.id, "ok", observations.len());
+            }
         }
 
         // C8 step 5: derived-observation reconcile + synthesis, in the same
         // pass (opt-in via `ai.observations.enabled`; default off). A failure
         // never fails the consolidation — the deterministic lifecycle keeps
         // staleness correct without the LLM stage.
-        if self.observations.enabled {
-            match self.observations_pass(project_name).await {
+        if !stopped && self.observations.enabled {
+            match self.observations_pass(project_name, checkpoint).await {
                 Ok(report) => tracing::info!(
                     "ObservationsPass: {} scope(s), {} summarized, {} fallback, {} embedding retry, {} deferred, {} failed",
                     report.scopes,
@@ -320,7 +342,7 @@ impl Optimizer {
         project_name: &str,
         max_items: usize,
     ) -> Result<(), String> {
-        self.consolidate_loop(project_name, max_items).await
+        self.consolidate_loop(project_name, max_items, None).await
     }
 
     /// Projects that still hold `current` observations (F4 §B.5: the
@@ -1316,7 +1338,7 @@ mod tests {
         ]));
         let opt = optimizer(db.clone(), ai.clone());
 
-        opt.consolidate_loop("ibis", 5)
+        opt.consolidate_loop("ibis", 5, None)
             .await
             .expect("ConsolidateLoop failed");
         let hints = ai.route_hints.lock().unwrap().clone();
@@ -1667,7 +1689,7 @@ mod tests {
         let mut opt = optimizer(db.clone(), ai.clone());
         opt.decide_shadow = true;
 
-        opt.consolidate_loop("ibis", 5)
+        opt.consolidate_loop("ibis", 5, None)
             .await
             .expect("ConsolidateLoop failed");
         let hints = ai.route_hints.lock().unwrap().clone();
@@ -1713,7 +1735,7 @@ mod tests {
 
         let events = install_decide_shadow_capture();
         events.lock().unwrap().clear();
-        opt.consolidate_loop("ibis", 5)
+        opt.consolidate_loop("ibis", 5, None)
             .await
             .expect("ConsolidateLoop failed");
 
@@ -1773,7 +1795,7 @@ mod tests {
         let mut opt = optimizer(db.clone(), ai.clone());
         opt.decide_shadow = true;
 
-        opt.consolidate_loop("ibis", 5)
+        opt.consolidate_loop("ibis", 5, None)
             .await
             .expect("shadow failure stays contained");
         let hints = ai.route_hints.lock().unwrap().clone();
@@ -1846,7 +1868,7 @@ mod tests {
         ]));
         let mut opt = optimizer(db.clone(), ai.clone());
         opt.schema_enforcement = ibis_search::memory::details::SchemaEnforcement::Strict;
-        opt.consolidate_loop("ibis", 5)
+        opt.consolidate_loop("ibis", 5, None)
             .await
             .expect("retry succeeds");
         assert_eq!(
@@ -1890,7 +1912,7 @@ mod tests {
         ]));
         let mut opt = optimizer(db.clone(), ai.clone());
         opt.schema_enforcement = ibis_search::memory::details::SchemaEnforcement::Strict;
-        opt.consolidate_loop("ibis", 5)
+        opt.consolidate_loop("ibis", 5, None)
             .await
             .expect("item-level failure stays contained");
         assert_eq!(ai.prompts.lock().unwrap().len(), 2, "no third attempt");
@@ -1929,7 +1951,7 @@ mod tests {
         ]));
         let opt = optimizer(db.clone(), ai.clone());
 
-        opt.consolidate_loop("repo", 10)
+        opt.consolidate_loop("repo", 10, None)
             .await
             .expect("ConsolidateLoop failed");
         let prompts = ai.prompts.lock().unwrap().clone();
@@ -1983,7 +2005,9 @@ mod tests {
             r#"{"action":"create","kind":"fix","title":"Guard empty roots","content":"Validate discovery_root before scanning.","confidence":0.9}"#,
         ]));
         let opt = optimizer(db.clone(), ai.clone());
-        opt.consolidate_loop("repo", 10).await.expect("loop failed");
+        opt.consolidate_loop("repo", 10, None)
+            .await
+            .expect("loop failed");
         let prompts = ai.prompts.lock().unwrap().clone();
         assert_eq!(prompts.len(), 1, "distillation still runs");
         assert!(
@@ -2003,7 +2027,9 @@ mod tests {
         ]));
         let mut opt = optimizer(db.clone(), ai.clone());
         opt.dup_similarity_min = 0.5;
-        opt.consolidate_loop("repo", 10).await.expect("loop failed");
+        opt.consolidate_loop("repo", 10, None)
+            .await
+            .expect("loop failed");
         let prompts = ai.prompts.lock().unwrap().clone();
         assert!(
             prompts[0].contains("memory:fix1"),
@@ -2039,7 +2065,7 @@ mod tests {
         let ai = Arc::new(ConsolidateAi::new(vec![]));
         let opt = optimizer(db.clone(), ai.clone());
 
-        opt.consolidate_loop("repo", 10)
+        opt.consolidate_loop("repo", 10, None)
             .await
             .expect("ConsolidateLoop failed");
         assert!(
@@ -2089,7 +2115,7 @@ mod tests {
         let ai = Arc::new(ConsolidateAi::new(vec![]));
         let opt = optimizer(db.clone(), ai.clone());
 
-        opt.consolidate_loop("repo", 10)
+        opt.consolidate_loop("repo", 10, None)
             .await
             .expect("ConsolidateLoop failed");
         assert!(
@@ -2136,7 +2162,7 @@ mod tests {
         ]));
         let opt = optimizer(db.clone(), ai.clone());
 
-        opt.consolidate_loop("repo", 10)
+        opt.consolidate_loop("repo", 10, None)
             .await
             .expect("ConsolidateLoop failed");
         let calls = db.sql_calls();
@@ -2170,7 +2196,7 @@ mod tests {
         let ai = Arc::new(ConsolidateAi::new(vec![r#"{"action":"noise"}"#]));
         let opt = optimizer(db.clone(), ai.clone());
 
-        opt.consolidate_loop("repo", 5)
+        opt.consolidate_loop("repo", 5, None)
             .await
             .expect("ConsolidateLoop failed");
         let hints = ai.route_hints.lock().unwrap().clone();
@@ -2217,7 +2243,7 @@ mod tests {
         let ai = Arc::new(ConsolidateAi::new(vec![r#"{"action":"noise"}"#]));
         let opt = optimizer(db.clone(), ai.clone());
 
-        opt.consolidate_loop("repo", 5)
+        opt.consolidate_loop("repo", 5, None)
             .await
             .expect("ConsolidateLoop failed");
         let hints = ai.route_hints.lock().unwrap().clone();
@@ -2245,7 +2271,7 @@ mod tests {
         let ai = Arc::new(ConsolidateAi::failing());
         let opt = optimizer(db.clone(), ai);
 
-        opt.consolidate_loop("repo", 10)
+        opt.consolidate_loop("repo", 10, None)
             .await
             .expect("an item-level AI failure should not fail the loop");
         let calls = db.sql_calls();

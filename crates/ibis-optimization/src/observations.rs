@@ -32,6 +32,7 @@ use ibis_search::search::SearchService;
 
 use crate::raft::Optimizer;
 use crate::store::DbCostStore;
+use crate::tasks::PassCheckpoint;
 
 /// D13 byte-stable instructions block for the observation synthesis call
 /// site. The evidence list is appended after it; `Return only JSON` stays the
@@ -396,6 +397,7 @@ impl Optimizer {
     pub async fn observations_pass(
         &self,
         project_name: &str,
+        checkpoint: Option<&dyn PassCheckpoint>,
     ) -> Result<ObservationPassReport, String> {
         let mut report = ObservationPassReport::default();
         if !self.observations.enabled {
@@ -419,8 +421,17 @@ impl Optimizer {
         .map_err(|e| e.to_string())?;
         report.scopes = scopes.len();
         let mut summarized = 0usize;
+        // The task checkpoint owns the residual budget; without a checkpoint
+        // the per-pass config cap applies (existing behavior).
+        let summary_cap = match checkpoint.and_then(|cp| cp.remaining_summaries()) {
+            Some(remaining) => remaining,
+            None => self.observations.max_llm_summaries_per_pass.max(1),
+        };
         let mut shadow_skipped = false;
         for scope in &scopes {
+            if checkpoint.is_some_and(|cp| !cp.should_continue()) {
+                break;
+            }
             let reconcile = service
                 .reconcile_observations_with_settings(
                     project,
@@ -435,8 +446,11 @@ impl Optimizer {
                 .observation_synthesis_backlog(db, project, scope)
                 .await?;
             for candidate in backlog {
+                if checkpoint.is_some_and(|cp| !cp.should_continue()) {
+                    break;
+                }
                 let needs_llm = candidate.generated_by.trim() != "llm";
-                if needs_llm && summarized >= self.observations.max_llm_summaries_per_pass.max(1) {
+                if needs_llm && summarized >= summary_cap {
                     report.deferred += 1;
                     continue;
                 }
@@ -455,6 +469,9 @@ impl Optimizer {
                         tracing::warn!("ObservationsPass: {}: {err}", candidate.id);
                     }
                 }
+            }
+            if let Some(cp) = checkpoint {
+                cp.scope_done(&report);
             }
         }
         Ok(report)
@@ -1370,7 +1387,10 @@ mod tests {
         ));
         let mut optimizer = optimizer(settings(false, 10));
         optimizer.db = Some(db.clone());
-        let report = optimizer.observations_pass("alpha").await.expect("ok");
+        let report = optimizer
+            .observations_pass("alpha", None)
+            .await
+            .expect("ok");
         assert_eq!(report, ObservationPassReport::default());
         assert!(db.sql_calls().is_empty(), "no query when disabled");
     }
@@ -1387,7 +1407,10 @@ mod tests {
         let mut optimizer = optimizer(settings(true, 10));
         optimizer.db = Some(db.clone());
         optimizer.ai = Some(ai.clone());
-        let report = optimizer.observations_pass("alpha").await.expect("ok");
+        let report = optimizer
+            .observations_pass("alpha", None)
+            .await
+            .expect("ok");
 
         assert_eq!(report.summarized, 1);
         assert_eq!(report.fallbacks, 0);
@@ -1454,7 +1477,10 @@ mod tests {
         let mut optimizer = optimizer(settings(true, 10));
         optimizer.db = Some(db);
         optimizer.ai = Some(ai.clone());
-        let report = optimizer.observations_pass("alpha").await.expect("ok");
+        let report = optimizer
+            .observations_pass("alpha", None)
+            .await
+            .expect("ok");
         assert_eq!(report.summarized, 1);
         assert_eq!(
             ai.route_hints.lock().unwrap().as_slice(),
@@ -1472,7 +1498,10 @@ mod tests {
         let mut optimizer = optimizer(settings(true, 10));
         optimizer.db = Some(db.clone());
         optimizer.ai = Some(ai);
-        let report = optimizer.observations_pass("alpha").await.expect("ok");
+        let report = optimizer
+            .observations_pass("alpha", None)
+            .await
+            .expect("ok");
         assert_eq!(report.summarized, 0);
         assert_eq!(report.fallbacks, 1);
         let vars = db
@@ -1510,7 +1539,10 @@ mod tests {
         let mut optimizer = optimizer(settings(true, 10));
         optimizer.db = Some(db);
         optimizer.ai = Some(ai.clone());
-        let report = optimizer.observations_pass("alpha").await.expect("ok");
+        let report = optimizer
+            .observations_pass("alpha", None)
+            .await
+            .expect("ok");
         assert_eq!(report.summarized, 1, "second attempt accepted");
         assert_eq!(ai.calls(), 2, "exactly one retry");
     }
@@ -1528,7 +1560,10 @@ mod tests {
         let mut optimizer = optimizer(settings(true, 10));
         optimizer.db = Some(db);
         optimizer.ai = Some(ai.clone());
-        let report = optimizer.observations_pass("alpha").await.expect("ok");
+        let report = optimizer
+            .observations_pass("alpha", None)
+            .await
+            .expect("ok");
         assert_eq!(report.summarized, 0);
         assert_eq!(report.fallbacks, 1);
         assert_eq!(ai.calls(), 2, "one retry only");
@@ -1544,7 +1579,10 @@ mod tests {
         let mut optimizer = optimizer(settings(true, 10));
         optimizer.db = Some(db.clone());
         optimizer.ai = Some(ai.clone());
-        let report = optimizer.observations_pass("alpha").await.expect("ok");
+        let report = optimizer
+            .observations_pass("alpha", None)
+            .await
+            .expect("ok");
         assert_eq!(report.embedding_retries, 1);
         assert_eq!(ai.calls(), 0, "zero LLM for an embedding retry");
         let retries: Vec<String> = db.calls_with("SET embedding = $obs_embedding");
@@ -1563,7 +1601,10 @@ mod tests {
         let mut optimizer = optimizer(settings(true, 10));
         optimizer.db = Some(db.clone());
         optimizer.ai = Some(ai);
-        optimizer.observations_pass("alpha").await.expect("ok");
+        optimizer
+            .observations_pass("alpha", None)
+            .await
+            .expect("ok");
         let backlog: Vec<String> = db
             .calls_with("details.generated_by = 'fallback'")
             .into_iter()
@@ -1593,7 +1634,10 @@ mod tests {
         let mut optimizer = optimizer(settings(true, 1));
         optimizer.db = Some(db);
         optimizer.ai = Some(ai.clone());
-        let report = optimizer.observations_pass("alpha").await.expect("ok");
+        let report = optimizer
+            .observations_pass("alpha", None)
+            .await
+            .expect("ok");
         assert_eq!(report.summarized, 1);
         assert_eq!(report.deferred, 1, "second row waits for the next pass");
         assert_eq!(ai.calls(), 1, "cap 1 → one LLM call");
@@ -1613,7 +1657,10 @@ mod tests {
         let mut optimizer = optimizer(settings(true, 10));
         optimizer.db = Some(db.clone());
         optimizer.ai = Some(ai);
-        let report = optimizer.observations_pass("alpha").await.expect("ok");
+        let report = optimizer
+            .observations_pass("alpha", None)
+            .await
+            .expect("ok");
         assert_eq!(report.summarized, 1);
         let apply: Vec<String> = db.calls_with("SET title = $obs_title");
         assert_eq!(apply.len(), 1);
@@ -1638,7 +1685,10 @@ mod tests {
         let mut optimizer = optimizer(settings(true, 10));
         optimizer.db = Some(db.clone());
         optimizer.ai = Some(ai);
-        let report = optimizer.observations_pass("alpha").await.expect("ok");
+        let report = optimizer
+            .observations_pass("alpha", None)
+            .await
+            .expect("ok");
         assert_eq!(
             report.summarized, 1,
             "the summary is never lost: {report:?}"
@@ -1670,7 +1720,10 @@ mod tests {
         optimizer.observations.max_scopes_per_project = 2;
         optimizer.db = Some(db.clone());
         optimizer.ai = Some(ai);
-        let report = optimizer.observations_pass("alpha").await.expect("ok");
+        let report = optimizer
+            .observations_pass("alpha", None)
+            .await
+            .expect("ok");
         assert_eq!(report.scopes, 2, "team + alice");
         let scope_owners: Vec<String> = db
             .inner

@@ -629,7 +629,7 @@ async fn run_server_async(args: Vec<String>) -> i32 {
 
     // Ticketing + repopr
     let db_snapshot = db_cell.read().unwrap().clone();
-    let (ticket, _) = assembly::assemble_ticketing(db_snapshot).await;
+    let (ticket, _) = assembly::assemble_ticketing(db_snapshot.clone()).await;
     if ticket.capabilities().providers.is_empty() {
         tracing::warn!("\u{26a0}\u{fe0f}  No ticketing providers configured. ticket_* tools will return configuration errors.");
     }
@@ -660,6 +660,29 @@ async fn run_server_async(args: Vec<String>) -> i32 {
         }
     }
 
+    // E16: durable task runner. The store exists only when the DB does; the
+    // runner is fail-open at the call sites.
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let task_policy = ibis_optimization::tasks::TaskPolicy::new(
+        cfg.tasks.lease_secs,
+        cfg.tasks.heartbeat_secs,
+        cfg.tasks.max_recoveries,
+        cfg.tasks.retention_days,
+    );
+    let task_shutdown = shutdown.child_token();
+    let tasks = db_snapshot.as_ref().map(|db| {
+        Arc::new(ibis_server::tasks::TaskRunner::new(
+            Arc::new(ibis_server::tasks::DbTaskStore::new(db.clone())),
+            task_policy,
+            task_shutdown.clone(),
+        ))
+    });
+    // E16 §4.2/§4.7: recovery + retention prune at boot, independent of the
+    // opt-in consolidation loop (a task created by the tool must recover too).
+    if let Some(tasks) = &tasks {
+        tasks.recover_and_prune().await;
+    }
+
     let state = Arc::new(AppState {
         cfg: Arc::new(RwLock::new((*cfg).clone())),
         db: db_cell,
@@ -673,13 +696,14 @@ async fn run_server_async(args: Vec<String>) -> i32 {
         db_process: Mutex::new(db_process),
         resource_subs: ibis_server::resources::ResourceSubscriptions::default(),
         sampling: sampling_registry,
+        tasks: Mutex::new(tasks),
+        task_shutdown,
         // F0.6: the published visibility matches the assembled ticketing
         // service (no providers → the ticket_* group starts hidden).
         tool_discovery: ibis_server::tool_discovery::ToolDiscovery::new(!ticketing_unconfigured),
     });
 
     // Background workers
-    let shutdown = tokio_util::sync::CancellationToken::new();
     start_log_watcher(&state, shutdown.child_token());
     assembly::start_notification_aggregator(&state, shutdown.child_token());
     assembly::start_polling_manager(&state, shutdown.child_token());
@@ -687,7 +711,7 @@ async fn run_server_async(args: Vec<String>) -> i32 {
     let batch_manager = assembly::start_batch_manager(&state);
     // F4 §B.5: the consolidation loop belongs to the daemon alone (opt-in,
     // off by default; stdio/plugin client surfaces never start it).
-    consolidation::start(&state, shutdown.child_token());
+    let consolidation_handle = consolidation::start(&state, shutdown.child_token());
 
     // 7./8. MCP server + run loop.
     let with_logging = state.config().mode != "stdio";
@@ -699,9 +723,22 @@ async fn run_server_async(args: Vec<String>) -> i32 {
 
     // GRACEFUL SHUTDOWN SEQUENCE
     shutdown.cancel();
-    tracing::info!("Waiting for background tasks to finish...");
+    // Stop the AI workers first so an in-flight LLM call aborts; the runner
+    // then requeues at the item boundary (E16 §4.2).
     tracing::info!("Stopping AI workers...");
     ai.stop().await;
+    // E16: bound the wait so `ibis stop` stays fast; on timeout abort the
+    // loop so a detached pass cannot write after the DB is dropped.
+    if let Some(mut handle) = consolidation_handle {
+        match tokio::time::timeout(Duration::from_secs(10), &mut handle).await {
+            Ok(_) => {}
+            Err(_) => {
+                tracing::warn!("Consolidation loop did not stop within 10s; aborting it");
+                handle.abort();
+            }
+        }
+    }
+    tracing::info!("Waiting for background tasks to finish...");
     if let Some(manager) = batch_manager {
         tracing::info!("Stopping Batch Manager...");
         manager.stop().await;

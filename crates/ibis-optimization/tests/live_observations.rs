@@ -183,7 +183,10 @@ async fn observations_pass_synthesizes_and_is_idempotent() {
         ..Default::default()
     };
 
-    let report = optimizer.observations_pass(PROJECT).await.expect("pass 1");
+    let report = optimizer
+        .observations_pass(PROJECT, None)
+        .await
+        .expect("pass 1");
     assert_eq!(report.summarized, 1, "{report:?}");
     assert_eq!(ai.calls.load(Ordering::SeqCst), 1);
     assert_eq!(
@@ -217,7 +220,10 @@ async fn observations_pass_synthesizes_and_is_idempotent() {
 
     // Second pass: the evidence hash is unchanged and the row is `llm` +
     // embedded, so the backlog is empty — zero AI calls.
-    let report = optimizer.observations_pass(PROJECT).await.expect("pass 2");
+    let report = optimizer
+        .observations_pass(PROJECT, None)
+        .await
+        .expect("pass 2");
     assert_eq!(report.summarized, 0, "{report:?}");
     assert_eq!(report.embedding_retries, 0);
     assert_eq!(ai.calls.load(Ordering::SeqCst), 1, "no second LLM call");

@@ -100,6 +100,10 @@ pub struct AppState {
     /// F0.5 MCP sampling: the session-peer registry feeding the
     /// `mcp_sampling` reasoning provider (tool dispatch attaches the peer).
     pub sampling: Arc<crate::sampling::SamplingSessionRegistry>,
+    /// E16 — durable task runner (absent until a DB is connected).
+    pub tasks: Mutex<Option<Arc<crate::tasks::TaskRunner>>>,
+    /// E16 — token shared by runners created at boot and on late DB binding.
+    pub task_shutdown: tokio_util::sync::CancellationToken,
     /// F0.6 dynamic tool discovery: the session-peer broadcast set for
     /// `notifications/tools/list_changed` (initialized sessions) plus the
     /// ticketing visibility the tool list last carried.
@@ -140,16 +144,38 @@ impl AppState {
         self.search.read().unwrap().clone()
     }
 
+    /// E16 — current task runner, if a DB is connected.
+    pub fn tasks(&self) -> Option<Arc<crate::tasks::TaskRunner>> {
+        self.tasks.lock().unwrap().clone()
+    }
+
     /// Swaps the DB and rebuilds the search service over it (plugin late
     /// binding). Returns whether a DB was already bound.
     pub fn bind_db(&self, db: Arc<dyn Executor>) -> bool {
         let replaced = {
             let mut guard = self.db.write().unwrap();
             let replaced = guard.is_some();
-            *guard = Some(db);
+            *guard = Some(db.clone());
             replaced
         };
         self.rebuild_search();
+        // E16: a plugin/stdio runtime binds its DB after construction; the
+        // task runner must exist for that DB too.
+        let mut slot = self.tasks.lock().unwrap();
+        if slot.is_none() {
+            let cfg = self.config();
+            let policy = ibis_optimization::tasks::TaskPolicy::new(
+                cfg.tasks.lease_secs,
+                cfg.tasks.heartbeat_secs,
+                cfg.tasks.max_recoveries,
+                cfg.tasks.retention_days,
+            );
+            *slot = Some(Arc::new(crate::tasks::TaskRunner::new(
+                Arc::new(crate::tasks::DbTaskStore::new(db)),
+                policy,
+                self.task_shutdown.child_token(),
+            )));
+        }
         replaced
     }
 

@@ -61,6 +61,8 @@ async fn test_state(projects: &[String]) -> Arc<AppState> {
         db_process: Mutex::new(None),
         resource_subs: ibis_server::resources::ResourceSubscriptions::default(),
         sampling: Arc::new(ibis_server::sampling::SamplingSessionRegistry::new()),
+        tasks: std::sync::Mutex::new(None),
+        task_shutdown: tokio_util::sync::CancellationToken::new(),
         tool_discovery: ibis_server::tool_discovery::ToolDiscovery::new(false),
     })
 }

@@ -21,6 +21,7 @@ pub mod registry;
 pub mod resources;
 pub mod sampling;
 pub mod state;
+pub mod tasks;
 pub mod tool_discovery;
 pub mod tools;
 pub mod tools_memory;

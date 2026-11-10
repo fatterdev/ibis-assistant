@@ -9,6 +9,9 @@
 use ibis_db::ids::is_safe_record_id;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use surrealdb::types::SurrealValue;
+
+use crate::observations::ObservationPassReport;
 
 /// The only task kind in v1. Kinds are a Rust whitelist (not a DB union) so
 /// adding one does not require a `REMOVE`/`DEFINE` cycle.
@@ -199,7 +202,7 @@ pub fn recovery_decision(
 
 /// Checkpoint persisted on the task row: observability plus the budget ledger,
 /// never the source of truth for resuming (the backlog is).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, SurrealValue)]
 pub struct TaskCheckpoint {
     pub last_item_id: Option<String>,
     pub items_done: u64,
@@ -224,6 +227,31 @@ impl TaskCheckpoint {
     }
 }
 
+/// Snapshot of the parameters a task was born with. The resume must use these
+/// values, not the live config (E16 §4.1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SurrealValue)]
+pub struct TaskParams {
+    pub max_items: u64,
+    pub max_llm_summaries: u64,
+    pub mode: String,
+}
+
+/// Observer seam for a long pass: `consolidate_loop` and `observations_pass`
+/// call it at item/scope boundaries. Implementations must be cheap and
+/// non-blocking (the server impl buffers DB writes in a writer task).
+pub trait PassCheckpoint: Send + Sync {
+    /// false = lease lost or shutdown: the pass stops at the next item boundary.
+    fn should_continue(&self) -> bool;
+    /// After an item was persisted (`ok` | `noise` | `error`).
+    fn item_done(&self, item_id: &str, outcome: &str, items_total: usize);
+    /// `items_total` is known right after the backlog select; default no-op.
+    fn items_total(&self, _total: usize) {}
+    /// After reconcile + synthesis of one scope.
+    fn scope_done(&self, report: &ObservationPassReport);
+    /// Remaining synthesis budget (`None` = use the config cap).
+    fn remaining_summaries(&self) -> Option<usize>;
+}
+
 /// Remaining synthesis budget for a task: `cap - used`, saturating at zero.
 pub fn remaining_summaries(cap: usize, used: usize) -> usize {
     cap.saturating_sub(used)
@@ -241,10 +269,14 @@ pub fn task_record_id(task_id: &str) -> Result<String, TaskModelError> {
     if id.is_empty() {
         return Err(TaskModelError::EmptyTaskId);
     }
-    if id.len() != 32 || !id.chars().all(|c| c.is_ascii_hexdigit()) {
+    // Accept the plain key, the full `task:<key>` form and the guillemet
+    // rendering returned by `record_id_to_plain`/the driver.
+    let key = id.strip_prefix("task:").unwrap_or(id);
+    let key = key.trim_matches(|c| c == '\u{27e8}' || c == '\u{27e9}');
+    if key.len() != 32 || !key.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(TaskModelError::UnsafeRecordId);
     }
-    let record = ibis_db::ids::format_record_id("task", id);
+    let record = ibis_db::ids::format_record_id("task", key);
     if !is_safe_record_id(&record) {
         return Err(TaskModelError::UnsafeRecordId);
     }
@@ -306,7 +338,8 @@ pub fn checkpoint_task_sql(task_id: &str) -> Result<String, TaskModelError> {
     let id = task_record_id(task_id)?;
     Ok(format!(
         "UPDATE {id} SET checkpoint = $checkpoint, updated_at = time::now() \
-         WHERE lease_owner = $owner AND lease_epoch = $epoch AND status = 'running';"
+         WHERE lease_owner = $owner AND lease_epoch = $epoch AND status = 'running' \
+         RETURN AFTER;"
     ))
 }
 
@@ -323,7 +356,8 @@ pub fn finish_task_sql(task_id: &str, terminal: TaskStatus) -> Result<String, Ta
         "UPDATE {id} SET status = '{terminal}', finished_at = time::now(), \
          updated_at = time::now(), active_key = NONE, error = $error, \
          checkpoint = $checkpoint \
-         WHERE lease_owner = $owner AND lease_epoch = $epoch AND status = 'running';"
+         WHERE lease_owner = $owner AND lease_epoch = $epoch AND status = 'running' \
+         RETURN AFTER;"
     ))
 }
 
@@ -333,7 +367,8 @@ pub fn requeue_task_sql(task_id: &str) -> Result<String, TaskModelError> {
     Ok(format!(
         "UPDATE {id} SET status = 'queued', lease_owner = NONE, \
          lease_expires_at = NONE, updated_at = time::now() \
-         WHERE lease_owner = $owner AND lease_epoch = $epoch AND status = 'running';"
+         WHERE lease_owner = $owner AND lease_epoch = $epoch AND status = 'running' \
+         RETURN AFTER;"
     ))
 }
 
@@ -393,6 +428,11 @@ mod tests {
         assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
         let record = task_record_id(&id).unwrap();
         assert_eq!(record, format!("task:\u{27e8}{id}\u{27e9}"));
+        assert_eq!(
+            task_record_id(&format!("task:{id}")).unwrap(),
+            record,
+            "full record-id form is accepted and normalized"
+        );
         assert!(is_safe_record_id(&record));
         assert_eq!(task_record_id("  "), Err(TaskModelError::EmptyTaskId));
         // Short/unsafe ids never reach SQL interpolation.
