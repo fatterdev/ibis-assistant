@@ -76,3 +76,12 @@
 - **Aperto:** step 3 (tool `memory_consolidate` con task id/no doppio spawn, risorse `ibis://tasks[/{id}]`, notifiche `resources/updated`, fixture discovery); poi gate completo (eval retrieval/observations) e live gate. Follow-up dichiarati: test loop-level lease-lost, test budget residuo observations, asserzione proiezione; notifiche task ancora da collegare al runner (serve un sink eventi).
 - **Prossimo comando:** `git status --short; cargo test -p ibis-server tasks::tests` (verifica ripresa), poi aprire `docs/planning/2026-11-10-dailydoseofds-improvement-analysis-l3-fase-5.md` §4.5 e implementare lo step 3.
 - **Decisioni richieste:** nessuna.
+
+## Handoff 2026-11-10 23:05
+- **Stato:** step 3/10 completato; **E16 chiuso** (step 1-3). Step 4 (F17) non iniziato.
+- **Ultimo commit:** `0e177ba` `docs(planning): record E16 step 3 completion` (codice `90bf10e`; E16 completo `ba89f4c`+`f9b00d5`+`90bf10e`).
+- **Gate:** fmt ok · clippy `-D warnings` ok · workspace test **84 suite, 0 failure** · build `ibis-server` ok · retrieval **21/21** (MRR 0.952 / r@5 0.976 / r@15 1.0) · observations **8/8** · live 4.0.0 ok (`live_surreal` 12, `live_memory_estate` 13, `live_observations` 12+1, `live_commit_txn` 2, `live_tasks` 5).
+- **Fatto:** E16 completo — schema `task`+modello+config; store/runner/lease/fencing/checkpoint/recovery/prune/shutdown; tool `memory_consolidate` con task id e no doppio spawn; risorse `ibis://tasks[/{id}]`; notifiche create/claim/finish; fixture solo descrizione; 58 tool invariati.
+- **Aperto:** F17 step 4 (feature `otel`, `TelemetryConfig`, registry, `shutdown_telemetry`, CI `otel-build`), poi step 5 span. Follow-up E16: test live diretto `read_parsed`/`resource_updated_fires_on_state_change`, test loop-level lease-lost, budget residuo observations, proiezione.
+- **Prossimo comando:** aprire la spec F17 §4.1 (righe 555-617) e implementare feature+config; verifica rapida `cargo test -p ibis-logger`.
+- **Decisioni richieste:** nessuna.
