@@ -757,6 +757,7 @@ fn build_search_service(
         ibis_search::memory::details::SchemaEnforcement::resolve(&cfg.memory.schema_enforcement);
     service.observations =
         ibis_search::memory::observations::ObservationSettings::from_config(&cfg.ai.observations);
+    service.agentic = ibis_search::agentic::AgenticSettings::from_config(&cfg.search.agentic);
     Arc::new(service)
 }
 

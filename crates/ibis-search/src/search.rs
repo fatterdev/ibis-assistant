@@ -152,6 +152,9 @@ pub struct SearchService {
     /// Derived-observation engine (`ai.observations` — C8 step 6): the
     /// ingest hook reads `enabled` + limits from here; default off.
     pub observations: crate::memory::observations::ObservationSettings,
+    /// Agentic ReAct loop brakes (`search.agentic`, E14): max steps, token
+    /// budget, repeated-search cap and the citation completion check.
+    pub agentic: crate::agentic::AgenticSettings,
     /// Process-local TTL cache of ancestor sets (lazily created).
     pub(crate) ancestor_cache: std::sync::OnceLock<ibis_git::AncestorCache>,
 }
@@ -173,6 +176,7 @@ impl Default for SearchService {
             rerank_mode: RerankMode::default(),
             schema_enforcement: SchemaEnforcement::default(),
             observations: crate::memory::observations::ObservationSettings::default(),
+            agentic: crate::agentic::AgenticSettings::default(),
             ancestor_cache: std::sync::OnceLock::new(),
         }
     }

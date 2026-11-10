@@ -261,13 +261,10 @@ fn is_weak_context(observed_sources: usize, above_threshold: usize) -> bool {
 pub(crate) struct TrustAssessment {
     pub trust: AgenticTrust,
     /// Repair-facing counts: E15 publishes them, the E14 policy reads them
-    /// (dead-code allowance scoped to that planned consumer).
-    #[allow(dead_code)]
+    /// (coverage threshold, repair observation, `invalid_citations` flag).
     pub total_claims: usize,
-    #[allow(dead_code)]
     pub covered_claims: usize,
     pub invalid_citations: usize,
-    #[allow(dead_code)]
     pub coverage_bp: u64,
 }
 

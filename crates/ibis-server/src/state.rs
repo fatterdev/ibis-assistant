@@ -184,6 +184,7 @@ impl AppState {
         service.observations = ibis_search::memory::observations::ObservationSettings::from_config(
             &cfg.ai.observations,
         );
+        service.agentic = ibis_search::agentic::AgenticSettings::from_config(&cfg.search.agentic);
         *self.search.write().unwrap() = Arc::new(service);
     }
 
