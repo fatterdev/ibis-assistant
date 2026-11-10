@@ -34,6 +34,8 @@
 //! - tables with no writer yet (`batch_job`, `error_state`, `community`,
 //!   `process`, `branch`) are declared without fields: their future lanes add
 //!   their own `DEFINE FIELD` lines.
+//! - E16 adds the durable `task` envelope (`task_status`, lease/fencing,
+//!   checkpoint) with a UNIQUE `active_key`; terminal rows clear it to `NONE`.
 //!
 //! Everything is born fresh; statements are string literals (identifiers
 //! only — no content interpolation, F-002) and may be re-run safely
@@ -59,6 +61,7 @@ pub mod names {
     pub const ISSUE: &str = "issue";
     pub const TRACKER: &str = "tracker";
     pub const BATCH_JOB: &str = "batch_job";
+    pub const TASK: &str = "task";
     pub const PROJECT: &str = "project";
     pub const LOG_FILE: &str = "log_file";
     pub const LOG_ENTRY: &str = "log_entry";
@@ -114,6 +117,7 @@ pub use names as table_names;
 pub const INIT_STATEMENTS: &[&str] = &[
     // ── Named types (4.0): the union order is the sort order ────────────────
     "DEFINE TYPE IF NOT EXISTS batch_status AS 'pending' | 'completed' | 'failed';",
+    "DEFINE TYPE IF NOT EXISTS task_status AS 'queued' | 'running' | 'completed' | 'failed';",
     "DEFINE TYPE IF NOT EXISTS memory_kind AS 'decision' | 'fix' | 'constraint' | 'rule' | 'gotcha' | 'design' | 'fact' | 'working_state' | 'observation' | 'reasoning';",
     "DEFINE TYPE IF NOT EXISTS memory_status AS 'current' | 'superseded' | 'archived' | 'stale';",
     "DEFINE TYPE IF NOT EXISTS memory_visibility AS 'team' | 'personal';",
@@ -202,6 +206,27 @@ pub const INIT_STATEMENTS: &[&str] = &[
     "DEFINE FIELD IF NOT EXISTS name ON TABLE tracker TYPE option<string>;",
     "DEFINE TABLE IF NOT EXISTS batch_job SCHEMAFULL;",
     "DEFINE FIELD IF NOT EXISTS status ON TABLE batch_job TYPE option<string>;",
+    // E16: durable task envelope for long passes (lease + fencing + checkpoint).
+    // `active_key` is the cross-process uniqueness guard: it stays set while
+    // the task is queued/running and is cleared to NONE on terminal states.
+    "DEFINE TABLE IF NOT EXISTS task SCHEMAFULL;",
+    "DEFINE FIELD IF NOT EXISTS kind ON TABLE task TYPE string;",
+    "DEFINE FIELD IF NOT EXISTS status ON TABLE task TYPE task_status DEFAULT 'queued';",
+    "DEFINE FIELD IF NOT EXISTS project ON TABLE task TYPE option<string>;",
+    "DEFINE FIELD IF NOT EXISTS params ON TABLE task TYPE option<object> FLEXIBLE;",
+    "DEFINE FIELD IF NOT EXISTS checkpoint ON TABLE task TYPE option<object> FLEXIBLE;",
+    "DEFINE FIELD IF NOT EXISTS active_key ON TABLE task TYPE option<string>;",
+    "DEFINE FIELD IF NOT EXISTS lease_owner ON TABLE task TYPE option<string>;",
+    "DEFINE FIELD IF NOT EXISTS lease_epoch ON TABLE task TYPE int DEFAULT 0;",
+    "DEFINE FIELD IF NOT EXISTS lease_expires_at ON TABLE task TYPE option<datetime>;",
+    "DEFINE FIELD IF NOT EXISTS claims ON TABLE task TYPE int DEFAULT 0;",
+    "DEFINE FIELD IF NOT EXISTS recoveries ON TABLE task TYPE int DEFAULT 0;",
+    "DEFINE FIELD IF NOT EXISTS error ON TABLE task TYPE option<string>;",
+    "DEFINE FIELD IF NOT EXISTS requested_by ON TABLE task TYPE option<string>;",
+    "DEFINE FIELD IF NOT EXISTS created_at ON TABLE task TYPE datetime DEFAULT time::now();",
+    "DEFINE FIELD IF NOT EXISTS updated_at ON TABLE task TYPE datetime DEFAULT time::now();",
+    "DEFINE FIELD IF NOT EXISTS claimed_at ON TABLE task TYPE option<datetime>;",
+    "DEFINE FIELD IF NOT EXISTS finished_at ON TABLE task TYPE option<datetime>;",
     "DEFINE TABLE IF NOT EXISTS project SCHEMAFULL;",
     "DEFINE FIELD IF NOT EXISTS name ON TABLE project TYPE string;",
     "DEFINE FIELD IF NOT EXISTS baseline_commit ON TABLE project TYPE option<string>;",
@@ -449,6 +474,12 @@ pub const INIT_STATEMENTS: &[&str] = &[
     // backstop behind the deterministic record id.
     "DEFINE INDEX IF NOT EXISTS llm_response_cache_key ON TABLE llm_response_cache COLUMNS key UNIQUE;",
     "DEFINE INDEX IF NOT EXISTS job_status ON TABLE batch_job COLUMNS status;",
+    // E16: one active task per (kind, project). UNIQUE ignores NONE, so terminal
+    // rows coexist once `active_key` is cleared (live-probed on 4.0).
+    "DEFINE INDEX IF NOT EXISTS task_active_key ON TABLE task COLUMNS active_key UNIQUE;",
+    "DEFINE INDEX IF NOT EXISTS task_status_kind ON TABLE task COLUMNS status, kind;",
+    "DEFINE INDEX IF NOT EXISTS task_project ON TABLE task COLUMNS project, kind;",
+    "DEFINE INDEX IF NOT EXISTS task_finished_at ON TABLE task COLUMNS finished_at;",
     "DEFINE INDEX IF NOT EXISTS chunk_batch_id ON TABLE file_chunk COLUMNS batch_id;",
     "DEFINE INDEX IF NOT EXISTS chunk_batch_status ON TABLE file_chunk COLUMNS batch_status;",
     // source_file lookups by path go through the named id components

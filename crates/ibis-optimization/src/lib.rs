@@ -33,6 +33,7 @@ pub mod observations;
 pub mod observations_eval;
 pub mod raft;
 pub mod store;
+pub mod tasks;
 
 pub use decide_eval::{
     build_report as build_decision_report, load_dataset as load_decision_dataset,

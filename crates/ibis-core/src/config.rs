@@ -259,6 +259,34 @@ impl Default for ConsolidationConfig {
     }
 }
 
+/// E16 — durable task store knobs (`tasks`). The values are kept raw here;
+/// `ibis_optimization::tasks::TaskPolicy` applies the documented clamps at
+/// use (lease [10, 600]s, heartbeat [1, lease/2]s, recoveries [1, 10],
+/// retention [1, 365] days).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct TasksConfig {
+    /// Lease duration in seconds; a dead owner is reclaimable afterwards.
+    pub lease_secs: u64,
+    /// Heartbeat cadence in seconds (clamped to at least two beats per lease).
+    pub heartbeat_secs: u64,
+    /// Reclaims after a crash before the task is declared failed.
+    pub max_recoveries: u32,
+    /// Retention of terminal tasks, pruned at boot.
+    pub retention_days: u64,
+}
+
+impl Default for TasksConfig {
+    fn default() -> Self {
+        TasksConfig {
+            lease_secs: 30,
+            heartbeat_secs: 10,
+            max_recoveries: 3,
+            retention_days: 30,
+        }
+    }
+}
+
 /// Bounded decisions (`ai.decide`, D11): shadow mode is on by default — the
 /// consolidation computes the typed `is_noise` decision next to the
 /// generative verdict and logs `decide_shadow`, without changing behavior.
@@ -600,6 +628,8 @@ pub struct Config {
     pub world_state: WorldStateConfig,
     #[serde(rename = "search")]
     pub search: SearchConfig,
+    /// E16 — durable task store knobs (`tasks.*`).
+    pub tasks: TasksConfig,
     /// True if a config file was successfully loaded (not serialized).
     #[serde(skip)]
     pub config_loaded: bool,
@@ -838,6 +868,7 @@ impl Default for Config {
             memory: MemoryConfig::default(),
             world_state: WorldStateConfig::default(),
             search: SearchConfig::default(),
+            tasks: TasksConfig::default(),
             bind_address: String::new(),
             runtime_mode: String::new(),
             gemini_keys: Vec::new(),
@@ -1585,6 +1616,23 @@ mod tests {
             serde_json::from_str(r#"{"search": {"agentic": {"completion_check": "bogus"}}}"#)
                 .unwrap();
         assert_eq!(cfg.search.agentic.completion_check, "bogus");
+    }
+
+    /// `tasks.*` (E16): durable task store defaults and file overlay.
+    #[test]
+    fn tasks_config_defaults() {
+        let dflt = default_config();
+        assert_eq!(dflt.tasks.lease_secs, 30);
+        assert_eq!(dflt.tasks.heartbeat_secs, 10);
+        assert_eq!(dflt.tasks.max_recoveries, 3);
+        assert_eq!(dflt.tasks.retention_days, 30);
+
+        let cfg: Config =
+            serde_json::from_str(r#"{"tasks": {"lease_secs": 45, "max_recoveries": 5}}"#).unwrap();
+        assert_eq!(cfg.tasks.lease_secs, 45);
+        assert_eq!(cfg.tasks.heartbeat_secs, 10);
+        assert_eq!(cfg.tasks.max_recoveries, 5);
+        assert_eq!(cfg.tasks.retention_days, 30);
     }
 
     /// `ai.consolidation` (F4 §B.5): off by default, the file overlays the

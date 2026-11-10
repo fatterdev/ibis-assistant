@@ -18,6 +18,8 @@ serde_yaml.workspace = true
 surrealdb = { version = "4.0.0", features = ["protocol-ws"] }
 tokio.workspace = true
 tracing.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
+ibis-core.workspace = true
 tempfile.workspace = true

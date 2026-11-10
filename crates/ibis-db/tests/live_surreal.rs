@@ -783,3 +783,80 @@ async fn migrations_apply_in_id_order_live() {
 
     cleanup(&exec, &db_name).await;
 }
+
+/// E16 live probe: `task_active_key` UNIQUE blocks a second active task while
+/// multiple terminal rows with `active_key = NONE` coexist on 4.0.
+#[tokio::test]
+async fn unique_active_key_blocks_second_active_task() {
+    let Some((exec, db_name)) = connect_scratch().await else {
+        return;
+    };
+    schema::init_schema(&exec).await.expect("init schema");
+
+    exec.execute(
+        "CREATE task:⟨a1⟩ SET kind = 'memory_consolidate', status = 'queued', \
+         project = 'p', active_key = 'memory_consolidate:p';",
+    )
+    .await
+    .expect("create first active task");
+
+    let err = exec
+        .execute(
+            "CREATE task:⟨a2⟩ SET kind = 'memory_consolidate', status = 'queued', \
+             project = 'p', active_key = 'memory_consolidate:p';",
+        )
+        .await
+        .expect_err("second active task must violate the UNIQUE index");
+    let text = err.to_string().to_lowercase();
+    assert!(
+        text.contains("unique") || text.contains("already contains"),
+        "unexpected UNIQUE error: {err}"
+    );
+
+    // A terminal transition clears the slot; a new active task can take it.
+    exec.execute(
+        "UPDATE task:⟨a1⟩ SET status = 'completed', active_key = NONE, \
+         finished_at = time::now();",
+    )
+    .await
+    .expect("complete first task");
+    exec.execute(
+        "CREATE task:⟨a2⟩ SET kind = 'memory_consolidate', status = 'queued', \
+         project = 'p', active_key = 'memory_consolidate:p';",
+    )
+    .await
+    .expect("the released slot accepts a new active task");
+
+    // Two more terminal rows with NONE: UNIQUE must ignore NONE on 4.0.
+    exec.execute(
+        "UPDATE task:⟨a2⟩ SET status = 'failed', active_key = NONE, \
+         finished_at = time::now();",
+    )
+    .await
+    .expect("fail second task");
+    exec.execute(
+        "CREATE task:⟨a3⟩ SET kind = 'memory_consolidate', status = 'completed', \
+         project = 'p', active_key = NONE, finished_at = time::now();",
+    )
+    .await
+    .expect("terminal NONE row 1");
+    exec.execute(
+        "CREATE task:⟨a4⟩ SET kind = 'memory_consolidate', status = 'failed', \
+         project = 'p', active_key = NONE, finished_at = time::now();",
+    )
+    .await
+    .expect("terminal NONE row 2");
+
+    let outcome = exec
+        .execute("SELECT VALUE id FROM task WHERE active_key = NONE;")
+        .await
+        .expect("select terminal rows");
+    match outcome.first() {
+        Some(Value::Array(rows)) => {
+            assert_eq!(rows.len(), 4, "four terminal rows with NONE must coexist")
+        }
+        other => panic!("unexpected SELECT outcome: {other:?}"),
+    }
+
+    cleanup(&exec, &db_name).await;
+}
