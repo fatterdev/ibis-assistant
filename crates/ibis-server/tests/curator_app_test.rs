@@ -140,7 +140,11 @@ async fn curator_app_listed_and_readable_with_app_mime() {
         .list_resources(Default::default())
         .await
         .expect("resources/list");
-    assert_eq!(listed.resources.len(), 2, "guide + curator: {listed:?}");
+    assert_eq!(
+        listed.resources.len(),
+        3,
+        "guide + curator + tasks: {listed:?}"
+    );
     let declared = listed
         .resources
         .iter()

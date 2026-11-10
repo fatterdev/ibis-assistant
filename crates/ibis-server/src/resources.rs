@@ -29,6 +29,7 @@ use rmcp::Peer;
 use rmcp::RoleServer;
 
 use crate::state::AppState;
+use ibis_db::ids::record_id_to_plain;
 use ibis_search::ActorContext;
 
 /// The memory kinds addressable via `ibis://memory/{kind}/{id}` — the
@@ -53,6 +54,10 @@ pub const MEMORY_TEMPLATE: &str = "ibis://memory/{kind}/{id}";
 pub const RULES_TEMPLATE: &str = "ibis://rules/{name}";
 /// URI template for one ticket/work item.
 pub const TICKET_TEMPLATE: &str = "ibis://ticket/{id}";
+/// URI template for one durable task (E16).
+pub const TASKS_TEMPLATE: &str = "ibis://tasks/{id}";
+/// Collection URI for active tasks (E16).
+pub const TASKS_URI: &str = "ibis://tasks";
 
 /// Builds the resource URI for a memory (`ibis://memory/{kind}/{id}`).
 pub fn memory_uri(kind: &str, id: &str) -> String {
@@ -78,9 +83,13 @@ pub enum ResourceUri {
     Rule { name: String },
     /// `ibis://ticket/{id}`
     Ticket { id: String },
+    /// `ibis://tasks` (active tasks)
+    Tasks,
+    /// `ibis://tasks/{id}`
+    Task { id: String },
 }
 
-/// Parses a concrete resource URI against the three templates; `None` when
+/// Parses a concrete resource URI against the four templates; `None` when
 /// the URI is not one of them (the guide resource and foreign schemes stay
 /// with `resources/read`'s static arm).
 pub fn parse_uri(uri: &str) -> Option<ResourceUri> {
@@ -116,6 +125,17 @@ pub fn parse_uri(uri: &str) -> Option<ResourceUri> {
         }
         return Some(ResourceUri::Ticket { id: id.to_string() });
     }
+    if rest == "tasks" {
+        return Some(ResourceUri::Tasks);
+    }
+    if let Some(id) = rest.strip_prefix("tasks/") {
+        let id = id.trim();
+        if id.is_empty() || id.contains('/') {
+            return None;
+        }
+        let id = ibis_optimization::tasks::task_record_id(id).ok()?;
+        return Some(ResourceUri::Task { id });
+    }
     None
 }
 
@@ -145,6 +165,13 @@ pub fn resource_templates() -> Vec<ResourceTemplate> {
                  external key.",
             )
             .with_mime_type("application/json"),
+        ResourceTemplate::new(TASKS_TEMPLATE, "Durable Task")
+            .with_title("Durable Task")
+            .with_description(
+                "One durable task envelope (E16): status, lease, checkpoint, claims and \
+                 recoveries, by task record id.",
+            )
+            .with_mime_type("application/json"),
     ]
 }
 
@@ -170,6 +197,63 @@ pub async fn read_parsed(
         ResourceUri::Memory { kind, id } => read_memory(state, actor, kind, id).await,
         ResourceUri::Rule { name } => read_rule(state, name).await,
         ResourceUri::Ticket { id } => read_ticket(state, ticket_auth, id).await,
+        ResourceUri::Tasks => read_tasks(state).await,
+        ResourceUri::Task { id } => read_task(state, id).await,
+    }
+}
+
+/// Resource JSON for one task: the record id is rendered in the plain
+/// `task:<hex>` form (not the driver's tagged object).
+fn task_json(row: &crate::tasks::TaskRow) -> Result<serde_json::Value, ErrorData> {
+    let mut value = serde_json::to_value(row)
+        .map_err(|e| ErrorData::internal_error(format!("serialize task: {e}"), None))?;
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "id".to_string(),
+            serde_json::json!(record_id_to_plain(&row.id)),
+        );
+    }
+    Ok(value)
+}
+
+/// Reads the active task collection (`queued`/`running`, oldest first).
+async fn read_tasks(state: &Arc<AppState>) -> Result<ReadBody, ErrorData> {
+    let Some(tasks) = state.tasks() else {
+        return Err(not_found("database not connected".to_string()));
+    };
+    let rows = tasks
+        .active()
+        .await
+        .map_err(|e| ErrorData::internal_error(format!("tasks: {e}"), None))?;
+    let rows: Vec<serde_json::Value> = rows.iter().map(task_json).collect::<Result<Vec<_>, _>>()?;
+    let content = serde_json::to_string_pretty(&rows)
+        .map_err(|e| ErrorData::internal_error(format!("serialize tasks: {e}"), None))?;
+    Ok(ReadBody {
+        content,
+        mime_type: "application/json",
+    })
+}
+
+/// Reads one task row by record id.
+async fn read_task(state: &Arc<AppState>, id: &str) -> Result<ReadBody, ErrorData> {
+    let Some(tasks) = state.tasks() else {
+        return Err(not_found("database not connected".to_string()));
+    };
+    match tasks
+        .get(id)
+        .await
+        .map_err(|e| ErrorData::internal_error(format!("task {id}: {e}"), None))?
+    {
+        Some(row) => {
+            let value = task_json(&row)?;
+            let content = serde_json::to_string_pretty(&value)
+                .map_err(|e| ErrorData::internal_error(format!("serialize task: {e}"), None))?;
+            Ok(ReadBody {
+                content,
+                mime_type: "application/json",
+            })
+        }
+        None => Err(not_found(format!("task {id:?} not found"))),
     }
 }
 
@@ -448,14 +532,61 @@ mod tests {
     }
 
     #[test]
+    fn task_json_uses_plain_record_id() {
+        use ibis_db::value::{Datetime, RecordId, RecordIdKey};
+        let now = Datetime::from(chrono::Utc::now());
+        let row = crate::tasks::TaskRow {
+            id: RecordId {
+                table: "task".into(),
+                key: RecordIdKey::String("0123456789abcdef0123456789abcdef".into()),
+            },
+            kind: "memory_consolidate".into(),
+            status: "queued".into(),
+            project: Some("p".into()),
+            params: None,
+            checkpoint: None,
+            active_key: Some("memory_consolidate:p".into()),
+            lease_owner: None,
+            lease_epoch: 0,
+            lease_expires_at: None,
+            claims: 0,
+            recoveries: 0,
+            error: None,
+            requested_by: None,
+            created_at: now,
+            updated_at: now,
+            claimed_at: None,
+            finished_at: None,
+        };
+        let value = task_json(&row).expect("task json");
+        assert_eq!(value["id"], "task:0123456789abcdef0123456789abcdef");
+    }
+
+    #[test]
+    fn task_uris_parse() {
+        assert_eq!(parse_uri("ibis://tasks"), Some(ResourceUri::Tasks));
+        let id = "0123456789abcdef0123456789abcdef";
+        let parsed = parse_uri(&format!("ibis://tasks/{id}")).expect("task uri");
+        assert!(matches!(parsed, ResourceUri::Task { .. }));
+        assert!(parse_uri("ibis://tasks/not-a-task").is_none());
+        assert!(parse_uri("ibis://tasks/a/b").is_none());
+    }
+
+    #[test]
     fn templates_table_has_the_three_f04_rows() {
         let templates = resource_templates();
-        assert_eq!(templates.len(), 3);
+        assert_eq!(templates.len(), 4);
         let mut uris: Vec<&str> = templates.iter().map(|t| t.uri_template.as_str()).collect();
         uris.sort_unstable();
         assert_eq!(
             uris,
-            [MEMORY_TEMPLATE, RULES_TEMPLATE, TICKET_TEMPLATE].map(|s| s as &str)
+            [
+                MEMORY_TEMPLATE,
+                RULES_TEMPLATE,
+                TASKS_TEMPLATE,
+                TICKET_TEMPLATE
+            ]
+            .map(|s| s as &str)
         );
         for t in &templates {
             assert_eq!(t.mime_type.as_deref(), Some("application/json"));

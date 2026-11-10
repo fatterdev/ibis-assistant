@@ -75,29 +75,30 @@ pub fn start(
     }))
 }
 
-/// One pass: discover the projects that still hold `current` observations
-/// and drain each one (store-driven, so team clients can capture for repos
-/// the server config does not know).
-async fn run_pass(state: &Arc<AppState>) {
+/// Builds the optimizer used by both the daemon pass and the tool.
+pub fn build_optimizer(state: &Arc<AppState>) -> ibis_optimization::Optimizer {
     let mut optimizer = ibis_optimization::Optimizer::new(
         state.db(),
         Some(Arc::new(crate::state::ClientAIAdapter(state.ai.clone()))
             as Arc<dyn ibis_ai::AIProvider>),
         Some(state.search()),
     );
-    // C9: the duplicate-lookup similarity floor is config-driven.
     optimizer.dup_similarity_min = state.config().ai.consolidation.dup_similarity_min;
     optimizer.schema_enforcement = ibis_search::memory::details::SchemaEnforcement::resolve(
         &state.config().memory.schema_enforcement,
     );
-    // D11: shadow mode ships on (`ai.decide.shadow`); it never changes the
-    // consolidation behavior, only the `decide_shadow` log line.
     optimizer.decide_shadow = state.config().ai.decide.shadow;
-    // C8: the observation engine is opt-in (`ai.observations.enabled`) and
-    // rides the same pass (reconcile Full + synthesis).
     optimizer.observations = ibis_search::memory::observations::ObservationSettings::from_config(
         &state.config().ai.observations,
     );
+    optimizer
+}
+
+/// One pass: discover the projects that still hold `current` observations
+/// and drain each one (store-driven, so team clients can capture for repos
+/// the server config does not know).
+async fn run_pass(state: &Arc<AppState>) {
+    let optimizer = build_optimizer(state);
     let projects = match optimizer.pending_observation_projects().await {
         Ok(projects) => projects,
         Err(err) => {

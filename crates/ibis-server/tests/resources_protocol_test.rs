@@ -202,18 +202,23 @@ async fn resources_capability_templates_and_reads() {
 
     // resources/list: the static guide surface plus the F0.7 Memory
     // Curator MCP App (templates are separate).
+    // resources/list: guide + curator + the E16 tasks collection.
     let listed = peer
         .list_resources(Default::default())
         .await
         .expect("resources/list");
-    assert_eq!(listed.resources.len(), 2, "guide + curator app: {listed:?}");
+    assert_eq!(
+        listed.resources.len(),
+        3,
+        "guide + curator + tasks: {listed:?}"
+    );
 
-    // resources/templates/list: exactly the F0.4 rows.
+    // resources/templates/list: the F0.4 rows plus the E16 tasks template.
     let templates = peer
         .list_resource_templates(Default::default())
         .await
         .expect("resources/templates/list");
-    assert_eq!(templates.resource_templates.len(), 3);
+    assert_eq!(templates.resource_templates.len(), 4);
     let mut rows: Vec<(&str, &str)> = templates
         .resource_templates
         .iter()
@@ -230,6 +235,7 @@ async fn resources_capability_templates_and_reads() {
         [
             (resources::MEMORY_TEMPLATE, "application/json"),
             (resources::RULES_TEMPLATE, "application/json"),
+            (resources::TASKS_TEMPLATE, "application/json"),
             (resources::TICKET_TEMPLATE, "application/json"),
         ]
     );
@@ -476,7 +482,7 @@ fn templates_wire_shapes() {
         .iter()
         .map(|t| serde_json::to_value(t).expect("template serializes"))
         .collect();
-    assert_eq!(wire.len(), 3);
+    assert_eq!(wire.len(), 4);
     for row in &wire {
         assert_eq!(row["mimeType"], json!("application/json"));
         assert!(row["uriTemplate"].is_string(), "uriTemplate: {row}");

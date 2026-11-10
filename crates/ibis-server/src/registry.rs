@@ -365,7 +365,7 @@ pub static TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "memory_consolidate",
-        description: "Trigger the local-first sleeptime pass that distills observations into typed memories, merges duplicates, and decays noise.",
+        description: "Trigger the local-first sleeptime pass that distills observations into typed memories, merges duplicates, and decays noise. A durable task lease prevents concurrent passes for the same project; the response carries the task id.",
         properties: &[
             p!("project_name", "Target project/repo scope", String),
             p!("max_items", "Maximum observations to process (default 20)", Number),

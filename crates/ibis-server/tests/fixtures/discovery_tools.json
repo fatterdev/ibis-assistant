@@ -473,7 +473,7 @@
       "name": "memory_bootstrap_git_store"
     },
     {
-      "description": "Trigger the local-first sleeptime pass that distills observations into typed memories, merges duplicates, and decays noise.",
+      "description": "Trigger the local-first sleeptime pass that distills observations into typed memories, merges duplicates, and decays noise. A durable task lease prevents concurrent passes for the same project; the response carries the task id.",
       "input_schema": {
         "properties": {
           "max_items": {

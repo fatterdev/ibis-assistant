@@ -702,6 +702,12 @@ async fn run_server_async(args: Vec<String>) -> i32 {
         // service (no providers → the ticket_* group starts hidden).
         tool_discovery: ibis_server::tool_discovery::ToolDiscovery::new(!ticketing_unconfigured),
     });
+    // E16: task state changes feed `notifications/resources/updated`.
+    if let Some(tasks) = state.tasks() {
+        tasks.set_events(Some(Arc::new(ibis_server::tasks::ResourceTaskEvents::new(
+            Arc::downgrade(&state),
+        ))));
+    }
 
     // Background workers
     start_log_watcher(&state, shutdown.child_token());

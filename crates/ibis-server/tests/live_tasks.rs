@@ -10,7 +10,8 @@ use ibis_db::executor::{Executor, SurrealDbExecutor};
 use ibis_db::ids::record_id_to_plain;
 use ibis_db::schema;
 use ibis_optimization::tasks::{TaskCheckpoint, TaskPolicy, TaskStatus};
-use ibis_server::tasks::{CreateOutcome, DbTaskStore, NewTask, TaskStore};
+use ibis_server::tasks::{CreateOutcome, DbTaskStore, NewTask, TaskBegin, TaskRunner, TaskStore};
+use tokio_util::sync::CancellationToken;
 
 const DEFAULT_URL: &str = "ws://127.0.0.1:38000";
 
@@ -289,6 +290,54 @@ async fn prune_terminal_tasks_by_retention() {
     assert_eq!(store.prune(30).await.expect("prune"), 1);
     assert!(store.get(&old).await.expect("get old").is_none());
     assert!(store.get(&recent).await.expect("get recent").is_some());
+
+    cleanup(&exec, &db_name).await;
+}
+
+/// E16 step 3: the tool's create+claim split answers with the task id and
+/// never starts a second pass while the lease is live.
+#[tokio::test]
+async fn begin_claims_once_and_second_call_is_already_running() {
+    let Some((exec, db_name)) = connect_scratch().await else {
+        return;
+    };
+    schema::init_schema(exec.as_ref())
+        .await
+        .expect("init schema");
+    let store = Arc::new(DbTaskStore::new(exec.clone()));
+    let runner = TaskRunner::new(store.clone(), policy(), CancellationToken::new());
+
+    let first = runner
+        .begin(NewTask::memory_consolidate("proj", 20, 10, "test").unwrap())
+        .await
+        .expect("begin");
+    let TaskBegin::Claimed(start) = first else {
+        panic!("first begin must claim");
+    };
+    let id = record_id_to_plain(&start.row.id);
+    assert!(id.starts_with("task:"));
+
+    let second = runner
+        .begin(NewTask::memory_consolidate("proj", 20, 10, "test").unwrap())
+        .await
+        .expect("second begin");
+    match second {
+        TaskBegin::AlreadyRunning {
+            task_id,
+            status,
+            attempts,
+        } => {
+            assert_eq!(task_id, id);
+            assert_eq!(status, "running");
+            assert_eq!(attempts, 1);
+        }
+        _ => panic!("second begin must not claim a live lease"),
+    }
+
+    // The resource projection serializes the row as JSON.
+    let row = store.get(&id).await.expect("get").expect("row");
+    let json = serde_json::to_string(&row).expect("task row serializes");
+    assert!(json.contains("\"status\":\"running\""));
 
     cleanup(&exec, &db_name).await;
 }

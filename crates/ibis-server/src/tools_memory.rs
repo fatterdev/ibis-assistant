@@ -10,7 +10,10 @@ use crate::args::bool_arg;
 #[allow(unused_imports)]
 use crate::args::get_string_arg;
 use crate::state::AppState;
+use crate::tasks::{NewTask, TaskBegin, TaskRunOutcome};
 use crate::tools::{error_result, json_result, text_result, with_ui_meta, ToolResult};
+
+use ibis_db::ids::record_id_to_plain;
 
 use ibis_search::memory::add::AddMemoryParams;
 use ibis_search::memory::capture::CaptureObservationParams;
@@ -49,7 +52,7 @@ pub async fn dispatch(
         "why_changed" => why_changed(state, &args).await,
         "load_session_context" => load_session_context(state, &args, actor).await,
         "capture_observation" => capture_observation(state, &args, actor).await,
-        "memory_consolidate" => memory_consolidate(state, &args).await,
+        "memory_consolidate" => memory_consolidate(state, &args, actor).await,
         "memory_share" => memory_share(state, &args, actor).await,
         "memory_export" => memory_export(state, &args, actor).await,
         "memory_import" => memory_import(state, &args, actor).await,
@@ -949,6 +952,7 @@ async fn capture_observation(
 async fn memory_consolidate(
     state: &Arc<AppState>,
     args: &serde_json::Map<String, Value>,
+    actor: &ActorContext,
 ) -> ToolResult {
     let project_name = get_string_arg(args, "project_name");
     let max_items = args
@@ -957,40 +961,91 @@ async fn memory_consolidate(
         .filter(|v| *v > 0.0)
         .map(|v| v as usize)
         .unwrap_or(20);
-    let state = state.clone();
-    let project = project_name.clone();
-    tokio::spawn(async move {
-        let mut optimizer = ibis_optimization::Optimizer::new(
-            state.db(),
-            Some(Arc::new(crate::state::ClientAIAdapter(state.ai.clone()))
-                as Arc<dyn ibis_ai::AIProvider>),
-            Some(state.search()),
-        );
-        // C9: the duplicate-lookup similarity floor is config-driven.
-        optimizer.dup_similarity_min = state.config().ai.consolidation.dup_similarity_min;
-        optimizer.schema_enforcement = ibis_search::memory::details::SchemaEnforcement::resolve(
-            &state.config().memory.schema_enforcement,
-        );
-        // D11: shadow mode ships on (`ai.decide.shadow`).
-        optimizer.decide_shadow = state.config().ai.decide.shadow;
-        // C8: the observation engine is opt-in (`ai.observations.enabled`).
-        optimizer.observations =
-            ibis_search::memory::observations::ObservationSettings::from_config(
-                &state.config().ai.observations,
-            );
-        match optimizer.consolidate_loop(&project, max_items, None).await {
-            Err(err) => tracing::error!("Memory consolidation failed: {err}"),
-            Ok(()) => {
-                tracing::info!(
-                    "Memory consolidation completed for up to {max_items} observations."
-                );
-                state.maybe_project_memory(&project).await;
+    let Some(tasks) = state.tasks() else {
+        return error_result("database not connected".to_string());
+    };
+    let max_summaries = state
+        .config()
+        .ai
+        .observations
+        .max_llm_summaries_per_pass
+        .max(1) as usize;
+    let actor = actor.actor.as_deref().unwrap_or("local");
+    let new = match NewTask::memory_consolidate(&project_name, max_items, max_summaries, actor) {
+        Ok(new) => new,
+        Err(err) => return error_result(err.to_string()),
+    };
+    let begin = match tasks.begin(new).await {
+        Ok(begin) => begin,
+        Err(err) => return error_result(format!("task store: {err}")),
+    };
+    match begin {
+        TaskBegin::AlreadyRunning {
+            task_id,
+            status,
+            attempts,
+        } => text_result(format!(
+            "A consolidation pass is already running for {project_name} ({task_id}, status {status}, attempt {attempts})."
+        )),
+        TaskBegin::Claimed(start) => {
+            let created = start.created;
+            let attempts = start.row.claims;
+            let task_id = record_id_to_plain(&start.row.id);
+            let project = start
+                .row
+                .project
+                .clone()
+                .unwrap_or_else(|| project_name.clone());
+            let state = state.clone();
+            let tasks = tasks.clone();
+            tokio::spawn(async move {
+                let optimizer = crate::consolidation::build_optimizer(&state);
+                match tasks.execute_project(*start, &optimizer, &project).await {
+                    Ok(TaskRunOutcome::Completed { .. }) => {
+                        tracing::info!("Memory consolidation completed for {project}");
+                        state.maybe_project_memory(&project).await;
+                    }
+                    Ok(TaskRunOutcome::Failed { error, .. }) => {
+                        tracing::error!("Memory consolidation failed for {project}: {error}");
+                    }
+                    Ok(outcome) => {
+                        tracing::info!("Memory consolidation for {project}: {outcome:?}");
+                    }
+                    Err(err) => tracing::error!("Memory consolidation failed for {project}: {err}"),
+                }
+            });
+            if created {
+                text_result(format!(
+                    "Consolidation started for up to {max_items} candidate observations ({task_id})."
+                ))
+            } else {
+                text_result(format!(
+                    "Resumed consolidation for {project_name} ({task_id}, attempt {attempts})."
+                ))
             }
         }
-    });
-    text_result(format!(
-        "Consolidation started for up to {max_items} candidate observations."
-    ))
+        TaskBegin::Degraded { params, reason } => {
+            let state = state.clone();
+            let tasks = tasks.clone();
+            let project = project_name.clone();
+            tokio::spawn(async move {
+                let optimizer = crate::consolidation::build_optimizer(&state);
+                match tasks
+                    .run_degraded_project(&params, &optimizer, &project)
+                    .await
+                {
+                    Ok(TaskRunOutcome::Degraded { .. }) => {
+                        state.maybe_project_memory(&project).await;
+                    }
+                    Ok(outcome) => tracing::info!("Consolidation degraded: {outcome:?}"),
+                    Err(err) => tracing::error!("Consolidation degraded failed: {err}"),
+                }
+            });
+            text_result(format!(
+                "Consolidation started for up to {max_items} candidate observations (degraded: {reason})."
+            ))
+        }
+    }
 }
 
 /// Scenario: memory_share

@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use serde::Serialize;
 use surrealdb::types::{Datetime, RecordId, SurrealValue, Value};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -27,7 +28,7 @@ use ibis_optimization::tasks::{
 use ibis_optimization::Optimizer;
 
 /// A `task` row as decoded from SurrealDB.
-#[derive(Debug, Clone, SurrealValue)]
+#[derive(Debug, Clone, Serialize, SurrealValue)]
 pub struct TaskRow {
     pub id: RecordId,
     pub kind: String,
@@ -373,12 +374,77 @@ pub enum TaskRunOutcome {
     },
 }
 
+/// A claimed task ready to run, plus the fallback params if the row lost them.
+pub struct TaskStart {
+    pub row: TaskRow,
+    pub created: bool,
+    fallback_params: TaskParams,
+}
+
+/// Result of the create+claim phase.
+pub enum TaskBegin {
+    Claimed(Box<TaskStart>),
+    AlreadyRunning {
+        task_id: String,
+        status: String,
+        attempts: i64,
+    },
+    Degraded {
+        params: TaskParams,
+        reason: String,
+    },
+}
+
+/// Optional sink for resource notifications (create/claim/finish).
+pub trait TaskEvents: Send + Sync {
+    fn task_changed(&self, task_id: &str);
+}
+
+/// `TaskEvents` adapter: fires `ibis://tasks` and `ibis://tasks/{id}` on the
+/// shared subscription registry (state is weak to avoid an Arc cycle).
+pub struct ResourceTaskEvents {
+    state: std::sync::Weak<crate::state::AppState>,
+}
+
+impl ResourceTaskEvents {
+    pub fn new(state: std::sync::Weak<crate::state::AppState>) -> Self {
+        ResourceTaskEvents { state }
+    }
+}
+
+impl TaskEvents for ResourceTaskEvents {
+    fn task_changed(&self, task_id: &str) {
+        let Some(state) = self.state.upgrade() else {
+            return;
+        };
+        let key = task_id
+            .trim_start_matches("task:")
+            .trim_matches(|c| c == '\u{27e8}' || c == '\u{27e9}')
+            .to_string();
+        let forms = [
+            task_id.to_string(),
+            key.clone(),
+            format!("task:\u{27e8}{key}\u{27e9}"),
+        ];
+        tokio::spawn(async move {
+            state.resource_subs.fire(crate::resources::TASKS_URI).await;
+            for form in forms {
+                state
+                    .resource_subs
+                    .fire(&format!("{}/{}", crate::resources::TASKS_URI, form))
+                    .await;
+            }
+        });
+    }
+}
+
 /// Lease/fencing/checkpoint owner for one process.
 pub struct TaskRunner {
     store: Arc<dyn TaskStore>,
     policy: TaskPolicy,
     owner: String,
     shutdown: CancellationToken,
+    events: Mutex<Option<Arc<dyn TaskEvents>>>,
 }
 
 impl TaskRunner {
@@ -388,6 +454,18 @@ impl TaskRunner {
             policy,
             owner: format!("{}:{}", std::process::id(), uuid::Uuid::new_v4().simple()),
             shutdown,
+            events: Mutex::new(None),
+        }
+    }
+
+    /// Installs the resource-notification sink (after `AppState` exists).
+    pub fn set_events(&self, events: Option<Arc<dyn TaskEvents>>) {
+        *self.events.lock().unwrap() = events;
+    }
+
+    fn notify(&self, task_id: &str) {
+        if let Some(events) = self.events.lock().unwrap().as_ref() {
+            events.task_changed(task_id);
         }
     }
 
@@ -398,6 +476,11 @@ impl TaskRunner {
     /// Active tasks (`queued`/`running`) for the daemon's queued-first drain.
     pub async fn active(&self) -> Result<Vec<TaskRow>, String> {
         self.store.active().await
+    }
+
+    /// One task row by record id (resources).
+    pub async fn get(&self, task_id: &str) -> Result<Option<TaskRow>, String> {
+        self.store.get(task_id).await
     }
 
     /// Boot recovery + retention prune. Failures are warnings, never fatal.
@@ -437,37 +520,44 @@ impl TaskRunner {
     }
 
     /// Generic runner used by tests with a fake pass/store.
-    pub async fn run_task(
-        &self,
-        new: NewTask,
-        pass: &dyn TaskPass,
-    ) -> Result<TaskRunOutcome, String> {
-        let requested_params = new.params.clone();
+    /// Creates or finds the active task and claims it. Returns before the
+    /// pass runs so the tool can answer with the task id.
+    pub async fn begin(&self, new: NewTask) -> Result<TaskBegin, String> {
+        let fallback_params = new.params.clone();
         let created = match self.store.create_or_get(new).await {
             Ok(outcome) => outcome,
             Err(err) => {
                 tracing::warn!("TaskStore: create failed, running without lease: {err}");
-                return self.run_degraded(pass, &requested_params, err).await;
+                return Ok(TaskBegin::Degraded {
+                    params: fallback_params,
+                    reason: err,
+                });
             }
         };
-        let row = match created {
+        let (row, created) = match created {
             CreateOutcome::Created(row) => {
                 let task_id = record_id_to_plain(&row.id);
                 tracing::info!(target: "task_created", task = %task_id, "task_created");
-                row
+                self.notify(&task_id);
+                (row, true)
             }
-            CreateOutcome::Existing(row) => row,
+            CreateOutcome::Existing(row) => (row, false),
         };
         let task_id = record_id_to_plain(&row.id);
-        let claimed = match self.store.claim(&task_id, &self.owner, &self.policy).await {
-            Ok(Some(row)) => {
+        match self.store.claim(&task_id, &self.owner, &self.policy).await {
+            Ok(Some(claimed)) => {
                 tracing::info!(
                     target: "task_claimed",
                     task = %task_id,
-                    epoch = row.lease_epoch,
+                    epoch = claimed.lease_epoch,
                     "task_claimed"
                 );
-                row
+                self.notify(&task_id);
+                Ok(TaskBegin::Claimed(Box::new(TaskStart {
+                    row: claimed,
+                    created,
+                    fallback_params,
+                })))
             }
             Ok(None) => {
                 tracing::info!(
@@ -475,15 +565,70 @@ impl TaskRunner {
                     task = %task_id,
                     "task_claim_skipped"
                 );
-                return Ok(TaskRunOutcome::AlreadyRunning { task_id });
+                Ok(TaskBegin::AlreadyRunning {
+                    task_id,
+                    status: row.status,
+                    attempts: row.claims,
+                })
             }
             Err(err) => {
                 tracing::warn!("TaskStore: claim failed, running without lease: {err}");
-                return self.run_degraded(pass, &requested_params, err).await;
+                Ok(TaskBegin::Degraded {
+                    params: fallback_params,
+                    reason: err,
+                })
             }
-        };
+        }
+    }
+
+    /// Runs a claimed task with the production consolidation pass.
+    pub async fn execute_project(
+        &self,
+        start: TaskStart,
+        optimizer: &Optimizer,
+        project: &str,
+    ) -> Result<TaskRunOutcome, String> {
+        let pass = OptimizerPass { optimizer, project };
+        self.execute_start(start, &pass).await
+    }
+
+    /// Runs the pass without a lease when the store failed after start.
+    pub async fn run_degraded_project(
+        &self,
+        params: &TaskParams,
+        optimizer: &Optimizer,
+        project: &str,
+    ) -> Result<TaskRunOutcome, String> {
+        let pass = OptimizerPass { optimizer, project };
+        self.run_degraded(&pass, params, "task store unavailable".into())
+            .await
+    }
+
+    pub async fn run_task(
+        &self,
+        new: NewTask,
+        pass: &dyn TaskPass,
+    ) -> Result<TaskRunOutcome, String> {
+        match self.begin(new).await? {
+            TaskBegin::Claimed(start) => self.execute_start(*start, pass).await,
+            TaskBegin::AlreadyRunning { task_id, .. } => {
+                Ok(TaskRunOutcome::AlreadyRunning { task_id })
+            }
+            TaskBegin::Degraded { params, reason } => {
+                self.run_degraded(pass, &params, reason).await
+            }
+        }
+    }
+
+    async fn execute_start(
+        &self,
+        start: TaskStart,
+        pass: &dyn TaskPass,
+    ) -> Result<TaskRunOutcome, String> {
+        let claimed = start.row;
+        let task_id = record_id_to_plain(&claimed.id);
         let epoch = claimed.lease_epoch;
-        let params = claimed.params.clone().unwrap_or(requested_params);
+        let params = claimed.params.clone().unwrap_or(start.fallback_params);
         let cap = params.max_llm_summaries as usize;
         let initial = claimed.checkpoint.clone().unwrap_or_default();
         let initial_summaries = initial.summaries_used;
@@ -575,6 +720,7 @@ impl TaskRunner {
             match self.store.requeue(&task_id, &self.owner, epoch).await {
                 Ok(true) => {
                     tracing::info!(target: "task_requeued", task = %task_id, "task_requeued");
+                    self.notify(&task_id);
                     return Ok(TaskRunOutcome::Requeued { task_id });
                 }
                 Ok(false) => return Ok(TaskRunOutcome::LeaseLost { task_id }),
@@ -603,6 +749,7 @@ impl TaskRunner {
             .await
         {
             Ok(true) => {
+                self.notify(&task_id);
                 match terminal {
                     TaskStatus::Completed => tracing::info!(
                         target: "task_completed",
@@ -995,6 +1142,15 @@ mod tests {
         remaining: AtomicUsize,
     }
 
+    #[derive(Default)]
+    struct CountingEvents(AtomicUsize);
+
+    impl TaskEvents for CountingEvents {
+        fn task_changed(&self, _task_id: &str) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
     impl FakePass {
         fn ok() -> Self {
             FakePass {
@@ -1192,6 +1348,26 @@ mod tests {
             .unwrap();
         assert!(matches!(outcome, TaskRunOutcome::Degraded { .. }));
         assert_eq!(pass.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn events_fire_on_create_claim_and_finish() {
+        let store = Arc::new(FakeTaskStore::default());
+        let runner = runner(store, CancellationToken::new());
+        let events = Arc::new(CountingEvents::default());
+        runner.set_events(Some(events.clone()));
+        let pass = FakePass::ok();
+        runner
+            .run_task(
+                NewTask::memory_consolidate("proj", 20, 10, "test").unwrap(),
+                &pass,
+            )
+            .await
+            .unwrap();
+        assert!(
+            events.0.load(Ordering::SeqCst) >= 3,
+            "create + claim + finish notify"
+        );
     }
 
     #[test]

@@ -81,6 +81,16 @@ pub fn curator_resource() -> Resource {
     .with_meta(ibis_httpserver::curator::ui_resource_meta())
 }
 
+pub fn tasks_resource() -> Resource {
+    Resource::new(crate::resources::TASKS_URI, "Active Tasks")
+        .with_title("Active Tasks")
+        .with_description(
+            "Durable task envelopes currently queued or running (E16): lease, checkpoint, \
+             claims and recoveries.",
+        )
+        .with_mime_type("application/json")
+}
+
 impl IbisServer {
     pub fn new(state: Arc<AppState>, with_logging: bool) -> Self {
         IbisServer {
@@ -268,6 +278,7 @@ impl ServerHandler for IbisServer {
             resources: vec![
                 Self::guide_resource(),
                 crate::mcp_server::curator_resource(),
+                crate::mcp_server::tasks_resource(),
             ],
             ..Default::default()
         })
@@ -514,6 +525,14 @@ impl ServerHandler for IbisServer {
                         }
                         if let Some(db) = db {
                             state.bind_db(db);
+                            if let Some(tasks) = state.tasks() {
+                                tasks.set_events(Some(Arc::new(
+                                    crate::tasks::ResourceTaskEvents::new(
+                                        std::sync::Arc::downgrade(&state),
+                                    ),
+                                )));
+                                tasks.recover_and_prune().await;
+                            }
                             tracing::info!("Plugin workspace bound; embedded DB connected.");
                         }
                     }
