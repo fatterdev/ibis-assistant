@@ -55,3 +55,12 @@
 - **Aperto (follow-up dichiarati):** test loop-level “item N+1 non parte dopo lease lost” (oggi test diretto su `should_continue`), test `observations_pass` con budget residuo 0, asserzione della proiezione `maybe_project_memory`; prossimo step 3.
 
 
+
+## Handoff 2026-11-10 22:14
+- **Stato:** step 2/10 completato; step 3 non iniziato.
+- **Ultimo commit:** `b591a80` `docs(planning): record E16 step 2 completion` (codice `f9b00d5`).
+- **Gate:** fmt ok · clippy `-D warnings` ok · workspace test ok (84 suite, 0 failure) · eval non eseguita in questo step · live `live_tasks` 4/4, `live_surreal` 12/12, `live_observations`/`live_memory_estate` incluse nel workspace test con sidecar attivo.
+- **Fatto:** `task` schema+modello+config (step 1, `ba89f4c`); `DbTaskStore`+`TaskRunner`+`PassCheckpoint`+heartbeat/fencing/checkpoint/recovery/prune/shutdown (step 2, `f9b00d5`); wiring `AppState.tasks` (Mutex + accessor + `bind_db` plugin), recovery/prune al boot, queued-first, shutdown ordinato con abort a 10s; live 4.0.0 per claim/reclaim/fencing/checkpoint/recovery/prune; unit runner 7/7.
+- **Aperto:** step 3 (tool `memory_consolidate` con task id/no doppio spawn, risorse `ibis://tasks[/{id}]`, notifiche `resources/updated`, fixture discovery); poi gate completo (eval retrieval/observations) e live gate. Follow-up dichiarati: test loop-level lease-lost, test budget residuo observations, asserzione proiezione; notifiche task ancora da collegare al runner (serve un sink eventi).
+- **Prossimo comando:** `git status --short; cargo test -p ibis-server tasks::tests` (verifica ripresa), poi aprire `docs/planning/2026-11-10-dailydoseofds-improvement-analysis-l3-fase-5.md` §4.5 e implementare lo step 3.
+- **Decisioni richieste:** nessuna.
