@@ -17,7 +17,7 @@
 | # | Step | Stato |
 |---|---|---|
 | 1 | E16 — schema `task` + modello puro + config `tasks.*` + probe live UNIQUE/NONE | done (`ba89f4c`) |
-| 2 | E16 — `DbTaskStore` + runner + `PassCheckpoint` + recovery/prune + shutdown | da fare |
+| 2 | E16 — `DbTaskStore` + runner + `PassCheckpoint` + recovery/prune + shutdown | done (`f9b00d5`) |
 | 3 | E16 — tool `memory_consolidate` + risorse `ibis://tasks` + notifiche + fixture | da fare |
 | 4 | F17 — feature `otel`, config, registry, shutdown, CI | da fare |
 | 5 | F17 — span `mcp.tool`, `ai.generate`, `ai.embed`, `memory.consolidate` | da fare |
@@ -42,4 +42,16 @@
 - **Probe live:** `unique_active_key_blocks_second_active_task` verde su 4.0.0 — il secondo task attivo viola `task_active_key`; quattro terminali con `active_key=NONE` coesistono. **Piano A confermato, niente sentinel `done:{id}`.**
 - **Gate:** clippy workspace `-D warnings` verde; `cargo test --workspace --no-fail-fast` 83 suite, 0 failure; unit `ibis-optimization` 12/12; config test verde.
 - **Deviazioni minori (review):** id reso `task:⟨32 hex⟩` e validato 32-hex; builder claim/heartbeat prendono `&TaskPolicy` (clamp non bypassabile); `finish_task_sql` accetta solo `TaskStatus` terminale (niente `$terminal` libero); aggiunti shape test recovery/prune e pin cross-crate default config↔policy.
+
+## Step 2 — E16 store, runner e checkpoint (2026-11-10)
+
+- **Commit:** `f9b00d5` `feat(tasks): task store, runner, checkpoint seam and shutdown (E16 ddofds)`.
+- **Store:** `crates/ibis-server/src/tasks.rs` — `TaskStore` seam + `DbTaskStore` (create-or-get con corsa UNIQUE, claim, heartbeat, checkpoint, finish, requeue, recovery, prune, get/active).
+- **Runner:** lease owner per processo, heartbeat tokio indipendente, checkpoint writer per item/scope (budget base sui tentativi precedenti), stop al confine item, shutdown requeue senza recovery, fail-open su store/errori di bookkeeping, errore troncato a 2 KB.
+- **Seam:** `PassCheckpoint` in `ibis-optimization::tasks`; `consolidate_loop`/`observations_pass` accettano `Option<&dyn PassCheckpoint>`; cap sintesi residuo dal task; `items_total` scritto subito; `scope_done` per scope.
+- **Wiring:** `AppState.tasks` (Mutex + accessor), runner creato al boot e su `bind_db` (plugin), recovery/prune al boot indipendenti dal loop opt-in, queued-first prima della discovery, `consolidation::start` ritorna il JoinHandle e lo shutdown attende (abort a 10s) prima di chiudere il DB.
+- **Live:** `crates/ibis-server/tests/live_tasks.rs` 4/4 su 4.0.0 — claim/reclaim/fencing/checkpoint, recovery 3 reclaim poi failed, shutdown requeue, prune `RETURN BEFORE`.
+- **Unit:** 7/7 runner con fake store/pass; `cargo test --workspace --no-fail-fast` 84 suite, 0 failure; clippy `-D warnings` verde.
+- **Aperto (follow-up dichiarati):** test loop-level “item N+1 non parte dopo lease lost” (oggi test diretto su `should_continue`), test `observations_pass` con budget residuo 0, asserzione della proiezione `maybe_project_memory`; prossimo step 3.
+
 
