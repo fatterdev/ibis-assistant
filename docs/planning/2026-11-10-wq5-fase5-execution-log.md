@@ -188,3 +188,15 @@ Review olistica finale (tre revisori read-only: F17, G19, G20+E16) — verdetti:
 - **Aperto:** solo follow-up dichiarati sopra; nessun blocco, nessuna decisione richiesta.
 - **Prossimo comando:** nessuno (fase chiusa). Per riprendere: `git log --oneline -n 20` e `git status --short`.
 - **Decisioni richieste:** nessuna.
+
+## Post-review hardening (2026-11-12)
+
+Review dei soli residui minori dichiarati (F17, G19, G20): tutti confermati sul codice, nessun nuovo blocker; fix estesi applicati prima del push.
+
+- **F17 — warn gRPC**: `tonic_metadata` ora restituisce i warning come stringhe; `build_layer`/`install` li bufferizza e li ri-emette **dopo** `set_global_default` (prima andavano persi, emessi durante il build antecedente al subscriber). Test: metadata invalida (nome con spazio, valore con control byte) + threading fino a `build_layer` (2 nuovi, `--features otel`).
+- **F17 — stats degraded/no-store**: nuovo `StatsCheckpoint` stats-only (`should_continue` true, `remaining_summaries` `None` → stesso cap di config) usato dal path senza task store (`consolidation.rs`) e da `run_degraded` (`tasks.rs`): lo span `memory.consolidate` ora porta items/summaries/deferred/fallbacks/failed anche lì, a semantica invariata. Test unit dedicato.
+- **G19 — scratch e read-only Windows**: tmp `<file>.ibis-tmp.<pid>` (run concorrenti non condividono più lo scratch); su errore il cleanup azzera l'attributo read-only copiato prima di rimuovere (niente `.ibis-tmp` orfano che blocca i run successivi); `rename` su destinazione read-only produce un errore actionable ("clear the read-only attribute"). Test: leftover scan, errore read-only Windows (target invariato + cleanup), invariante `TOTAL_CAP = PER_KIND_CAP × 3`.
+- **G19 — contesto Io**: `ProjectError::Io` porta ora `context` (path + operazione: "cannot read/cannot create/…") invece del bare "access denied"; mapping CLI invariato (exit 1). Test: read su directory e create su parent mancante nominano il path.
+- **G20**: `canonical_group` case-insensitive (`"Settings"` → `settings`, coerente con `match`); test di `get_tool` in-crate (ultimo profilo risolto: settings nascosti dal profilo copilot, gate ticketing chiuso); e2e nuovo `harness_sampling_never_skips_a_capable_client` (client con capability sampling dichiarata, profilo `never` → leg disabilitato sul registry reale, zero `sampling/createMessage`). Docs: `ai_and_settings.md` e commento `HarnessProfile` su gruppi case-insensitive; `memory_layer.md` sul nuovo scratch/errore.
+- **Gate:** fmt ok; clippy workspace `--all-targets -D warnings` ok; clippy + lib test `--features otel` ok; `ibis-logger --features otel` **23/23**; `ibis-cli` **71/71**; e2e sampling **4/4**; workspace **85 suite, 0 failure**; contract 58 e fixture discovery invariati.
+- **Push:** fast-forward su `origin/main` (140 commit di fase + hardening).

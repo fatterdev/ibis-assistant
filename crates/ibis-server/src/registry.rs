@@ -1087,11 +1087,13 @@ pub fn group_of(name: &str) -> Option<&'static str> {
         .map(|(group, _)| *group)
 }
 
-/// Canonical group name, or `None` for an unknown group.
+/// Canonical group name, or `None` for an unknown group. The comparison is
+/// case-insensitive (`"Settings"` resolves to `settings`), matching the
+/// case-insensitive `match` handling of harness profiles.
 pub fn canonical_group(group: &str) -> Option<&'static str> {
     TOOL_GROUPS
         .iter()
-        .find(|(name, _)| *name == group)
+        .find(|(name, _)| name.eq_ignore_ascii_case(group))
         .map(|(name, _)| *name)
 }
 
@@ -1196,5 +1198,14 @@ mod group_tests {
         assert_eq!(group_of("memory_search"), None);
         assert!(group_exists("settings"));
         assert!(!group_exists("nope"));
+        // Case-insensitive, mirroring the harness `match` handling.
+        assert!(group_exists("Settings"));
+        assert!(group_exists("OPTIMIZE"));
+        assert_eq!(
+            canonical_group(" Ticketing "),
+            None,
+            "trimming stays the caller's job"
+        );
+        assert_eq!(canonical_group("TICKETING"), Some("ticketing"));
     }
 }

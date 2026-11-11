@@ -388,7 +388,7 @@ Per-host behavior without changing the tool surface:
 }
 ```
 
-`match` is a case-insensitive substring on `clientInfo.name`; the first profile wins, unknown clients get `default`. Groups: `ticketing`, `settings`, `optimize`. Default = current behavior (no hidden groups, sampling `auto`). Hiding `settings` also hides `settings_open_ui`, which the VS Code "Open Settings" command, the Cursor Status/Settings commands and the Copilot status skill call - do not combine that profile with those surfaces. `sampling: never` removes the MCP sampling leg and the chain falls back to lm_bridge/ollama. The per-surface wiring matrix is [harness/profiles.json](../harness/profiles.json).
+`match` is a case-insensitive substring on `clientInfo.name`; the first profile wins, unknown clients get `default`. Groups (case-insensitive): `ticketing`, `settings`, `optimize`. Default = current behavior (no hidden groups, sampling `auto`). Hiding `settings` also hides `settings_open_ui`, which the VS Code "Open Settings" command, the Cursor Status/Settings commands and the Copilot status skill call - do not combine that profile with those surfaces. `sampling: never` removes the MCP sampling leg and the chain falls back to lm_bridge/ollama. The per-surface wiring matrix is [harness/profiles.json](../harness/profiles.json).
 
 ## Config sketch
 

@@ -138,10 +138,15 @@ async fn run_pass(state: &Arc<AppState>) {
     for project in queue {
         let Some(tasks) = state.tasks() else {
             let span = crate::telemetry::active_memory_consolidate_span(&project);
+            // F17: no task store → no `RunnerCheckpoint`; the stats-only
+            // checkpoint still fills ibis.items/ibis.summaries/… on the span
+            // with the pass semantics unchanged.
+            let stats = crate::tasks::StatsCheckpoint::new();
             let result = optimizer
-                .consolidate_loop(&project, MAX_ITEMS_PER_PROJECT, None)
+                .consolidate_loop(&project, MAX_ITEMS_PER_PROJECT, Some(&stats))
                 .instrument(span.clone())
                 .await;
+            crate::telemetry::record_pass_stats(&span, &stats.snapshot());
             match result {
                 Err(err) => {
                     crate::telemetry::record_pass_outcome(

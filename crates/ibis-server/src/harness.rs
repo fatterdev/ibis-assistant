@@ -218,4 +218,17 @@ mod tests {
         assert!(resolved.hides("ticket_search"));
         assert!(!resolved.hides("memory_search"));
     }
+
+    #[test]
+    fn group_names_are_case_insensitive() {
+        let cfg = config(vec![profile(
+            &["copilot"],
+            "copilot",
+            "auto",
+            &["Settings"],
+        )]);
+        let resolved = resolve(&cfg, Some("copilot"));
+        assert!(resolved.hides("settings_get"));
+        assert!(resolved.hides_group("settings"));
+    }
 }

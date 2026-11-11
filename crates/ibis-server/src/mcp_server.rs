@@ -692,3 +692,79 @@ mod panic_guard_tests {
         assert_eq!(panic_payload_message(&*from_string), "string payload");
     }
 }
+
+/// G20: `get_tool` has no request context, so it follows the last resolved
+/// harness profile (set by construction, then `list_tools`/`call_tool`/
+/// `on_initialized`). These tests pin that contract directly, including the
+/// config-gated ticketing gate.
+#[cfg(test)]
+mod harness_get_tool_tests {
+    use std::sync::{Arc, Mutex, RwLock};
+
+    use ibis_core::config::{Config, HarnessConfig, HarnessProfile};
+
+    use super::*;
+
+    /// Minimal server state mirroring the discovery integration tests: no DB
+    /// (degraded clone-only), no AI, ticketing unconfigured.
+    async fn test_server(harness: HarnessConfig) -> IbisServer {
+        let mut cfg = Config {
+            port: 3030,
+            runtime_mode: "server".into(),
+            ..Default::default()
+        };
+        cfg.harness = harness;
+        let cfg = Arc::new(cfg);
+        let db: Option<Arc<dyn ibis_db::executor::Executor>> = None;
+        let ticket = crate::assembly::assemble_ticketing(db.clone()).await.0;
+        let repopr = crate::assembly::assemble_repopr(&ticket.config().clone());
+        let state = Arc::new(AppState {
+            cfg: Arc::new(RwLock::new((*cfg).clone())),
+            db: Arc::new(RwLock::new(db)),
+            search: Arc::new(RwLock::new(Arc::new(
+                ibis_search::search::SearchService::new(None, None),
+            ))),
+            ai: Arc::new(ibis_ai::Client::new(None, None, None)),
+            ticket,
+            repopr,
+            sessions: Mutex::new(std::collections::HashMap::new()),
+            ingestion: Arc::new(ibis_ingest_dynamic::queue::ProjectIngestionManager::new(
+                cfg.clone(),
+                None,
+            )),
+            active_repos: vec![],
+            db_process: Mutex::new(None),
+            resource_subs: crate::resources::ResourceSubscriptions::default(),
+            sampling: Arc::new(crate::sampling::SamplingSessionRegistry::new()),
+            tasks: Mutex::new(None),
+            task_shutdown: tokio_util::sync::CancellationToken::new(),
+            tool_discovery: crate::tool_discovery::ToolDiscovery::new(false),
+        });
+        IbisServer::new(state, false)
+    }
+
+    #[tokio::test]
+    async fn get_tool_uses_the_last_resolved_profile() {
+        let mut harness = HarnessConfig::default();
+        harness.profiles.push(HarnessProfile {
+            match_names: vec!["copilot".into()],
+            name: "copilot".into(),
+            sampling: "never".into(),
+            hidden_tool_groups: vec!["settings".into()],
+        });
+        let server = test_server(harness).await;
+
+        // Construction resolved the default profile: settings visible.
+        assert!(server.get_tool("settings_get").is_some());
+        assert!(server.get_tool("memory_search").is_some());
+        // The config-gated ticketing group stays absent while unconfigured.
+        assert!(server.get_tool("ticket_get_capabilities").is_none());
+
+        // The context-less lookup follows the profile last resolved by this
+        // connection (exactly what `list_tools`/`call_tool` leave behind).
+        let profile = crate::harness::resolve(&server.state.config().harness, Some("copilot-cli"));
+        *server.last_profile.lock().unwrap() = profile;
+        assert!(server.get_tool("settings_get").is_none());
+        assert!(server.get_tool("memory_search").is_some());
+    }
+}

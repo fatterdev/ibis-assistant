@@ -299,7 +299,8 @@ pub struct HarnessConfig {
 
 /// One harness profile. `match` is a list of case-insensitive substrings on
 /// `clientInfo.name`; `sampling` is `auto` (default) or `never`;
-/// `hidden_tool_groups` is a subset of the server's `TOOL_GROUPS`.
+/// `hidden_tool_groups` names are case-insensitive and must be a subset of the
+/// server's `TOOL_GROUPS`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct HarnessProfile {

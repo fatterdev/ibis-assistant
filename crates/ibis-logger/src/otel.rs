@@ -85,11 +85,17 @@ where
     S: tracing::Subscriber + for<'a> LookupSpan<'a> + Send + Sync + 'static,
 {
     let mut build_error: Option<String> = None;
+    let mut header_warnings: Vec<String> = Vec::new();
     let mut guard: Option<TelemetryGuard> = None;
     let layer = if telemetry.otlp.enabled && GUARD.get().is_none() {
         match build_layer::<S>(telemetry) {
-            Ok((layer, built_guard)) => {
+            Ok(BuiltLayer {
+                layer,
+                guard: built_guard,
+                warnings,
+            }) => {
                 guard = Some(built_guard);
+                header_warnings = warnings;
                 Some(layer)
             }
             Err(err) => {
@@ -125,6 +131,12 @@ where
     if let Some(err) = build_error {
         tracing::warn!("OpenTelemetry exporter could not be built: {err}; telemetry stays off");
     }
+    // The exporter build runs before the subscriber exists: its warnings are
+    // buffered and emitted now, or they would be lost (same pattern as the
+    // build error above).
+    for warning in header_warnings {
+        tracing::warn!("{warning}");
+    }
     if installed && layer_built {
         // Re-run normalization only to surface its warnings; the values used
         // by the layer were resolved before installation.
@@ -138,18 +150,24 @@ where
     }
 }
 
+/// Result of a successful layer build: the OTLP layer, its provider guard,
+/// and the warnings buffered until the subscriber is installed.
+struct BuiltLayer<S> {
+    layer: OpenTelemetryLayer<S, SdkTracer>,
+    guard: TelemetryGuard,
+    warnings: Vec<String>,
+}
+
 fn build_layer<S>(
     telemetry: &TelemetryConfig,
-) -> Result<
-    (OpenTelemetryLayer<S, SdkTracer>, TelemetryGuard),
-    opentelemetry_otlp::ExporterBuildError,
->
+) -> Result<BuiltLayer<S>, opentelemetry_otlp::ExporterBuildError>
 where
     S: tracing::Subscriber + for<'a> LookupSpan<'a>,
 {
     let resolved = telemetry.otlp.resolved();
+    let (exporter, warnings) = build_exporter(&resolved)?;
     let exporter = WarnOnceExporter {
-        inner: build_exporter(&resolved)?,
+        inner: exporter,
         warned: AtomicBool::new(false),
     };
 
@@ -174,26 +192,37 @@ where
         .with_threads(false)
         .with_target(false)
         .with_tracked_inactivity(false);
-    Ok((layer, TelemetryGuard { provider }))
+    Ok(BuiltLayer {
+        layer,
+        guard: TelemetryGuard { provider },
+        warnings,
+    })
 }
 
 fn build_exporter(
     resolved: &ResolvedOtlp,
-) -> Result<OtlpSpanExporter, opentelemetry_otlp::ExporterBuildError> {
+) -> Result<(OtlpSpanExporter, Vec<String>), opentelemetry_otlp::ExporterBuildError> {
     let builder = OtlpSpanExporter::builder();
     match resolved.protocol {
-        OtlpProtocol::HttpProtobuf => builder
-            .with_http()
-            .with_endpoint(http_traces_endpoint(&resolved.endpoint))
-            .with_headers(resolved.headers.clone())
-            .with_timeout(Duration::from_secs(5))
-            .build(),
-        OtlpProtocol::Grpc => builder
-            .with_tonic()
-            .with_endpoint(resolved.endpoint.clone())
-            .with_metadata(tonic_metadata(&resolved.headers))
-            .with_timeout(Duration::from_secs(5))
-            .build(),
+        OtlpProtocol::HttpProtobuf => Ok((
+            builder
+                .with_http()
+                .with_endpoint(http_traces_endpoint(&resolved.endpoint))
+                .with_headers(resolved.headers.clone())
+                .with_timeout(Duration::from_secs(5))
+                .build()?,
+            Vec::new(),
+        )),
+        OtlpProtocol::Grpc => {
+            let (metadata, warnings) = tonic_metadata(&resolved.headers);
+            let exporter = builder
+                .with_tonic()
+                .with_endpoint(resolved.endpoint.clone())
+                .with_metadata(metadata)
+                .with_timeout(Duration::from_secs(5))
+                .build()?;
+            Ok((exporter, warnings))
+        }
     }
 }
 
@@ -209,36 +238,38 @@ fn http_traces_endpoint(endpoint: &str) -> String {
 }
 
 /// Converts the static config headers into tonic metadata. Invalid keys or
-/// values are skipped with a warning (they would otherwise fail the export
-/// silently at the first batch).
+/// values are skipped and returned as warning strings (they would otherwise
+/// fail the export silently at the first batch); the caller buffers the
+/// warnings until the subscriber is installed, so they are not lost.
 fn tonic_metadata(
     headers: &std::collections::HashMap<String, String>,
-) -> tonic::metadata::MetadataMap {
+) -> (tonic::metadata::MetadataMap, Vec<String>) {
     use tonic::metadata::{MetadataKey, MetadataMap, MetadataValue};
 
     let mut metadata = MetadataMap::new();
+    let mut warnings = Vec::new();
     for (name, raw) in headers {
         let key = match MetadataKey::from_bytes(name.as_bytes()) {
             Ok(key) => key,
             Err(_) => {
-                tracing::warn!(
+                warnings.push(format!(
                     "telemetry.otlp.headers key '{name}' is not valid gRPC metadata; skipped"
-                );
+                ));
                 continue;
             }
         };
         let value = match MetadataValue::try_from(raw.as_str()) {
             Ok(value) => value,
             Err(_) => {
-                tracing::warn!(
+                warnings.push(format!(
                     "telemetry.otlp.headers value for '{name}' is not valid gRPC metadata; skipped"
-                );
+                ));
                 continue;
             }
         };
         metadata.insert(key, value);
     }
-    metadata
+    (metadata, warnings)
 }
 
 /// Flushes pending spans, bounded by `timeout`. No provider → no-op.
@@ -395,6 +426,59 @@ mod tests {
         assert_eq!(
             http_traces_endpoint("http://collector/v1/traces"),
             "http://collector/v1/traces"
+        );
+    }
+
+    /// F17: invalid gRPC metadata is skipped with a warning string instead of
+    /// a `tracing::warn!` that would fire before the subscriber exists.
+    #[test]
+    fn grpc_metadata_reports_invalid_headers_without_panicking() {
+        let headers = std::collections::HashMap::from([
+            ("valid-key".to_string(), "ok".to_string()),
+            // Header names normalize their case but must stay a token: a space
+            // is invalid.
+            ("Bad Key".to_string(), "ok".to_string()),
+            // Control bytes are not valid header values.
+            ("also-valid".to_string(), "bad\nvalue".to_string()),
+        ]);
+        let (metadata, warnings) = tonic_metadata(&headers);
+        assert_eq!(metadata.len(), 1, "only the valid pair lands in the map");
+        assert_eq!(
+            warnings.len(),
+            2,
+            "one warning per skipped pair: {warnings:?}"
+        );
+        assert!(
+            warnings.iter().any(|w| w.contains("'Bad Key'")),
+            "{warnings:?}"
+        );
+        assert!(
+            warnings.iter().any(|w| w.contains("'also-valid'")),
+            "{warnings:?}"
+        );
+    }
+
+    /// The buffered warnings must travel with the built layer so `install`
+    /// can emit them after the subscriber is mounted. The tonic client needs
+    /// a Tokio reactor at build time.
+    #[tokio::test]
+    async fn build_layer_surfaces_header_warnings() {
+        let telemetry = TelemetryConfig {
+            otlp: crate::OtlpConfig {
+                enabled: true,
+                endpoint: "http://127.0.0.1:4317".into(),
+                protocol: "grpc".into(),
+                headers: std::collections::HashMap::from([("Bad Key".into(), "v".into())]),
+                ..Default::default()
+            },
+        };
+        let built =
+            build_layer::<tracing_subscriber::Registry>(&telemetry).expect("grpc layer builds");
+        assert_eq!(built.warnings.len(), 1, "{:?}", built.warnings);
+        assert!(
+            built.warnings[0].contains("'Bad Key'"),
+            "{:?}",
+            built.warnings
         );
     }
 

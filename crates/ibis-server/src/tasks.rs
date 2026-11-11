@@ -818,7 +818,14 @@ impl TaskRunner {
         project: &str,
     ) -> Result<TaskRunOutcome, String> {
         let span = crate::telemetry::active_memory_consolidate_span(project);
-        let result = pass.run(params, None).instrument(span.clone()).await;
+        // F17: without a task row there is no `RunnerCheckpoint`; a stats-only
+        // checkpoint still fills ibis.items/ibis.summaries/… on the span.
+        let stats = StatsCheckpoint::new();
+        let result = pass
+            .run(params, Some(&stats))
+            .instrument(span.clone())
+            .await;
+        crate::telemetry::record_pass_stats(&span, &stats.snapshot());
         match result {
             Ok(()) => {
                 crate::telemetry::record_pass_outcome(
@@ -942,6 +949,52 @@ fn bounded_error(error: &str) -> String {
         return error.to_string();
     }
     String::from_utf8_lossy(&bytes[..2048]).into_owned()
+}
+
+/// F17: stats-only observer for the degraded/no-store passes. It fills the
+/// same [`crate::telemetry::PassStats`] the leased runner reports without
+/// changing pass semantics: `should_continue` is always true and
+/// `remaining_summaries` stays `None`, so the pass keeps its per-config cap
+/// exactly as with no checkpoint at all.
+pub(crate) struct StatsCheckpoint {
+    stats: Mutex<crate::telemetry::PassStats>,
+}
+
+impl StatsCheckpoint {
+    pub(crate) fn new() -> Self {
+        StatsCheckpoint {
+            stats: Mutex::new(crate::telemetry::PassStats::default()),
+        }
+    }
+
+    pub(crate) fn snapshot(&self) -> crate::telemetry::PassStats {
+        *self.stats.lock().unwrap()
+    }
+}
+
+impl PassCheckpoint for StatsCheckpoint {
+    fn should_continue(&self) -> bool {
+        true
+    }
+
+    fn item_done(&self, _item_id: &str, _outcome: &str, _items_total: usize) {
+        let mut stats = self.stats.lock().unwrap();
+        stats.items = stats.items.saturating_add(1);
+    }
+
+    fn scope_done(&self, report: &ibis_optimization::ObservationPassReport) {
+        // Same cumulative-report rule as `RunnerCheckpoint::scope_done`:
+        // assign, never add.
+        let mut stats = self.stats.lock().unwrap();
+        stats.summaries = report.summarized as u64;
+        stats.deferred = report.deferred as u64;
+        stats.fallbacks = report.fallbacks as u64;
+        stats.failed = report.failed as u64;
+    }
+
+    fn remaining_summaries(&self) -> Option<usize> {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -1490,5 +1543,43 @@ mod tests {
         assert_eq!(stats.deferred, 6);
         assert_eq!(stats.fallbacks, 7);
         assert_eq!(stats.failed, 8);
+    }
+
+    /// F17: the stats-only checkpoint collected on the degraded/no-store
+    /// passes must mirror the leased runner's numbers without changing pass
+    /// semantics (always continue, no budget override).
+    #[test]
+    fn stats_checkpoint_collects_without_changing_semantics() {
+        let checkpoint = StatsCheckpoint::new();
+        assert!(checkpoint.should_continue());
+        assert_eq!(checkpoint.remaining_summaries(), None);
+
+        checkpoint.items_total(5);
+        checkpoint.item_done("item-1", "ok", 5);
+        checkpoint.item_done("item-2", "error", 5);
+        checkpoint.scope_done(&ObservationPassReport {
+            scopes: 2,
+            summarized: 3,
+            deferred: 1,
+            fallbacks: 4,
+            failed: 1,
+            ..Default::default()
+        });
+        // Cumulative report: assigned, not summed.
+        checkpoint.scope_done(&ObservationPassReport {
+            scopes: 2,
+            summarized: 3,
+            deferred: 2,
+            fallbacks: 4,
+            failed: 1,
+            ..Default::default()
+        });
+
+        let stats = checkpoint.snapshot();
+        assert_eq!(stats.items, 2);
+        assert_eq!(stats.summaries, 3);
+        assert_eq!(stats.deferred, 2);
+        assert_eq!(stats.fallbacks, 4);
+        assert_eq!(stats.failed, 1);
     }
 }

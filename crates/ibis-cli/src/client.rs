@@ -1446,13 +1446,10 @@ fn project_export_payload(project: &str) -> ToolCallPayload {
 }
 
 fn project_cli_error(err: memory_project::ProjectError) -> CliError {
+    let message = err.to_string();
     match err {
-        memory_project::ProjectError::Io(err) => CliError::Io {
-            message: err.to_string(),
-        },
-        other => CliError::CheckUsage {
-            message: other.to_string(),
-        },
+        memory_project::ProjectError::Io { .. } => CliError::Io { message },
+        _ => CliError::CheckUsage { message },
     }
 }
 

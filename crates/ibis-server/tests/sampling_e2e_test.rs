@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use ibis_ai::{AIProvider, Client, CursorLMProvider, FallbackChain, McpSamplingProvider};
-use ibis_core::config::Config;
+use ibis_core::config::{Config, HarnessProfile};
 use ibis_db::value::{Object as DbObject, Value as DbValue};
 use ibis_db::{DbError, Executor, QueryOutcome, Vars};
 use ibis_search::search::SearchService;
@@ -468,5 +468,57 @@ async fn sampling_without_client_capability_degrades_to_chain_error() {
     );
     // The sampling request was never sent (capability not declared).
     assert_eq!(client.handler.calls.load(Ordering::SeqCst), 0);
+    client.shutdown().await;
+}
+
+/// G20 §5: a profile with `sampling: never` disables the leg for a session
+/// that DID declare the capability — the chain skips it (no
+/// `sampling/createMessage` is issued) and the policy lands on the shared
+/// registry that the reasoning chain consults.
+#[tokio::test]
+async fn harness_sampling_never_skips_a_capable_client() {
+    let registry = Arc::new(SamplingSessionRegistry::new());
+    let state = test_state(registry.clone()).await;
+    state
+        .cfg
+        .write()
+        .unwrap()
+        .harness
+        .profiles
+        .push(HarnessProfile {
+            match_names: vec!["sampling-e2e".into()],
+            name: "sampling-e2e".into(),
+            sampling: "never".into(),
+            hidden_tool_groups: Vec::new(),
+        });
+
+    let client = TestClient::connect_sampling(state).await;
+    let peer = client.peer();
+
+    let result = peer
+        .call_tool(
+            rmcp::model::CallToolRequestParams::new("ask_project")
+                .with_arguments(json!({ "query": "why?" }).as_object().unwrap().clone()),
+        )
+        .await
+        .expect("ask_project executes");
+    assert!(
+        result.is_error.unwrap_or(false),
+        "sampling-never must degrade to the next legs: {result:?}"
+    );
+    let text = match result.content.first() {
+        Some(rmcp::model::ContentBlock::Text(t)) => t.text.clone(),
+        other => panic!("expected text content, got {other:?}"),
+    };
+    assert!(
+        text.contains("mcp_sampling unavailable"),
+        "the profile disabled the leg despite the declared capability: {text}"
+    );
+    // No sampling request was sent despite the declared capability.
+    assert_eq!(client.handler.calls.load(Ordering::SeqCst), 0);
+    assert!(
+        !registry.sampling_enabled(),
+        "the policy is applied on the accepted call"
+    );
     client.shutdown().await;
 }

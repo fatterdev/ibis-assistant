@@ -21,6 +21,9 @@ const EMPTY_LINE: &str = "_No current rules, constraints or gotchas._";
 const TITLE_CAP: usize = 120;
 const LINE_CAP: usize = 200;
 const PER_KIND_CAP: usize = 20;
+/// Explicit ceiling over all kinds. It equals `PER_KIND_CAP * 3` today, so it
+/// only binds if a fourth durable kind joins the renderer (see
+/// `caps_are_coherent`).
 const TOTAL_CAP: usize = 60;
 
 #[derive(Debug, thiserror::Error)]
@@ -35,8 +38,21 @@ pub enum ProjectError {
     ExportParse(String),
     #[error("{0}")]
     Usage(String),
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
+    /// File I/O with the path and the operation that failed (`std::io::Error`
+    /// alone reads as a bare "access denied" for the user).
+    #[error("io error: {context}: {source}")]
+    Io {
+        context: String,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+fn io_error(context: impl Into<String>, source: std::io::Error) -> ProjectError {
+    ProjectError::Io {
+        context: context.into(),
+        source,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -462,7 +478,8 @@ impl ProjectOptions {
     /// `--path` defaults to `<cwd>/<target file>`; `--project` defaults to the
     /// basename of the file's directory.
     pub fn resolve(&self) -> Result<ResolvedProject, ProjectError> {
-        let cwd = std::env::current_dir().map_err(ProjectError::Io)?;
+        let cwd = std::env::current_dir()
+            .map_err(|err| io_error("cannot determine the current directory", err))?;
         let path = match self
             .path
             .as_ref()
@@ -529,7 +546,12 @@ pub fn plan(
     let existing = match std::fs::read_to_string(&resolved.path) {
         Ok(text) => Some(text),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-        Err(err) => return Err(ProjectError::Io(err)),
+        Err(err) => {
+            return Err(io_error(
+                format!("cannot read {}", resolved.path.display()),
+                err,
+            ));
+        }
     };
     let eol = detect_eol(existing.as_deref());
     let block = render_block(&resolved.project, &selected, eol);
@@ -546,9 +568,12 @@ pub fn plan(
     })
 }
 
-/// Writes through `<file>.ibis-tmp` in the same directory, then renames.
-/// Permissions of an existing file are copied best-effort (a failure is a
-/// warning, not an error).
+/// Writes through `<file>.ibis-tmp.<pid>` in the same directory, then renames.
+/// A per-process scratch name keeps concurrent runs on the same file from
+/// sharing one write path. Permissions of an existing file are copied
+/// best-effort (a failure is a warning, not an error); a failed run cleans the
+/// scratch file up, even when the copied read-only attribute would make it
+/// undeletable, and the Windows read-only destination error names the fix.
 pub fn write_atomic(path: &Path, content: &str) -> Result<WriteOutcome, ProjectError> {
     if path.is_dir() {
         return Err(ProjectError::Usage(format!(
@@ -563,14 +588,21 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<WriteOutcome, ProjectE
     let file_name = path
         .file_name()
         .ok_or_else(|| ProjectError::Usage(format!("invalid path: {}", path.display())))?;
-    let tmp = parent.join(format!("{}.ibis-tmp", file_name.to_string_lossy()));
+    let tmp = parent.join(format!(
+        "{}.ibis-tmp.{}",
+        file_name.to_string_lossy(),
+        std::process::id()
+    ));
 
     let mut warnings = Vec::new();
-    let result = (|| -> std::io::Result<()> {
+    let result = (|| -> Result<(), ProjectError> {
         use std::io::Write as _;
-        let mut file = std::fs::File::create(&tmp)?;
-        file.write_all(content.as_bytes())?;
-        file.sync_all()?;
+        let mut file = std::fs::File::create(&tmp)
+            .map_err(|err| io_error(format!("cannot create {}", tmp.display()), err))?;
+        file.write_all(content.as_bytes())
+            .map_err(|err| io_error(format!("cannot write {}", tmp.display()), err))?;
+        file.sync_all()
+            .map_err(|err| io_error(format!("cannot sync {}", tmp.display()), err))?;
         drop(file);
         if let Ok(metadata) = std::fs::metadata(path) {
             if let Err(err) = std::fs::set_permissions(&tmp, metadata.permissions()) {
@@ -580,12 +612,46 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<WriteOutcome, ProjectE
                 ));
             }
         }
-        std::fs::rename(&tmp, path)
+        if let Err(err) = std::fs::rename(&tmp, path) {
+            // Windows refuses to replace a read-only destination; name the
+            // fix instead of a bare "access denied".
+            let readonly_target =
+                cfg!(windows) && std::fs::metadata(path).is_ok_and(|m| m.permissions().readonly());
+            let context = if readonly_target {
+                format!(
+                    "cannot replace {} (the file is read-only; clear the read-only attribute)",
+                    path.display()
+                )
+            } else {
+                format!("cannot replace {} with {}", path.display(), tmp.display())
+            };
+            return Err(io_error(context, err));
+        }
+        Ok(())
     })();
+
     if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
+        // Best effort cleanup. On Windows the scratch file may carry the
+        // copied FILE_ATTRIBUTE_READONLY, which blocks deletion until cleared.
+        if std::fs::remove_file(&tmp).is_err() {
+            #[cfg(windows)]
+            {
+                if let Ok(metadata) = std::fs::metadata(&tmp) {
+                    let mut permissions = metadata.permissions();
+                    if permissions.readonly() {
+                        // Clears the Windows read-only attribute; the
+                        // Unix-oriented lint about the owner write bit does
+                        // not apply to this attribute path.
+                        #[allow(clippy::permissions_set_readonly_false)]
+                        permissions.set_readonly(false);
+                        let _ = std::fs::set_permissions(&tmp, permissions);
+                    }
+                }
+            }
+            let _ = std::fs::remove_file(&tmp);
+        }
     }
-    result.map_err(ProjectError::Io)?;
+    result?;
     Ok(WriteOutcome { warnings })
 }
 
@@ -655,6 +721,14 @@ mod tests {
             .collect();
         let block = render(&memories);
         assert_eq!(block.matches("- **Rule").count(), 20);
+    }
+
+    /// The total cap never binds while there are exactly three durable kinds:
+    /// this test fails the moment a new kind is added, forcing the renderer
+    /// to be revisited instead of silently raising the ceiling.
+    #[test]
+    fn caps_are_coherent() {
+        assert_eq!(TOTAL_CAP, PER_KIND_CAP * 3);
     }
 
     #[test]
@@ -912,7 +986,7 @@ mod tests {
         std::fs::write(&path, "old").unwrap();
         write_atomic(&path, "new").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
-        assert!(!dir.path().join("AGENTS.md.ibis-tmp").exists());
+        assert!(tmp_leftovers(dir.path()).is_empty());
     }
 
     #[test]
@@ -921,7 +995,80 @@ mod tests {
         let path = dir.path().join("AGENTS.md");
         std::fs::create_dir(&path).unwrap();
         assert!(write_atomic(&path, "x").is_err());
-        assert!(!dir.path().join("AGENTS.md.ibis-tmp").exists());
+        assert!(tmp_leftovers(dir.path()).is_empty());
+    }
+
+    /// G19: a failing I/O must name the path (and operation), not surface a
+    /// bare "access denied".
+    #[test]
+    fn io_errors_carry_path_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolved = ResolvedProject {
+            // read_to_string on a directory fails on every platform.
+            path: dir.path().to_path_buf(),
+            project: "proj".into(),
+            file_name: "AGENTS.md".into(),
+        };
+        let err = plan(&resolved, None, r#"{"items":[]}"#).unwrap_err();
+        match err {
+            ProjectError::Io { context, .. } => {
+                assert!(
+                    context.contains(&dir.path().display().to_string()),
+                    "{context}"
+                );
+            }
+            other => panic!("expected Io, got {other}"),
+        }
+
+        let missing = dir.path().join("missing").join("AGENTS.md");
+        let err = write_atomic(&missing, "x").unwrap_err();
+        match err {
+            ProjectError::Io { context, .. } => {
+                assert!(context.contains("cannot create"), "{context}");
+                assert!(context.contains(".ibis-tmp"), "{context}");
+            }
+            other => panic!("expected Io, got {other}"),
+        }
+    }
+
+    /// G19: on Windows a read-only destination fails the rename; the error
+    /// names the fix and the scratch file is still cleaned up (it inherits the
+    /// read-only attribute), so the next run is not stuck.
+    #[cfg(windows)]
+    #[test]
+    fn write_atomic_readonly_target_reports_the_fix_and_cleans_tmp() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("AGENTS.md");
+        std::fs::write(&path, "old").unwrap();
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&path, permissions).unwrap();
+
+        let err = write_atomic(&path, "new").unwrap_err();
+        assert!(
+            err.to_string().contains("read-only"),
+            "actionable error: {err}"
+        );
+        assert!(tmp_leftovers(dir.path()).is_empty(), "scratch leftover");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "old");
+
+        // Reopen before tempdir cleanup: a read-only file blocks removal.
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        // Windows attribute restore for the tempdir drop; the lint targets
+        // the Unix owner bit and does not apply here.
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&path, permissions).unwrap();
+    }
+
+    /// Scratch files for `dir` (the pid suffix is not part of the assertion).
+    fn tmp_leftovers(dir: &Path) -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .filter(|name| name.contains(".ibis-tmp"))
+            .collect()
     }
 
     #[test]
