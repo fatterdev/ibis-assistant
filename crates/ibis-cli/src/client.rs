@@ -1456,18 +1456,37 @@ fn project_cli_error(err: memory_project::ProjectError) -> CliError {
     }
 }
 
+fn write_stdout(text: &str) {
+    use std::io::Write as _;
+    let _ = std::io::stdout().lock().write_all(text.as_bytes());
+}
+
+fn write_stdout_line(text: &str) {
+    use std::io::Write as _;
+    let _ = writeln!(std::io::stdout().lock(), "{text}");
+}
+
+fn write_stderr_line(text: &str) {
+    use std::io::Write as _;
+    let _ = writeln!(std::io::stderr().lock(), "{text}");
+}
+
 fn run_memory_project<F>(options: ProjectOptions, caller: F) -> Result<(), CliError>
 where
     F: FnOnce(ToolCallPayload) -> Result<String, CliError>,
 {
     let resolved = options.resolve().map_err(project_cli_error)?;
     let export = caller(project_export_payload(&resolved.project))?;
-    let plan = memory_project::plan(&resolved, options.branch.as_deref(), &export)
-        .map_err(project_cli_error)?;
+    let branch = options
+        .branch
+        .as_deref()
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty());
+    let plan = memory_project::plan(&resolved, branch, &export).map_err(project_cli_error)?;
 
     if options.dry_run {
-        eprintln!("ibis memory project: {}", resolved.path.display());
-        print!("{}", plan.block);
+        write_stderr_line(&format!("ibis memory project: {}", resolved.path.display()));
+        write_stdout(&plan.block);
         return Ok(());
     }
     if options.check {
@@ -1490,26 +1509,29 @@ where
                     resolved.path.display()
                 )
             } else {
-                format!(
-                    "{} is stale; run `ibis memory project --target {} --project {} --path {}`",
-                    resolved.path.display(),
+                let mut hint = format!(
+                    "ibis memory project --target {} --project {} --path \"{}\"",
                     options.target.cli_name(),
                     resolved.project,
                     resolved.path.display()
-                )
+                );
+                if let Some(branch) = branch {
+                    hint.push_str(&format!(" --branch {branch}"));
+                }
+                format!("{} is stale; run `{hint}`", resolved.path.display())
             };
             return Err(CliError::CheckFailed { message });
         }
-        println!("{} is up to date", resolved.path.display());
+        write_stdout_line(&format!("{} is up to date", resolved.path.display()));
         return Ok(());
     }
 
     let outcome = memory_project::write_atomic(&resolved.path, &plan.merged.content)
         .map_err(project_cli_error)?;
     for warning in outcome.warnings {
-        eprintln!("warning: {warning}");
+        write_stderr_line(&format!("warning: {warning}"));
     }
-    println!("Updated {}", resolved.path.display());
+    write_stdout_line(&format!("Updated {}", resolved.path.display()));
     Ok(())
 }
 
@@ -1576,8 +1598,7 @@ where
             let payload = command.tool_call()?;
             let text = caller(payload)?;
             // Ignore broken-pipe errors: `ibis ask … | head` must not panic.
-            use std::io::Write as _;
-            let _ = std::io::stdout().write_all(text.as_bytes());
+            write_stdout(&text);
             Ok(())
         }
     }
@@ -2447,5 +2468,34 @@ mod tests {
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("Main rule"));
         assert!(!content.contains("Dev rule"));
+    }
+
+    #[test]
+    fn empty_branch_flag_is_treated_as_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("AGENTS.md");
+        let export = r#"{"count":2,"items":[
+            {"id":"1","kind":"rule","title":"Main rule","content":"m","confidence":1.0,"branch":"main"},
+            {"id":"2","kind":"rule","title":"Dev rule","content":"d","confidence":1.0,"branch":"dev"}
+        ]}"#;
+        dispatch_with_export(
+            &[
+                "memory",
+                "project",
+                "--target",
+                "agents-md",
+                "--project",
+                "proj",
+                "--path",
+                path.to_str().unwrap(),
+                "--branch",
+                "",
+            ],
+            export,
+        )
+        .unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("Main rule"));
+        assert!(content.contains("Dev rule"));
     }
 }

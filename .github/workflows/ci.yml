@@ -129,6 +129,10 @@ jobs:
         run: cargo test -p ibis-logger --features otel
       - name: Clippy with OTel
         run: cargo clippy -p ibis-logger --features otel --all-targets -- -D warnings
+      - name: Server clippy and lib tests with OTel
+        run: |
+          cargo clippy -p ibis-server --features otel --all-targets -- -D warnings
+          cargo test -p ibis-server --features otel --lib
       - name: stdio framing and exporter with OTel
         run: cargo test -p ibis-server --features otel --test today_e2e_test otel
       - name: Default tree has no OpenTelemetry

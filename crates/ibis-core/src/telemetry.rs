@@ -5,10 +5,9 @@
 //! attribute values (project, actor) are sanitized and capped here so every
 //! producer applies the same rule.
 
-pub const SPAN_MCP_TOOL: &str = "mcp.tool";
-pub const SPAN_AI_GENERATE: &str = "ai.generate";
-pub const SPAN_AI_EMBED: &str = "ai.embed";
-pub const SPAN_MEMORY_CONSOLIDATE: &str = "memory.consolidate";
+/// Span names live in `ibis-logger` (the exporter filters on the same list);
+/// re-exported here so `ibis-ai`/`ibis-server` keep a single import path.
+pub use ibis_logger::{SPAN_AI_EMBED, SPAN_AI_GENERATE, SPAN_MCP_TOOL, SPAN_MEMORY_CONSOLIDATE};
 
 /// `tracing-opentelemetry` special field: it sets the OTel span status and is
 /// not exported as a regular attribute.

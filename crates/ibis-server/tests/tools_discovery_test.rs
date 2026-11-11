@@ -191,7 +191,7 @@ fn ticket_names(tools: &[rmcp::model::Tool]) -> Vec<&str> {
         .collect()
 }
 
-/// The closed gate: unconfigured ticketing announces the 41 core tools only,
+/// The closed gate: unconfigured ticketing announces the 43 core tools only,
 /// hidden calls get the configuration error, and the capability advertises
 /// `listChanged`.
 #[tokio::test]
@@ -304,6 +304,16 @@ async fn harness_profile_hides_settings_group() {
         message.contains("harness.profiles[].hidden_tool_groups"),
         "the error names the config key: {message}"
     );
+    assert!(
+        client.state.sampling.sampling_enabled(),
+        "a rejected hidden call must not flip the sampling policy"
+    );
+    // An accepted call applies the profile policy (the tool may return a
+    // tool-level error without a DB; visibility is what matters here).
+    let _ = client
+        .service
+        .call_tool(CallToolRequestParams::new("memory_search"))
+        .await;
     assert!(
         !client.state.sampling.sampling_enabled(),
         "sampling=never must disable the sampling leg"

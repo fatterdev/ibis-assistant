@@ -194,19 +194,19 @@ fn child_env(overrides: &[(&str, String)]) -> Vec<(String, String)> {
 #[cfg(feature = "otel")]
 struct CollectorStub {
     endpoint: String,
-    bodies: Receiver<Vec<u8>>,
+    requests: Receiver<(String, Vec<u8>)>,
 }
 
 #[cfg(feature = "otel")]
 fn collector_stub() -> CollectorStub {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind collector");
     let port = listener.local_addr().expect("collector addr").port();
-    let (tx, bodies) = mpsc::channel();
+    let (tx, requests) = mpsc::channel();
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { break };
-            if let Some(body) = read_http_body(&mut stream) {
-                let _ = tx.send(body);
+            if let Some((path, body)) = read_http_request(&mut stream) {
+                let _ = tx.send((path, body));
             }
             let _ = stream
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
@@ -215,12 +215,12 @@ fn collector_stub() -> CollectorStub {
     });
     CollectorStub {
         endpoint: format!("http://127.0.0.1:{port}"),
-        bodies,
+        requests,
     }
 }
 
 #[cfg(feature = "otel")]
-fn read_http_body(stream: &mut std::net::TcpStream) -> Option<Vec<u8>> {
+fn read_http_request(stream: &mut std::net::TcpStream) -> Option<(String, Vec<u8>)> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     let header_end = loop {
@@ -233,7 +233,14 @@ fn read_http_body(stream: &mut std::net::TcpStream) -> Option<Vec<u8>> {
             Err(_) => return None,
         }
     };
-    let headers = String::from_utf8_lossy(&buf[..header_end]).to_ascii_lowercase();
+    let header_text = String::from_utf8_lossy(&buf[..header_end]).to_string();
+    let path = header_text
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .unwrap_or("")
+        .to_string();
+    let headers = header_text.to_ascii_lowercase();
     let content_length = headers
         .lines()
         .find_map(|line| line.strip_prefix("content-length:"))
@@ -246,7 +253,7 @@ fn read_http_body(stream: &mut std::net::TcpStream) -> Option<Vec<u8>> {
             Err(_) => break,
         }
     }
-    Some(buf[header_end..].to_vec())
+    Some((path, buf[header_end..].to_vec()))
 }
 
 struct E2eChild {
@@ -740,9 +747,12 @@ fn otel_exporter_receives_tool_span() {
 
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut saw_tool_span = false;
+    let mut last_path = String::new();
     while Instant::now() < deadline && !saw_tool_span {
-        if let Ok(body) = collector.bodies.recv_timeout(Duration::from_millis(500)) {
-            saw_tool_span = body.windows(8).any(|window| window == b"mcp.tool")
+        if let Ok((path, body)) = collector.requests.recv_timeout(Duration::from_millis(500)) {
+            last_path = path.clone();
+            saw_tool_span = path == "/v1/traces"
+                && body.windows(8).any(|window| window == b"mcp.tool")
                 && body
                     .windows(17)
                     .any(|window| window == b"get_working_state");
@@ -751,7 +761,7 @@ fn otel_exporter_receives_tool_span() {
     child.kill_tree();
     assert!(
         saw_tool_span,
-        "collector did not receive an mcp.tool span for get_working_state"
+        "collector did not receive POST /v1/traces with an mcp.tool span for get_working_state (last path: {last_path:?})"
     );
 }
 

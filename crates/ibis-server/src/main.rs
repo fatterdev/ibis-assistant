@@ -130,7 +130,7 @@ fn cli_exit_code(error: &ibis_cli::CliError) -> i32 {
     }
 }
 
-/// `handleService — the daemon/service dispatch seam.///
+/// `handleService - the daemon/service dispatch seam.
 /// **Wired by lane N-service (daemon/service) — orchestrator replaces.**
 /// Lane N-service owns `install`/`uninstall` (windows-service SCM lifecycle,
 /// F-011 one-pass elevation), `/run` (SCM mode) and `start`/`stop`

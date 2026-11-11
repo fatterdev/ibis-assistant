@@ -108,8 +108,8 @@ ibis optimize   # RAFT; consolidation also via MCP memory_consolidate
 <!-- ibis:end memory -->
 ```
 
-- Only the region between the markers is owned and rewritten; every byte outside it is untouched.
-- One block per file. A different project name, unbalanced markers or duplicate blocks are refused without writing.
+- Only the region between the markers is owned and rewritten; every byte outside it is untouched. The one append exception: a missing final newline is added and one blank separator line is inserted before the block.
+- One block per file. A different project name, unbalanced markers or duplicate blocks are refused without writing. The parser is line-based: a marker inside a fenced code block is still a marker (ambiguity is refused).
 - Deterministic: `kind` → confidence desc → title → id, 20 per kind / 60 total, no timestamps or hashes. Rendering neutralizes marker injection and collapses content to one line.
 - Atomic write (`<file>.ibis-tmp` + rename), file EOL preserved; a new file uses LF.
 - `--check`: exit 0 = up to date, 1 = missing/stale, 2 = parse/usage. `--dry-run` prints the block and writes nothing.

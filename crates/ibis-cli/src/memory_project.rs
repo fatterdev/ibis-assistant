@@ -89,7 +89,6 @@ pub struct ExportedMemory {
 
 #[derive(Debug, Deserialize)]
 struct ExportPayload {
-    #[serde(default)]
     items: Vec<ExportedMemory>,
 }
 
@@ -136,7 +135,7 @@ pub fn select_memories(memories: &[ExportedMemory], branch: Option<&str>) -> Vec
         .filter(|memory| {
             branch.is_none_or(|branch| {
                 let branch = branch.trim().to_lowercase();
-                memory.branch.trim().is_empty() || memory.branch.to_lowercase() == branch
+                memory.branch.trim().is_empty() || memory.branch.trim().to_lowercase() == branch
             })
         })
         .filter(|memory| !(memory.title.trim().is_empty() && memory.content.trim().is_empty()))
@@ -464,7 +463,11 @@ impl ProjectOptions {
     /// basename of the file's directory.
     pub fn resolve(&self) -> Result<ResolvedProject, ProjectError> {
         let cwd = std::env::current_dir().map_err(ProjectError::Io)?;
-        let path = match &self.path {
+        let path = match self
+            .path
+            .as_ref()
+            .filter(|path| !path.as_os_str().is_empty())
+        {
             Some(path) => path.clone(),
             None => cwd.join(self.target.file_name()),
         };
@@ -564,7 +567,11 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<WriteOutcome, ProjectE
 
     let mut warnings = Vec::new();
     let result = (|| -> std::io::Result<()> {
-        std::fs::write(&tmp, content)?;
+        use std::io::Write as _;
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
         if let Ok(metadata) = std::fs::metadata(path) {
             if let Err(err) = std::fs::set_permissions(&tmp, metadata.permissions()) {
                 warnings.push(format!(
@@ -731,12 +738,13 @@ mod tests {
             memory("1", "rule", "Main", "m", 1.0, "main"),
             memory("2", "rule", "Other", "o", 1.0, "dev"),
             memory("3", "rule", "Any", "a", 1.0, ""),
-            memory("4", "observation", "Obs", "o", 1.0, "main"),
+            memory("4", "rule", "Spaced", "s", 1.0, " main "),
+            memory("5", "observation", "Obs", "o", 1.0, "main"),
         ];
         let selected = select_memories(&memories, Some("MAIN"));
         let titles: Vec<&str> = selected.iter().map(|m| m.title.as_str()).collect();
-        assert_eq!(titles, vec!["Any", "Main"]);
-        assert_eq!(select_memories(&memories, None).len(), 3);
+        assert_eq!(titles, vec!["Any", "Main", "Spaced"]);
+        assert_eq!(select_memories(&memories, None).len(), 4);
     }
 
     #[test]
@@ -746,6 +754,14 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title, "T");
         assert!(parse_export("not json").is_err());
+    }
+
+    #[test]
+    fn parse_export_rejects_missing_items() {
+        // A contract drift must fail (exit 2) instead of rendering an empty
+        // block over a populated file.
+        assert!(parse_export(r#"{"count":3}"#).is_err());
+        assert!(parse_export(r#"{"items":null}"#).is_err());
     }
 
     #[test]
@@ -1102,6 +1118,21 @@ mod tests {
         let cwd = std::env::current_dir().unwrap();
         assert_eq!(resolved.project, cwd.file_name().unwrap().to_string_lossy());
         assert!(resolved.path.ends_with("AGENTS.md"));
+    }
+
+    #[test]
+    fn empty_path_is_treated_as_absent() {
+        let options = ProjectOptions {
+            target: ProjectTarget::AgentsMd,
+            project: Some("proj".into()),
+            path: Some(PathBuf::new()),
+            branch: None,
+            check: false,
+            dry_run: false,
+        };
+        let resolved = options.resolve().unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        assert_eq!(resolved.path, cwd.join("AGENTS.md"));
     }
 
     #[test]

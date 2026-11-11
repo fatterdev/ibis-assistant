@@ -102,8 +102,15 @@ fn profiles_json_is_valid() {
                 surface.id
             ),
             "bridge" => assert!(surface.connection.bridge.is_some(), "{} bridge", surface.id),
-            _ => {}
+            "loopback" => {}
+            other => panic!("{} has unknown connection.default '{other}'", surface.id),
         }
+        assert!(
+            ["header+argument", "argument", "env+argument"].contains(&surface.actor.as_str()),
+            "{} has unknown actor '{}'",
+            surface.id,
+            surface.actor
+        );
         if let Some(manifest) = &surface.manifest {
             assert!(
                 workspace_root().join(manifest).is_file(),
@@ -129,6 +136,11 @@ fn every_expected_surface_is_declared() {
     .into_iter()
     .collect();
     assert_eq!(declared, expected);
+    let claude = surface(&profiles, "claude-desktop");
+    assert_eq!(
+        claude.connection.bridge.as_deref(),
+        Some("mcp-bridge -url <endpoint>")
+    );
 }
 
 #[test]

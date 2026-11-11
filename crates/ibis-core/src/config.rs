@@ -1726,6 +1726,13 @@ mod tests {
         assert_eq!(cfg.harness.profiles.len(), 1);
         assert_eq!(cfg.harness.profiles[0].match_names, vec!["cursor"]);
         assert_eq!(cfg.harness.profiles[0].hidden_tool_groups, vec!["settings"]);
+
+        // `settings_apply` serializes the whole Config: the `match` rename and
+        // the profiles must survive a round-trip.
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert!(json.contains("\"match\""), "match rename lost: {json}");
+        let back: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.harness, cfg.harness);
     }
 
     /// `ai.consolidation` (F4 §B.5): off by default, the file overlays the

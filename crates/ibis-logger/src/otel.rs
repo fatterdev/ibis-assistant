@@ -10,8 +10,11 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use opentelemetry::trace::TracerProvider as _;
-use opentelemetry_otlp::{SpanExporter, WithExportConfig, WithHttpConfig, WithTonicConfig};
-use opentelemetry_sdk::trace::{Sampler, SdkTracer, SdkTracerProvider};
+use opentelemetry_otlp::{
+    SpanExporter as OtlpSpanExporter, WithExportConfig, WithHttpConfig, WithTonicConfig,
+};
+use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::trace::{Sampler, SdkTracer, SdkTracerProvider, SpanData, SpanExporter};
 use opentelemetry_sdk::Resource;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::filter::FilterFn;
@@ -19,7 +22,10 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer as _;
 
-use crate::{OtlpProtocol, ResolvedOtlp, TelemetryConfig};
+use crate::{
+    OtlpProtocol, ResolvedOtlp, TelemetryConfig, SPAN_AI_EMBED, SPAN_AI_GENERATE, SPAN_MCP_TOOL,
+    SPAN_MEMORY_CONSOLIDATE,
+};
 
 static GUARD: OnceLock<TelemetryGuard> = OnceLock::new();
 static ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -33,6 +39,44 @@ struct TelemetryGuard {
     provider: SdkTracerProvider,
 }
 
+/// Wraps the OTLP exporter so an unreachable collector produces one warning
+/// instead of an ERROR per batch (the SDK's internal log is filtered by the
+/// `fmt` layer target list).
+#[derive(Debug)]
+struct WarnOnceExporter<E> {
+    inner: E,
+    warned: AtomicBool,
+}
+
+impl<E: SpanExporter> SpanExporter for WarnOnceExporter<E> {
+    async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
+        let result = self.inner.export(batch).await;
+        if let Err(err) = &result {
+            if !self.warned.swap(true, Ordering::Relaxed) {
+                tracing::warn!(
+                    "OpenTelemetry export failed (further export errors suppressed): {err}"
+                );
+            }
+        }
+        result
+    }
+
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        self.inner.shutdown_with_timeout(timeout)
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        self.inner.force_flush()
+    }
+}
+
+fn is_allowed_span(name: &str) -> bool {
+    matches!(
+        name,
+        SPAN_MCP_TOOL | SPAN_AI_GENERATE | SPAN_AI_EMBED | SPAN_MEMORY_CONSOLIDATE
+    )
+}
+
 /// Composes the OTLP layer onto `registry` (when enabled) and installs the
 /// global default. `None` from the builder means the exporter could not be
 /// constructed: the plain `fmt` registry is installed instead.
@@ -41,34 +85,40 @@ where
     S: tracing::Subscriber + for<'a> LookupSpan<'a> + Send + Sync + 'static,
 {
     let mut build_error: Option<String> = None;
+    let mut guard: Option<TelemetryGuard> = None;
     let layer = if telemetry.otlp.enabled && GUARD.get().is_none() {
-        if tokio::runtime::Handle::try_current().is_err() {
-            build_error = Some("the OTLP exporter requires a Tokio runtime".to_string());
-            None
-        } else {
-            match build_layer::<S>(telemetry) {
-                Ok((layer, guard)) => {
-                    let _ = GUARD.set(guard);
-                    Some(layer)
-                }
-                Err(err) => {
-                    build_error = Some(err.to_string());
-                    None
-                }
+        match build_layer::<S>(telemetry) {
+            Ok((layer, built_guard)) => {
+                guard = Some(built_guard);
+                Some(layer)
+            }
+            Err(err) => {
+                build_error = Some(err.to_string());
+                None
             }
         }
     } else {
         None
     };
 
-    // §4.4: only span attributes leave the process. `tracing` events inside
-    // a span would otherwise be exported as OTel span events carrying their
-    // fields (potentially content), so the OTel layer filters events out.
-    let layer = layer.map(|layer| layer.with_filter(FilterFn::new(|meta| meta.is_span())));
+    // §4.4: only the four declared spans leave the process. `tracing` events
+    // inside a span would otherwise be exported as OTel span events carrying
+    // their fields (potentially content), and foreign INFO+ spans from
+    // dependencies would add unbounded names/attributes.
+    let layer = layer.map(|layer| {
+        layer.with_filter(FilterFn::new(|meta| {
+            meta.is_span() && is_allowed_span(meta.name())
+        }))
+    });
     let layer_built = layer.is_some();
     let installed = tracing::subscriber::set_global_default(registry.with(layer)).is_ok();
-    if installed && layer_built {
-        ACTIVE.store(true, Ordering::Relaxed);
+    if installed {
+        if let Some(guard) = guard {
+            let _ = GUARD.set(guard);
+        }
+        if layer_built {
+            ACTIVE.store(true, Ordering::Relaxed);
+        }
     }
 
     // The subscriber is installed now, so warnings reach the configured sink.
@@ -98,7 +148,10 @@ where
     S: tracing::Subscriber + for<'a> LookupSpan<'a>,
 {
     let resolved = telemetry.otlp.resolved();
-    let exporter = build_exporter(&resolved)?;
+    let exporter = WarnOnceExporter {
+        inner: build_exporter(&resolved)?,
+        warned: AtomicBool::new(false),
+    };
 
     let provider = SdkTracerProvider::builder()
         .with_batch_exporter(exporter)
@@ -126,12 +179,12 @@ where
 
 fn build_exporter(
     resolved: &ResolvedOtlp,
-) -> Result<SpanExporter, opentelemetry_otlp::ExporterBuildError> {
-    let builder = SpanExporter::builder();
+) -> Result<OtlpSpanExporter, opentelemetry_otlp::ExporterBuildError> {
+    let builder = OtlpSpanExporter::builder();
     match resolved.protocol {
         OtlpProtocol::HttpProtobuf => builder
             .with_http()
-            .with_endpoint(resolved.endpoint.clone())
+            .with_endpoint(http_traces_endpoint(&resolved.endpoint))
             .with_headers(resolved.headers.clone())
             .with_timeout(Duration::from_secs(5))
             .build(),
@@ -141,6 +194,17 @@ fn build_exporter(
             .with_metadata(tonic_metadata(&resolved.headers))
             .with_timeout(Duration::from_secs(5))
             .build(),
+    }
+}
+
+/// The HTTP exporter uses a programmatic endpoint verbatim (only the generic
+/// env var gets the signal path appended), so add `/v1/traces` ourselves.
+fn http_traces_endpoint(endpoint: &str) -> String {
+    let endpoint = endpoint.trim_end_matches('/');
+    if endpoint.ends_with("/v1/traces") {
+        endpoint.to_string()
+    } else {
+        format!("{endpoint}/v1/traces")
     }
 }
 
@@ -227,7 +291,9 @@ mod tests {
         let subscriber = tracing_subscriber::registry().with(
             tracing_opentelemetry::layer()
                 .with_tracer(tracer)
-                .with_filter(FilterFn::new(|meta| meta.is_span())),
+                .with_filter(FilterFn::new(|meta| {
+                    meta.is_span() && is_allowed_span(meta.name())
+                })),
         );
         tracing::subscriber::with_default(subscriber, || {
             let span = tracing::info_span!("mcp.tool", "mcp.tool.name" = "memory_search");
@@ -272,7 +338,9 @@ mod tests {
         let subscriber = tracing_subscriber::registry().with(
             tracing_opentelemetry::layer()
                 .with_tracer(tracer)
-                .with_filter(FilterFn::new(|meta| meta.is_span())),
+                .with_filter(FilterFn::new(|meta| {
+                    meta.is_span() && is_allowed_span(meta.name())
+                })),
         );
         tracing::subscriber::with_default(subscriber, || {
             let span = tracing::info_span!("mcp.tool", "mcp.tool.name" = "memory_search");
@@ -288,6 +356,59 @@ mod tests {
             spans[0].events
         );
         provider.shutdown().unwrap();
+    }
+
+    #[test]
+    fn foreign_spans_are_not_exported() {
+        let exporter = VecExporter::default();
+        let provider = provider_with(exporter.clone(), 1.0);
+        let tracer = provider.tracer("test");
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_opentelemetry::layer()
+                .with_tracer(tracer)
+                .with_filter(FilterFn::new(|meta| {
+                    meta.is_span() && is_allowed_span(meta.name())
+                })),
+        );
+        tracing::subscriber::with_default(subscriber, || {
+            let foreign = tracing::info_span!("foreign.span", secret = "x");
+            let _guard = foreign.enter();
+            let allowed = tracing::info_span!("mcp.tool");
+            let _guard = allowed.enter();
+        });
+        let spans = exporter.spans.lock().unwrap().clone();
+        assert_eq!(spans.len(), 1, "only the whitelisted span is exported");
+        assert_eq!(spans[0].name, "mcp.tool");
+        provider.shutdown().unwrap();
+    }
+
+    #[test]
+    fn http_endpoint_appends_traces_path() {
+        assert_eq!(
+            http_traces_endpoint("http://127.0.0.1:4318"),
+            "http://127.0.0.1:4318/v1/traces"
+        );
+        assert_eq!(
+            http_traces_endpoint("http://127.0.0.1:4318/"),
+            "http://127.0.0.1:4318/v1/traces"
+        );
+        assert_eq!(
+            http_traces_endpoint("http://collector/v1/traces"),
+            "http://collector/v1/traces"
+        );
+    }
+
+    #[test]
+    fn build_layer_works_without_tokio_runtime() {
+        let telemetry = TelemetryConfig {
+            otlp: crate::OtlpConfig {
+                enabled: true,
+                endpoint: "http://127.0.0.1:1".into(),
+                ..Default::default()
+            },
+        };
+        let result = build_layer::<tracing_subscriber::Registry>(&telemetry);
+        assert!(result.is_ok(), "build_layer: {:?}", result.err());
     }
 
     #[tokio::test]

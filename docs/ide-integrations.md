@@ -46,8 +46,9 @@ Per-host runtime behavior lives in `config.harness` (server-side): `match` on
 `clientInfo.name`, `sampling: auto|never`, `hidden_tool_groups`
 (`ticketing`, `settings`, `optimize`). Default = no hidden groups, sampling
 `auto`, 58 tools unchanged. Hiding `settings` also hides `settings_open_ui`,
-which the VS Code **Ibis: Open Settings** command calls - do not apply that
-profile to the VSIX. See
+which the VS Code **Ibis: Open Settings** command, the Cursor Status/Settings
+commands and the Copilot status skill call - do not apply that profile to
+those surfaces. See
 [ai_and_settings.md](ai_and_settings.md#harness-profiles-g20).
 
 ## Team server

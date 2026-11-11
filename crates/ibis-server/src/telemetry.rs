@@ -75,7 +75,15 @@ impl PassOutcome {
 pub fn project_from_arguments(args: Option<&Map<String, Value>>) -> Option<String> {
     args.and_then(|args| args.get("project_name"))
         .and_then(Value::as_str)
-        .map(str::to_owned)
+        .map(sanitize_project_reference)
+}
+
+/// Keeps `ibis.project` a logical name: a path-like value is reduced to its
+/// basename, so an absolute client path never reaches the exporter.
+pub fn sanitize_project_reference(value: &str) -> String {
+    let value = value.trim();
+    let basename = value.rsplit(['/', '\\']).next().unwrap_or(value);
+    sanitize_project(basename)
 }
 
 /// A tool name is exported only when it belongs to the 58-tool registry;
@@ -353,6 +361,27 @@ mod tests {
             let _span = tool_span("init_project", false, Some("  a\nb  "), "personal");
         });
         assert_eq!(spans[0].fields["ibis.project"], "ab");
+    }
+
+    #[test]
+    fn project_paths_are_reduced_to_the_basename() {
+        assert_eq!(
+            sanitize_project_reference(r"C:\Users\fabio\repos\ibis-assistant"),
+            "ibis-assistant"
+        );
+        assert_eq!(
+            sanitize_project_reference("/home/fabio/repos/ibis-assistant"),
+            "ibis-assistant"
+        );
+        assert_eq!(sanitize_project_reference("  proj  "), "proj");
+
+        let args = serde_json::json!({"project_name": r"C:\Users\fabio\repos\proj"});
+        let project = project_from_arguments(args.as_object());
+        assert_eq!(project.as_deref(), Some("proj"));
+        let spans = capture(|| {
+            let _span = tool_span("init_project", false, project.as_deref(), "personal");
+        });
+        assert_eq!(spans[0].fields["ibis.project"], "proj");
     }
 
     #[test]

@@ -16,11 +16,20 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::Layer as _;
 
 pub const DEFAULT_OTLP_ENDPOINT: &str = "http://127.0.0.1:4318";
 pub const DEFAULT_OTLP_PROTOCOL: &str = "http/protobuf";
 pub const DEFAULT_OTLP_SERVICE_NAME: &str = "ibis";
 pub const DEFAULT_OTLP_SAMPLE_RATIO: f64 = 0.1;
+
+/// F17 — stable span names. The OTel layer exports only these spans; the
+/// constants are re-exported by `ibis_core::telemetry` so every producer and
+/// the exporter filter share one source.
+pub const SPAN_MCP_TOOL: &str = "mcp.tool";
+pub const SPAN_AI_GENERATE: &str = "ai.generate";
+pub const SPAN_AI_EMBED: &str = "ai.embed";
+pub const SPAN_MEMORY_CONSOLIDATE: &str = "memory.consolidate";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
@@ -285,15 +294,29 @@ fn build_sink(log_file: &str, file_only: bool) -> std::io::Result<Sink> {
 /// The `fmt` layer keeps the pre-F17 configuration byte for byte: no ANSI,
 /// no target, custom sink. Kept as a function so the fixture test exercises
 /// the same layer the runtime installs.
-fn build_fmt_layer<S, W>(writer: W) -> impl tracing_subscriber::Layer<S>
+fn build_fmt_layer<S, W>(writer: W, max: tracing::Level) -> impl tracing_subscriber::Layer<S>
 where
     S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
     W: for<'a> tracing_subscriber::fmt::MakeWriter<'a> + 'static,
 {
+    // OTel's `internal-logs` feature routes SDK errors to `tracing` at ERROR;
+    // an unreachable collector would flood the log once per batch. The
+    // exporter wrapper reports the first failure; the SDK target stays quiet.
+    let targets = tracing_subscriber::filter::Targets::new()
+        .with_default(tracing_subscriber::filter::LevelFilter::from_level(max))
+        .with_target(
+            "opentelemetry",
+            tracing_subscriber::filter::LevelFilter::OFF,
+        )
+        .with_target(
+            "opentelemetry_sdk",
+            tracing_subscriber::filter::LevelFilter::OFF,
+        );
     tracing_subscriber::fmt::layer()
         .with_ansi(false)
         .with_target(false)
         .with_writer(writer)
+        .with_filter(targets)
 }
 
 /// Warns once when the config asks for OTLP but the binary was built without
@@ -334,7 +357,7 @@ pub fn init(
 
     let registry = tracing_subscriber::registry()
         .with(tracing_subscriber::filter::LevelFilter::from_level(max))
-        .with(build_fmt_layer(sink));
+        .with(build_fmt_layer(sink, max));
 
     #[cfg(feature = "otel")]
     {
@@ -442,6 +465,20 @@ mod tests {
         assert_eq!(cfg.otlp.service_name, DEFAULT_OTLP_SERVICE_NAME);
         assert!((cfg.otlp.sample_ratio - DEFAULT_OTLP_SAMPLE_RATIO).abs() < f64::EPSILON);
         assert!(cfg.otlp.headers.is_empty());
+    }
+
+    #[test]
+    fn otlp_debug_redacts_headers() {
+        let cfg = OtlpConfig {
+            headers: HashMap::from([("authorization".to_string(), "secret".to_string())]),
+            ..Default::default()
+        };
+        let debug = format!("{cfg:?}");
+        assert!(!debug.contains("secret"), "secret leaked: {debug}");
+        assert!(
+            debug.contains("<1 redacted>"),
+            "headers not redacted: {debug}"
+        );
     }
 
     #[test]
@@ -560,7 +597,10 @@ mod tests {
         let buffer = Arc::new(Mutex::new(Vec::new()));
         let subscriber = tracing_subscriber::registry()
             .with(tracing_subscriber::filter::LevelFilter::INFO)
-            .with(build_fmt_layer(CaptureWriter(Arc::clone(&buffer))));
+            .with(build_fmt_layer(
+                CaptureWriter(Arc::clone(&buffer)),
+                tracing::Level::INFO,
+            ));
         tracing::subscriber::with_default(subscriber, || {
             tracing::info!("fmt fixture line");
         });

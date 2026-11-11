@@ -366,7 +366,7 @@ The exporter is compiled only with `--features otel` and is off by default:
 }
 ```
 
-Only span names/ids/counts leave the process (`mcp.tool`, `ai.generate`, `ai.embed`, `memory.consolidate`); prompts, memory content, provider error messages and absolute paths are never exported. `headers` can carry collector credentials - keep them out of committed config. Feature off plus `enabled: true` logs one explicit warning; the default build does not link the OTel stack.
+Only span names, provider/route hints, model knobs, token counts and outcomes leave the process (`mcp.tool`, `ai.generate`, `ai.embed`, `memory.consolidate`); project names are reduced to their basename, so absolute paths are never exported. Prompts, memory content and provider error messages are never exported. `headers` can carry collector credentials - keep them out of committed config. Feature off plus `enabled: true` logs one explicit warning; the default build does not link the OTel stack.
 
 ### Harness profiles (G20)
 
@@ -388,7 +388,7 @@ Per-host behavior without changing the tool surface:
 }
 ```
 
-`match` is a case-insensitive substring on `clientInfo.name`; the first profile wins, unknown clients get `default`. Groups: `ticketing`, `settings`, `optimize`. Default = current behavior (no hidden groups, sampling `auto`). Hiding `settings` also hides `settings_open_ui`, which the VS Code "Open Settings" command calls - do not combine that profile with the VSIX. `sampling: never` removes the MCP sampling leg and the chain falls back to lm_bridge/ollama. The per-surface wiring matrix is [harness/profiles.json](../harness/profiles.json).
+`match` is a case-insensitive substring on `clientInfo.name`; the first profile wins, unknown clients get `default`. Groups: `ticketing`, `settings`, `optimize`. Default = current behavior (no hidden groups, sampling `auto`). Hiding `settings` also hides `settings_open_ui`, which the VS Code "Open Settings" command, the Cursor Status/Settings commands and the Copilot status skill call - do not combine that profile with those surfaces. `sampling: never` removes the MCP sampling leg and the chain falls back to lm_bridge/ollama. The per-surface wiring matrix is [harness/profiles.json](../harness/profiles.json).
 
 ## Config sketch
 

@@ -277,9 +277,6 @@ impl ServerHandler for IbisServer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, rmcp::ErrorData> {
         let profile = self.resolve_profile(&context);
-        self.state
-            .sampling
-            .set_sampling_enabled(profile.sampling == crate::harness::SamplingPolicy::Auto);
         if !self.tool_visible(&request.name, &profile) {
             // A hidden tool call is diagnostic gold (stale client list, a
             // caller probing for unconfigured lanes): log it, don't fail
@@ -303,6 +300,11 @@ impl ServerHandler for IbisServer {
             };
             return Err(rmcp::ErrorData::invalid_params(message, None));
         }
+        // G20: update the sampling policy only for an accepted call; a
+        // rejected hidden-tool call must not flip the shared leg.
+        self.state
+            .sampling
+            .set_sampling_enabled(profile.sampling == crate::harness::SamplingPolicy::Auto);
         let tool_name = request.name.clone();
         // F17: the only argument that reaches telemetry is the project name.
         let project = crate::telemetry::project_from_arguments(request.arguments.as_ref());

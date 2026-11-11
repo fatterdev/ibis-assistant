@@ -52,8 +52,8 @@ pub use mcp::{call_mcp_tool, call_server_tool, default_mcp_endpoint};
 ///
 /// the `ExecuteCLI` ended in `os.Exit(1)` on every failure path; this crate
 /// returns typed errors so the wave-4 binary owns `process::exit`:
-/// print the message (to stderr, unlike the stdout for usage errors) and
-/// exit 1 for both variants.
+/// print the message (to stderr) and exit 1 for `Usage`/`Transport`/`Io` and
+/// `CheckFailed`, 2 for `CheckUsage` (`memory project` usage/parse).
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
     /// Subcommand usage/validation failure (`fmt.Println` + `os.Exit(1)`,

@@ -16,7 +16,6 @@ otel = [
     "dep:opentelemetry-otlp",
     "dep:tracing-opentelemetry",
     "dep:tonic",
-    "dep:tokio",
 ]
 
 [dependencies]
@@ -28,7 +27,6 @@ opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
 tonic = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json.workspace = true
