@@ -14,6 +14,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use tracing::Instrument as _;
+
 use tokio_util::sync::CancellationToken;
 
 use ibis_core::config::Config;
@@ -135,12 +137,24 @@ async fn run_pass(state: &Arc<AppState>) {
     tracing::info!("ConsolidationLoop: pass over {} project(s)", queue.len());
     for project in queue {
         let Some(tasks) = state.tasks() else {
-            match optimizer
+            let span = crate::telemetry::active_memory_consolidate_span(&project);
+            let result = optimizer
                 .consolidate_loop(&project, MAX_ITEMS_PER_PROJECT, None)
-                .await
-            {
-                Err(err) => tracing::warn!("ConsolidationLoop: pass for {project} failed: {err}"),
+                .instrument(span.clone())
+                .await;
+            match result {
+                Err(err) => {
+                    crate::telemetry::record_pass_outcome(
+                        &span,
+                        crate::telemetry::PassOutcome::Failed,
+                    );
+                    tracing::warn!("ConsolidationLoop: pass for {project} failed: {err}");
+                }
                 Ok(()) => {
+                    crate::telemetry::record_pass_outcome(
+                        &span,
+                        crate::telemetry::PassOutcome::Completed,
+                    );
                     tracing::info!("ConsolidationLoop: pass for {project} completed");
                     state.maybe_project_memory(&project).await;
                 }

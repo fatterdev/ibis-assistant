@@ -5,6 +5,7 @@
 //! errors are reported through `tracing` (the `internal-logs` feature of the
 //! OpenTelemetry crates routes them to the same subscriber).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -21,6 +22,12 @@ use tracing_subscriber::Layer as _;
 use crate::{OtlpProtocol, ResolvedOtlp, TelemetryConfig};
 
 static GUARD: OnceLock<TelemetryGuard> = OnceLock::new();
+static ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// True once the OTLP layer is installed in this process.
+pub(crate) fn active() -> bool {
+    ACTIVE.load(Ordering::Relaxed)
+}
 
 struct TelemetryGuard {
     provider: SdkTracerProvider,
@@ -58,16 +65,26 @@ where
     // a span would otherwise be exported as OTel span events carrying their
     // fields (potentially content), so the OTel layer filters events out.
     let layer = layer.map(|layer| layer.with_filter(FilterFn::new(|meta| meta.is_span())));
+    let layer_built = layer.is_some();
     let installed = tracing::subscriber::set_global_default(registry.with(layer)).is_ok();
+    if installed && layer_built {
+        ACTIVE.store(true, Ordering::Relaxed);
+    }
 
     // The subscriber is installed now, so warnings reach the configured sink.
     if let Some(err) = build_error {
         tracing::warn!("OpenTelemetry exporter could not be built: {err}; telemetry stays off");
     }
-    if installed && telemetry.otlp.enabled {
+    if installed && layer_built {
         // Re-run normalization only to surface its warnings; the values used
         // by the layer were resolved before installation.
-        let _ = telemetry.otlp.resolved();
+        let resolved = telemetry.otlp.resolved();
+        tracing::info!(
+            "OpenTelemetry exporter enabled: endpoint={} protocol={} sample_ratio={}",
+            resolved.endpoint,
+            resolved.protocol.as_str(),
+            resolved.sample_ratio
+        );
     }
 }
 
@@ -95,7 +112,15 @@ where
         )
         .build();
     let tracer = provider.tracer("ibis");
-    let layer = tracing_opentelemetry::layer().with_tracer(tracer);
+    let layer = tracing_opentelemetry::layer()
+        .with_tracer(tracer)
+        // §4.3/§4.4: only the declared attributes leave the process. The
+        // layer defaults would add code.* (absolute paths), thread.*, target
+        // and busy/idle counters.
+        .with_location(false)
+        .with_threads(false)
+        .with_target(false)
+        .with_tracked_inactivity(false);
     Ok((layer, TelemetryGuard { provider }))
 }
 

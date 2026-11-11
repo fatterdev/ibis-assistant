@@ -38,6 +38,7 @@ use rmcp::service::{RequestContext, SubscriptionContext};
 use rmcp::tool_handler;
 use rmcp::RoleServer;
 use rmcp::ServerHandler;
+use tracing::Instrument as _;
 
 use crate::state::AppState;
 
@@ -137,20 +138,23 @@ pub fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> String {
 async fn catch_tool_panic(
     tool_name: &str,
     dispatch: impl std::future::Future<Output = Result<CallToolResponse, rmcp::ErrorData>>,
-) -> Result<CallToolResponse, rmcp::ErrorData> {
+) -> (Result<CallToolResponse, rmcp::ErrorData>, bool) {
     use futures::FutureExt as _;
     match std::panic::AssertUnwindSafe(dispatch).catch_unwind().await {
-        Ok(response) => response,
+        Ok(response) => (response, false),
         Err(payload) => {
             let message = panic_payload_message(&*payload);
             tracing::error!(
                 tool = tool_name,
                 "tool panicked; returning an error result: {message}"
             );
-            Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                "internal error: tool '{tool_name}' panicked: {message}\nsee the server log for details"
-            ))])
-            .into())
+            (
+                Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                    "internal error: tool '{tool_name}' panicked: {message}\nsee the server log for details"
+                ))])
+                .into()),
+                true,
+            )
         }
     }
 }
@@ -246,9 +250,23 @@ impl ServerHandler for IbisServer {
             ));
         }
         let tool_name = request.name.clone();
+        // F17: the only argument that reaches telemetry is the project name.
+        let project = crate::telemetry::project_from_arguments(request.arguments.as_ref());
+        // Unknown names are a client-side string: keep the exported value
+        // bounded (`<unknown>`) instead of an arbitrary cardinality/PII leak.
+        let span_tool_name = crate::telemetry::tool_span_name(&tool_name);
+        let read_only = crate::telemetry::tool_read_only(&tool_name);
+        let runtime_mode = self.state.config().runtime_mode.clone();
+        let span = crate::telemetry::active_tool_span(
+            span_tool_name,
+            read_only,
+            project.as_deref(),
+            &runtime_mode,
+        );
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         let t0 = std::time::Instant::now();
-        let response = catch_tool_panic(&tool_name, self.router.call(tcc)).await;
+        let (response, panicked) =
+            catch_tool_panic(&tool_name, self.router.call(tcc).instrument(span.clone())).await;
         let elapsed = t0.elapsed();
         match &response {
             Ok(CallToolResponse::Complete(result)) => {
@@ -266,6 +284,18 @@ impl ServerHandler for IbisServer {
                 );
             }
         }
+        let outcome = if panicked {
+            crate::telemetry::ToolOutcome::Panic
+        } else {
+            match &response {
+                Ok(CallToolResponse::Complete(result)) if result.is_error == Some(true) => {
+                    crate::telemetry::ToolOutcome::Error
+                }
+                Ok(_) => crate::telemetry::ToolOutcome::Ok,
+                Err(_) => crate::telemetry::ToolOutcome::Error,
+            }
+        };
+        crate::telemetry::record_tool_outcome(&span, outcome);
         response
     }
 
@@ -556,9 +586,9 @@ mod panic_guard_tests {
     /// task and the IDE waited out its 60s timeout).
     #[tokio::test]
     async fn tool_panic_becomes_error_result() {
-        let response = catch_tool_panic("probe_tool", panicking_probe())
-            .await
-            .expect("panic must be converted, not propagated");
+        let (response, panicked) = catch_tool_panic("probe_tool", panicking_probe()).await;
+        assert!(panicked, "panic flag must be set");
+        let response = response.expect("panic must be converted, not propagated");
         let CallToolResponse::Complete(result) = response else {
             panic!("expected a complete tool response");
         };
@@ -579,13 +609,14 @@ mod panic_guard_tests {
     /// The guard must not alter the normal outcome path.
     #[tokio::test]
     async fn ok_results_pass_through() {
-        let response = catch_tool_panic("probe_tool", async {
+        let (response, panicked) = catch_tool_panic("probe_tool", async {
             Ok::<CallToolResponse, rmcp::ErrorData>(
                 CallToolResult::success(vec![ContentBlock::text("fine")]).into(),
             )
         })
-        .await
-        .expect("ok dispatch");
+        .await;
+        assert!(!panicked, "normal dispatch is not a panic");
+        let response = response.expect("ok dispatch");
         let CallToolResponse::Complete(result) = response else {
             panic!("expected a complete tool response");
         };

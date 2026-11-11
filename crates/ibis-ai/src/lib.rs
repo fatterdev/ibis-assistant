@@ -26,6 +26,7 @@ pub mod openai_compat;
 pub mod response_cache;
 pub mod router;
 pub mod runner;
+pub mod telemetry;
 pub mod traits;
 pub mod types;
 

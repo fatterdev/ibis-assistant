@@ -67,6 +67,29 @@ impl AiError {
     pub fn is_context_only(&self) -> bool {
         matches!(self, AiError::ContextOnly)
     }
+
+    /// Stable, bounded identifier for telemetry (`ai.error.kind`). Never the
+    /// message: provider errors can echo the prompt.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            AiError::ContextOnly => "context_only",
+            AiError::NoEmbeddingProvider => "no_embedding_provider",
+            AiError::NoReasoningProvider => "no_reasoning_provider",
+            AiError::NotInitialized => "not_initialized",
+            AiError::NotConfigured { .. } => "not_configured",
+            AiError::Unsupported { .. } => "unsupported",
+            AiError::CloudUnavailable => "cloud_unavailable",
+            AiError::LocalUnavailable => "local_unavailable",
+            AiError::NoCloudProviders => "no_cloud_providers",
+            AiError::CloudPoolExhausted => "cloud_pool_exhausted",
+            AiError::DeadlineExceeded => "deadline_exceeded",
+            AiError::Cancelled => "cancelled",
+            AiError::Joined { .. } => "joined",
+            AiError::Transport(_) => "transport",
+            AiError::Wrapped { .. } => "wrapped",
+            AiError::Other(_) => "other",
+        }
+    }
 }
 
 impl From<reqwest::Error> for AiError {

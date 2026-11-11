@@ -112,6 +112,13 @@ impl OtlpProtocol {
             _ => None,
         }
     }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            OtlpProtocol::HttpProtobuf => "http/protobuf",
+            OtlpProtocol::Grpc => "grpc",
+        }
+    }
 }
 
 /// Normalized exporter settings consumed by the `otel` module.
@@ -355,6 +362,21 @@ pub fn shutdown_telemetry(timeout: Duration) {
     #[cfg(not(feature = "otel"))]
     {
         let _ = timeout;
+    }
+}
+
+/// True when this process installed the OTLP layer (feature `otel` compiled
+/// in, `telemetry.otlp.enabled` true, exporter built). Call sites gate span
+/// creation on this so the default build/config keeps the pre-F17 `fmt`
+/// output byte-identical (no span scope prefix in log lines).
+pub fn otel_active() -> bool {
+    #[cfg(feature = "otel")]
+    {
+        crate::otel::active()
+    }
+    #[cfg(not(feature = "otel"))]
+    {
+        false
     }
 }
 

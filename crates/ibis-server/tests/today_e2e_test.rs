@@ -24,7 +24,11 @@
 //! path the product uses at startup) with `DB_AUTO_UPDATE=false` so the
 //! child takes the local-binary fast path after the seed.
 
+#[cfg(feature = "otel")]
+use std::io::Read as _;
 use std::io::{BufRead, BufReader, Write as _};
+#[cfg(feature = "otel")]
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
@@ -184,6 +188,67 @@ fn child_env(overrides: &[(&str, String)]) -> Vec<(String, String)> {
     env
 }
 
+/// F17 test collector: a minimal OTLP/HTTP sink. It answers every POST with
+/// 200 and forwards the protobuf body; the test only needs the literal span
+/// and attribute bytes, not a full decoder.
+#[cfg(feature = "otel")]
+struct CollectorStub {
+    endpoint: String,
+    bodies: Receiver<Vec<u8>>,
+}
+
+#[cfg(feature = "otel")]
+fn collector_stub() -> CollectorStub {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind collector");
+    let port = listener.local_addr().expect("collector addr").port();
+    let (tx, bodies) = mpsc::channel();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            if let Some(body) = read_http_body(&mut stream) {
+                let _ = tx.send(body);
+            }
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            let _ = stream.flush();
+        }
+    });
+    CollectorStub {
+        endpoint: format!("http://127.0.0.1:{port}"),
+        bodies,
+    }
+}
+
+#[cfg(feature = "otel")]
+fn read_http_body(stream: &mut std::net::TcpStream) -> Option<Vec<u8>> {
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let header_end = loop {
+        if let Some(pos) = buf.windows(4).position(|window| window == b"\r\n\r\n") {
+            break pos + 4;
+        }
+        match stream.read(&mut chunk) {
+            Ok(0) => return None,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(_) => return None,
+        }
+    };
+    let headers = String::from_utf8_lossy(&buf[..header_end]).to_ascii_lowercase();
+    let content_length = headers
+        .lines()
+        .find_map(|line| line.strip_prefix("content-length:"))
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    while buf.len() < header_end + content_length {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(_) => break,
+        }
+    }
+    Some(buf[header_end..].to_vec())
+}
+
 struct E2eChild {
     proc: Child,
     stdin: Option<ChildStdin>,
@@ -333,6 +398,83 @@ impl E2eChild {
         }
     }
 
+    /// F17 strict framing: every stdout line must be JSON-RPC. A log line or
+    /// exporter byte on stdout fails the test instead of being skipped.
+    #[cfg(feature = "otel")]
+    fn request_strict(&mut self, id: u64, method: &str, params: Value, timeout: Duration) -> Value {
+        let deadline = Instant::now() + timeout;
+        self.send(
+            &json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }).to_string(),
+        );
+        loop {
+            let msg = self
+                .next_message_strict(deadline)
+                .unwrap_or_else(|| panic!("no response to {method} (id {id})"));
+            if msg["id"] == json!(id) {
+                return msg;
+            }
+        }
+    }
+
+    #[cfg(feature = "otel")]
+    fn next_message_strict(&mut self, deadline: Instant) -> Option<Value> {
+        loop {
+            let now = Instant::now();
+            if now >= deadline {
+                return None;
+            }
+            match self.rx.recv_timeout(deadline - now) {
+                Ok(line) => {
+                    let trimmed = line.trim();
+                    assert!(
+                        !trimmed.is_empty(),
+                        "empty stdout line during stdio framing"
+                    );
+                    let value: Value = serde_json::from_str(trimmed).unwrap_or_else(|err| {
+                        panic!("non-JSON stdout line (framing leak): {line:?} ({err})")
+                    });
+                    if value.get("method").is_some() {
+                        if let Some(id) = value.get("id") {
+                            self.pending_server_requests
+                                .push((id.clone(), value["method"].as_str().unwrap_or("").into()));
+                        }
+                        continue;
+                    }
+                    return Some(value);
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => return None,
+                Err(mpsc::RecvTimeoutError::Disconnected) => return None,
+            }
+        }
+    }
+
+    /// Drains stdout until EOF, failing on any non-JSON line: shutdown-time
+    /// exporter/log output must not leak into the MCP stream either.
+    #[cfg(feature = "otel")]
+    fn drain_stdout_strict(&mut self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let now = Instant::now();
+            assert!(
+                now < deadline,
+                "stdout still open {timeout:?} after stdin close"
+            );
+            match self.rx.recv_timeout(deadline - now) {
+                Ok(line) => {
+                    let trimmed = line.trim();
+                    assert!(!trimmed.is_empty(), "empty stdout line during shutdown");
+                    serde_json::from_str::<Value>(trimmed).unwrap_or_else(|err| {
+                        panic!("non-JSON stdout line during shutdown: {line:?} ({err})")
+                    });
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    panic!("stdout still open {timeout:?} after stdin close")
+                }
+            }
+        }
+    }
+
     fn respond(&mut self, id: &Value, result: Value) {
         self.send(&json!({ "jsonrpc": "2.0", "id": id, "result": result }).to_string());
     }
@@ -444,6 +586,173 @@ fn plugin_without_workspace_completes_initialize() {
         "clean exit expected after stdin close, got {status:?}"
     );
     child.kill_tree();
+}
+
+/// F17: with the `otel` feature compiled in and OTLP enabled, stdout stays
+/// pure JSON-RPC framing. The collector is unreachable on purpose: exporter
+/// errors must go to `tracing`, never to stdout.
+#[cfg(feature = "otel")]
+#[test]
+fn stdio_framing_with_otel_enabled() {
+    let exe = assistant_exe();
+    let cwd = tempfile::tempdir().expect("cwd tempdir");
+    let data = tempfile::tempdir().expect("data tempdir");
+    let config_path = cwd.path().join("config.json");
+    std::fs::write(
+        &config_path,
+        r#"{"telemetry":{"otlp":{"enabled":true,"endpoint":"http://127.0.0.1:1","sample_ratio":1.0}}}"#,
+    )
+    .expect("write telemetry config");
+    let env = child_env(&[
+        ("IBIS_DATA_DIR", data.path().display().to_string()),
+        ("EMBEDDING_PROVIDER", "none".into()),
+        ("DB_AUTO_UPDATE", "false".into()),
+        ("LOG_LEVEL", "INFO".into()),
+    ]);
+    let config_arg = config_path.display().to_string();
+    let mut child = E2eChild::spawn(
+        &exe,
+        &[
+            "run",
+            "--mode",
+            "stdio",
+            "--runtime-mode",
+            "plugin",
+            "--scan",
+            "false",
+            "--config",
+            &config_arg,
+        ],
+        cwd.path(),
+        &env,
+    );
+
+    let init = child.request_strict(
+        1,
+        "initialize",
+        initialize_params(),
+        Duration::from_secs(30),
+    );
+    assert!(
+        init.get("result").is_some() && init.get("error").is_none(),
+        "initialize must succeed with otel enabled: {init}"
+    );
+
+    // A real tool call: the `mcp.tool` span is created and exported (and
+    // dropped, the collector is unreachable) while stdout stays framing-only.
+    let call = child.request_strict(
+        2,
+        "tools/call",
+        json!({
+            "name": "get_working_state",
+            "arguments": {"project_name": "otel-probe", "branch": "main"}
+        }),
+        Duration::from_secs(30),
+    );
+    assert!(
+        call.get("result").is_some() && call.get("error").is_none(),
+        "tool call must return a result, not a protocol error: {call}"
+    );
+
+    child.close_stdin();
+    child.drain_stdout_strict(Duration::from_secs(15));
+    let status = child
+        .wait_for_exit(Duration::from_secs(30))
+        .expect("process must exit when stdin closes");
+    assert!(
+        status.success(),
+        "clean exit expected after stdin close, got {status:?}"
+    );
+    child.kill_tree();
+}
+
+/// F17: the real exporter receives the `mcp.tool` span for a real tool call.
+/// The collector is a local HTTP sink; the span name and tool name are
+/// asserted from the protobuf bytes (no full OTLP decoder needed).
+#[cfg(feature = "otel")]
+#[test]
+fn otel_exporter_receives_tool_span() {
+    let exe = assistant_exe();
+    let collector = collector_stub();
+    let cwd = tempfile::tempdir().expect("cwd tempdir");
+    let data = tempfile::tempdir().expect("data tempdir");
+    let config_path = cwd.path().join("config.json");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"{{"log_file":"{}","telemetry":{{"otlp":{{"enabled":true,"endpoint":"{}","sample_ratio":1.0}}}}}}"#,
+            cwd.path().join("otel.log").display().to_string().replace('\\', "/"),
+            collector.endpoint
+        ),
+    )
+    .expect("write telemetry config");
+    let env = child_env(&[
+        ("IBIS_DATA_DIR", data.path().display().to_string()),
+        ("EMBEDDING_PROVIDER", "none".into()),
+        ("DB_AUTO_UPDATE", "false".into()),
+        ("LOG_LEVEL", "INFO".into()),
+    ]);
+    let config_arg = config_path.display().to_string();
+    let mut child = E2eChild::spawn(
+        &exe,
+        &[
+            "run",
+            "--mode",
+            "stdio",
+            "--runtime-mode",
+            "plugin",
+            "--scan",
+            "false",
+            "--config",
+            &config_arg,
+        ],
+        cwd.path(),
+        &env,
+    );
+
+    let init = child.request_strict(
+        1,
+        "initialize",
+        initialize_params(),
+        Duration::from_secs(30),
+    );
+    assert!(init.get("result").is_some(), "initialize: {init}");
+    let call = child.request_strict(
+        2,
+        "tools/call",
+        json!({
+            "name": "get_working_state",
+            "arguments": {"project_name": "otel-probe", "branch": "main"}
+        }),
+        Duration::from_secs(30),
+    );
+    assert!(
+        call.get("result").is_some() && call.get("error").is_none(),
+        "tool call must return a result: {call}"
+    );
+
+    child.close_stdin();
+    child.drain_stdout_strict(Duration::from_secs(15));
+    let status = child
+        .wait_for_exit(Duration::from_secs(30))
+        .expect("process must exit when stdin closes");
+    assert!(status.success(), "clean exit expected, got {status:?}");
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut saw_tool_span = false;
+    while Instant::now() < deadline && !saw_tool_span {
+        if let Ok(body) = collector.bodies.recv_timeout(Duration::from_millis(500)) {
+            saw_tool_span = body.windows(8).any(|window| window == b"mcp.tool")
+                && body
+                    .windows(17)
+                    .any(|window| window == b"get_working_state");
+        }
+    }
+    child.kill_tree();
+    assert!(
+        saw_tool_span,
+        "collector did not receive an mcp.tool span for get_working_state"
+    );
 }
 
 /// `TestTodayE2EPluginBinary (decoy): the plugin launched with a

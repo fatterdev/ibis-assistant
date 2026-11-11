@@ -127,6 +127,7 @@ pub async fn dispatch(
         None
     };
     let actor = actor_context(&ctx.request_context);
+    crate::telemetry::record_tool_actor(actor.actor.as_deref());
     tracing::info!("MCP Tool Call: {name}");
     match name {
         "init_project" => init_project(&state, &args, progress, ctx).await,

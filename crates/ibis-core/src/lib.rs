@@ -5,4 +5,5 @@ pub mod discovery;
 pub mod process_tree;
 pub mod reasoning;
 pub mod sidecar_ledger;
+pub mod telemetry;
 pub mod workspace;

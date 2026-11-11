@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use tracing::Instrument as _;
+
 use crate::error::AiError;
 use crate::runner::OllamaProcess;
 use crate::traits::AIProvider;
@@ -33,8 +35,13 @@ impl Client {
     pub async fn embed_text(&self, text: &str) -> Result<Vec<f32>, AiError> {
         match &self.embedding {
             Some(e) => {
+                let span = crate::telemetry::active_embed_span(e.name(), 1);
                 let t0 = std::time::Instant::now();
-                let out = e.embed_text(text).await;
+                let out = e.embed_text(text).instrument(span.clone()).await;
+                match &out {
+                    Ok(vector) => crate::telemetry::record_embed_success(&span, vector.len()),
+                    Err(err) => crate::telemetry::record_error(&span, err),
+                }
                 tracing::info!(
                     "embed_text: provider={} dt={:?} ok={}",
                     e.name(),
@@ -43,14 +50,29 @@ impl Client {
                 );
                 out
             }
-            None => Err(AiError::NoEmbeddingProvider),
+            None => {
+                let err = AiError::NoEmbeddingProvider;
+                let span = crate::telemetry::active_embed_span("none", 1);
+                crate::telemetry::record_error(&span, &err);
+                Err(err)
+            }
         }
     }
 
     pub async fn batch_embed_text(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, AiError> {
         match &self.embedding {
-            Some(e) => e.batch_embed_text(texts).await,
-            None => Err(AiError::NoEmbeddingProvider),
+            Some(e) => {
+                let span = crate::telemetry::active_embed_span(e.name(), texts.len());
+                let out = e.batch_embed_text(texts).instrument(span.clone()).await;
+                crate::telemetry::record_embed_result(&span, &out);
+                out
+            }
+            None => {
+                let err = AiError::NoEmbeddingProvider;
+                let span = crate::telemetry::active_embed_span("none", texts.len());
+                crate::telemetry::record_error(&span, &err);
+                Err(err)
+            }
         }
     }
 
@@ -60,8 +82,21 @@ impl Client {
         config: GenerationConfig,
     ) -> Result<Candidate, AiError> {
         match &self.reasoning {
-            Some(r) => r.generate_content(contents, config).await,
-            None => Err(AiError::NoReasoningProvider),
+            Some(r) => {
+                let span = crate::telemetry::active_generate_span(r.name(), &config);
+                let out = r
+                    .generate_content(contents, config)
+                    .instrument(span.clone())
+                    .await;
+                crate::telemetry::record_generate_result(&span, &out);
+                out
+            }
+            None => {
+                let err = AiError::NoReasoningProvider;
+                let span = crate::telemetry::active_generate_span("none", &config);
+                crate::telemetry::record_error(&span, &err);
+                Err(err)
+            }
         }
     }
 

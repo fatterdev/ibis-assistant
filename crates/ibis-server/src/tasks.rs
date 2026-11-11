@@ -16,6 +16,7 @@ use serde::Serialize;
 use surrealdb::types::{Datetime, RecordId, SurrealValue, Value};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument as _;
 
 use ibis_db::executor::{Executor, QueryOutcome, Vars};
 use ibis_db::ids::record_id_to_plain;
@@ -589,7 +590,13 @@ impl TaskRunner {
         project: &str,
     ) -> Result<TaskRunOutcome, String> {
         let pass = OptimizerPass { optimizer, project };
-        self.execute_start(start, &pass).await
+        let span = crate::telemetry::active_memory_consolidate_span(project);
+        let result = self
+            .execute_start(start, &pass)
+            .instrument(span.clone())
+            .await;
+        record_task_outcome(&span, &result);
+        result
     }
 
     /// Runs the pass without a lease when the store failed after start.
@@ -600,7 +607,7 @@ impl TaskRunner {
         project: &str,
     ) -> Result<TaskRunOutcome, String> {
         let pass = OptimizerPass { optimizer, project };
-        self.run_degraded(&pass, params, "task store unavailable".into())
+        self.run_degraded(&pass, params, "task store unavailable".into(), project)
             .await
     }
 
@@ -609,13 +616,22 @@ impl TaskRunner {
         new: NewTask,
         pass: &dyn TaskPass,
     ) -> Result<TaskRunOutcome, String> {
+        let project = new.project.clone();
         match self.begin(new).await? {
-            TaskBegin::Claimed(start) => self.execute_start(*start, pass).await,
+            TaskBegin::Claimed(start) => {
+                let span = crate::telemetry::active_memory_consolidate_span(&project);
+                let result = self
+                    .execute_start(*start, pass)
+                    .instrument(span.clone())
+                    .await;
+                record_task_outcome(&span, &result);
+                result
+            }
             TaskBegin::AlreadyRunning { task_id, .. } => {
                 Ok(TaskRunOutcome::AlreadyRunning { task_id })
             }
             TaskBegin::Degraded { params, reason } => {
-                self.run_degraded(pass, &params, reason).await
+                self.run_degraded(pass, &params, reason, &project).await
             }
         }
     }
@@ -627,6 +643,10 @@ impl TaskRunner {
     ) -> Result<TaskRunOutcome, String> {
         let claimed = start.row;
         let task_id = record_id_to_plain(&claimed.id);
+        // F17: the runner's `memory.consolidate` span is the current span of
+        // the instrumented `execute_start` future.
+        let span = tracing::Span::current();
+        crate::telemetry::record_task(&span, task_id.as_str(), claimed.recoveries.max(0) as u64);
         let epoch = claimed.lease_epoch;
         let params = claimed.params.clone().unwrap_or(start.fallback_params);
         let cap = params.max_llm_summaries as usize;
@@ -635,6 +655,7 @@ impl TaskRunner {
 
         let lease_lost = Arc::new(AtomicBool::new(false));
         let state = Arc::new(Mutex::new(initial));
+        let span_stats = Arc::new(Mutex::new(crate::telemetry::PassStats::default()));
         let (tx, mut rx) = mpsc::unbounded_channel::<TaskCheckpoint>();
 
         let writer = {
@@ -705,12 +726,14 @@ impl TaskRunner {
             cap,
             base_summaries: initial_summaries,
             state: state.clone(),
+            span_stats: span_stats.clone(),
             tx,
             lease_lost: lease_lost.clone(),
             shutdown: self.shutdown.clone(),
         };
         let result = pass.run(&params, Some(&checkpoint)).await;
         drop(checkpoint);
+        crate::telemetry::record_pass_stats(&tracing::Span::current(), &span_stats.lock().unwrap());
         let _ = writer.await;
         heartbeat_stop.cancel();
         let _ = heartbeat.await;
@@ -792,12 +815,42 @@ impl TaskRunner {
         pass: &dyn TaskPass,
         params: &TaskParams,
         reason: String,
+        project: &str,
     ) -> Result<TaskRunOutcome, String> {
-        match pass.run(params, None).await {
-            Ok(()) => Ok(TaskRunOutcome::Degraded { reason }),
-            Err(err) => Err(err),
+        let span = crate::telemetry::active_memory_consolidate_span(project);
+        let result = pass.run(params, None).instrument(span.clone()).await;
+        match result {
+            Ok(()) => {
+                crate::telemetry::record_pass_outcome(
+                    &span,
+                    crate::telemetry::PassOutcome::Completed,
+                );
+                Ok(TaskRunOutcome::Degraded { reason })
+            }
+            Err(err) => {
+                crate::telemetry::record_pass_outcome(&span, crate::telemetry::PassOutcome::Failed);
+                Err(err)
+            }
         }
     }
+}
+
+/// Maps the runner's terminal outcome onto the bounded `ibis.outcome` values.
+fn record_task_outcome(span: &tracing::Span, result: &Result<TaskRunOutcome, String>) {
+    use crate::telemetry::PassOutcome;
+    let outcome = match result {
+        Ok(TaskRunOutcome::Completed { .. }) | Ok(TaskRunOutcome::Degraded { .. }) => {
+            PassOutcome::Completed
+        }
+        Ok(TaskRunOutcome::Requeued { .. }) => PassOutcome::Requeued,
+        Ok(TaskRunOutcome::Failed { .. }) | Ok(TaskRunOutcome::LeaseLost { .. }) => {
+            PassOutcome::Failed
+        }
+        // `AlreadyRunning` never reaches an instrumented pass.
+        Ok(TaskRunOutcome::AlreadyRunning { .. }) => PassOutcome::Completed,
+        Err(_) => PassOutcome::Failed,
+    };
+    crate::telemetry::record_pass_outcome(span, outcome);
 }
 
 /// Sync checkpoint seam backed by an unbounded writer channel: `item_done`
@@ -808,6 +861,7 @@ struct RunnerCheckpoint {
     /// Summaries already spent by previous attempts (the resume budget base).
     base_summaries: u64,
     state: Arc<Mutex<TaskCheckpoint>>,
+    span_stats: Arc<Mutex<crate::telemetry::PassStats>>,
     tx: mpsc::UnboundedSender<TaskCheckpoint>,
     lease_lost: Arc<AtomicBool>,
     shutdown: CancellationToken,
@@ -829,6 +883,10 @@ impl PassCheckpoint for RunnerCheckpoint {
     }
 
     fn item_done(&self, item_id: &str, outcome: &str, items_total: usize) {
+        {
+            let mut stats = self.span_stats.lock().unwrap();
+            stats.items = stats.items.saturating_add(1);
+        }
         {
             let mut state = self.state.lock().unwrap();
             state.last_item_id = Some(item_id.to_string());
@@ -854,6 +912,15 @@ impl PassCheckpoint for RunnerCheckpoint {
     }
 
     fn scope_done(&self, report: &ibis_optimization::ObservationPassReport) {
+        {
+            // `observations_pass` hands the same cumulative report to every
+            // scope: assign, never add (addition would triangle the totals).
+            let mut stats = self.span_stats.lock().unwrap();
+            stats.summaries = report.summarized as u64;
+            stats.deferred = report.deferred as u64;
+            stats.fallbacks = report.fallbacks as u64;
+            stats.failed = report.failed as u64;
+        }
         {
             let mut state = self.state.lock().unwrap();
             state.summaries_used = self.base_summaries.saturating_add(report.summarized as u64);
@@ -1378,10 +1445,50 @@ mod tests {
             cap: 10,
             base_summaries: 0,
             state: Arc::new(Mutex::new(TaskCheckpoint::default())),
+            span_stats: Arc::new(Mutex::new(crate::telemetry::PassStats::default())),
             tx,
             lease_lost: Arc::new(AtomicBool::new(true)),
             shutdown: CancellationToken::new(),
         };
         assert!(!checkpoint.should_continue());
+    }
+
+    /// `observations_pass` reports cumulative totals to every scope; the
+    /// span stats must mirror the latest report, never sum it per scope.
+    #[test]
+    fn scope_done_assigns_cumulative_report() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let stats = Arc::new(Mutex::new(crate::telemetry::PassStats::default()));
+        let checkpoint = RunnerCheckpoint {
+            task_id: "task".into(),
+            cap: 10,
+            base_summaries: 0,
+            state: Arc::new(Mutex::new(TaskCheckpoint::default())),
+            span_stats: stats.clone(),
+            tx,
+            lease_lost: Arc::new(AtomicBool::new(false)),
+            shutdown: CancellationToken::new(),
+        };
+        checkpoint.scope_done(&ObservationPassReport {
+            scopes: 2,
+            summarized: 1,
+            deferred: 2,
+            fallbacks: 3,
+            failed: 4,
+            ..Default::default()
+        });
+        checkpoint.scope_done(&ObservationPassReport {
+            scopes: 2,
+            summarized: 5,
+            deferred: 6,
+            fallbacks: 7,
+            failed: 8,
+            ..Default::default()
+        });
+        let stats = *stats.lock().unwrap();
+        assert_eq!(stats.summaries, 5);
+        assert_eq!(stats.deferred, 6);
+        assert_eq!(stats.fallbacks, 7);
+        assert_eq!(stats.failed, 8);
     }
 }

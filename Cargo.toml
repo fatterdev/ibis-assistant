@@ -63,7 +63,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 # F17: opt-in OpenTelemetry span export (feature `otel`, default off).
 opentelemetry = { version = "0.33", default-features = false, features = ["trace", "internal-logs"] }
 opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "rt-tokio", "internal-logs"] }
-opentelemetry-otlp = { version = "0.33", default-features = false, features = ["http-proto", "reqwest-client", "reqwest-rustls", "grpc-tonic", "internal-logs"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["http-proto", "reqwest-blocking-client", "reqwest-rustls", "grpc-tonic", "internal-logs"] }
 tracing-opentelemetry = { version = "0.34", default-features = false }
 # Direct dependency only for the tonic metadata types used by OTLP/gRPC
 # headers; the transport itself comes from opentelemetry-otlp.
