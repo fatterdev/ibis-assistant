@@ -630,6 +630,9 @@ pub struct Config {
     pub search: SearchConfig,
     /// E16 — durable task store knobs (`tasks.*`).
     pub tasks: TasksConfig,
+    /// F17 — opt-in OpenTelemetry OTLP span export (`telemetry.*`). The
+    /// feature `otel` is required for the exporter to be compiled in.
+    pub telemetry: ibis_logger::TelemetryConfig,
     /// True if a config file was successfully loaded (not serialized).
     #[serde(skip)]
     pub config_loaded: bool,
@@ -869,6 +872,7 @@ impl Default for Config {
             world_state: WorldStateConfig::default(),
             search: SearchConfig::default(),
             tasks: TasksConfig::default(),
+            telemetry: ibis_logger::TelemetryConfig::default(),
             bind_address: String::new(),
             runtime_mode: String::new(),
             gemini_keys: Vec::new(),
@@ -1633,6 +1637,35 @@ mod tests {
         assert_eq!(cfg.tasks.heartbeat_secs, 10);
         assert_eq!(cfg.tasks.max_recoveries, 5);
         assert_eq!(cfg.tasks.retention_days, 30);
+    }
+
+    /// `telemetry.*` (F17): OTLP export is off by default; the file overlays
+    /// individual keys and keeps the remaining defaults.
+    #[test]
+    fn telemetry_config_defaults() {
+        let dflt = default_config();
+        assert!(!dflt.telemetry.otlp.enabled);
+        assert_eq!(dflt.telemetry.otlp.endpoint, "http://127.0.0.1:4318");
+        assert_eq!(dflt.telemetry.otlp.protocol, "http/protobuf");
+        assert_eq!(dflt.telemetry.otlp.service_name, "ibis");
+        assert!((dflt.telemetry.otlp.sample_ratio - 0.1).abs() < f64::EPSILON);
+        assert!(dflt.telemetry.otlp.headers.is_empty());
+
+        let cfg: Config = serde_json::from_str(
+            r#"{"telemetry":{"otlp":{"enabled":true,"sample_ratio":1.0,"headers":{"x-api-key":"secret"}}}}"#,
+        )
+        .unwrap();
+        assert!(cfg.telemetry.otlp.enabled);
+        assert_eq!(cfg.telemetry.otlp.sample_ratio, 1.0);
+        assert_eq!(cfg.telemetry.otlp.protocol, "http/protobuf");
+        assert_eq!(
+            cfg.telemetry
+                .otlp
+                .headers
+                .get("x-api-key")
+                .map(String::as_str),
+            Some("secret")
+        );
     }
 
     /// `ai.consolidation` (F4 §B.5): off by default, the file overlays the

@@ -6,10 +6,32 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+# F17: OTLP span export. Default off: the standard build does not link the
+# OpenTelemetry stack.
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+    "dep:tracing-opentelemetry",
+    "dep:tonic",
+    "dep:tokio",
+]
+
 [dependencies]
+serde.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+tonic = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
+serde_json.workspace = true
 tempfile.workspace = true
+tokio.workspace = true
 

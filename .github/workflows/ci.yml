@@ -111,3 +111,27 @@ jobs:
         run: cargo test -p ibis-optimization --test live_observations
       - name: Live tests (ibis-server)
         run: cargo test -p ibis-server --test live_commit_txn
+      - name: Live tests (ibis-server tasks)
+        run: cargo test -p ibis-server --test live_tasks
+
+  # F17: the OpenTelemetry exporter is opt-in. This job proves the feature
+  # builds and its tests pass, and that the default tree stays free of the
+  # OTel stack (the standard `rust` job never enables it).
+  otel-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build server with OTel
+        run: cargo build -p ibis-server --features otel
+      - name: Logger tests with OTel
+        run: cargo test -p ibis-logger --features otel
+      - name: Clippy with OTel
+        run: cargo clippy -p ibis-logger --features otel --all-targets -- -D warnings
+      - name: Default tree has no OpenTelemetry
+        run: |
+          if cargo tree -p ibis-server | grep -q opentelemetry; then
+            echo "opentelemetry leaked into the default build" >&2
+            exit 1
+          fi

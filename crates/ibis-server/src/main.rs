@@ -530,7 +530,8 @@ async fn run_server_async(args: Vec<String>) -> i32 {
 
     // Initialize the logger (stdout stays clean for stdio children).
     let stdio_quiet = cfg.mode == "stdio" || cfg.is_plugin();
-    if let Err(err) = ibis_logger::init(&cfg.log_file, &cfg.log_level, stdio_quiet) {
+    if let Err(err) = ibis_logger::init(&cfg.log_file, &cfg.log_level, stdio_quiet, &cfg.telemetry)
+    {
         if !stdio_quiet {
             eprintln!("Error initializing logger: {err}");
         }
@@ -751,6 +752,10 @@ async fn run_server_async(args: Vec<String>) -> i32 {
     }
     tracing::info!("Stopping the ProjectIngestionManager...");
     state.ingestion.stop().await;
+    // F17: flush pending OTLP spans before the database connection closes.
+    // Bounded: an unreachable collector must not delay the exit beyond 5s.
+    tracing::info!("Flushing telemetry...");
+    ibis_logger::shutdown_telemetry(Duration::from_secs(5));
     if state.db().is_some() {
         tracing::info!("Closing database connection...");
         // Dropping the executor closes the underlying connection.

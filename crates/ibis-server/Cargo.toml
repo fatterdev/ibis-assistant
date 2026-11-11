@@ -10,6 +10,10 @@ repository.workspace = true
 name = "ibis"
 path = "src/main.rs"
 
+[features]
+# F17: pass-through for the opt-in OpenTelemetry exporter.
+otel = ["ibis-logger/otel"]
+
 [dependencies]
 rmcp = { version = "3.7.0", features = ["server", "macros", "schemars", "transport-async-rw", "transport-io", "transport-streamable-http-server", "transport-streamable-http-server-session", "transport-worker", "client", "transport-streamable-http-client", "__reqwest", "transport-streamable-http-client-reqwest"] }
 schemars = "1.2.3"
