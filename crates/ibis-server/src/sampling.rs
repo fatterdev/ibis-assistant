@@ -13,6 +13,7 @@
 //! HTTP sessions share the slot (the last tool caller wins) — acceptable for
 //! reasoning, which is best-effort per request.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use async_trait::async_trait;
@@ -28,13 +29,26 @@ use ibis_ai::SamplingMessage;
 /// Holds the live session peer; implements the [`SamplingTransport`] seam.
 pub struct SamplingSessionRegistry {
     peer: Mutex<Option<Peer<RoleServer>>>,
+    /// G20 harness policy: `false` after a profile with `sampling: never`
+    /// resolves (last caller wins, same limitation as the peer cell).
+    sampling_enabled: AtomicBool,
 }
 
 impl SamplingSessionRegistry {
     pub fn new() -> Self {
         SamplingSessionRegistry {
             peer: Mutex::new(None),
+            sampling_enabled: AtomicBool::new(true),
         }
+    }
+
+    /// G20: the dispatcher updates the policy when it resolves a profile.
+    pub fn set_sampling_enabled(&self, enabled: bool) {
+        self.sampling_enabled.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn sampling_enabled(&self) -> bool {
+        self.sampling_enabled.load(Ordering::Relaxed)
     }
 
     /// Records the peer of the in-flight request (called by tool dispatch).
@@ -68,8 +82,14 @@ impl Default for SamplingSessionRegistry {
 #[async_trait]
 impl SamplingTransport for SamplingSessionRegistry {
     fn connected(&self) -> bool {
-        self.current()
-            .is_some_and(|p| Self::client_declares_sampling(&p))
+        self.sampling_enabled()
+            && self
+                .current()
+                .is_some_and(|p| Self::client_declares_sampling(&p))
+    }
+
+    fn sampling_allowed(&self) -> bool {
+        self.sampling_enabled()
     }
 
     async fn create_message(&self, request: SamplingRequest) -> Result<SamplingResponse, AiError> {
@@ -254,5 +274,15 @@ mod tests {
                 .to_string(),
             "mcp sampling: no client session attached"
         );
+    }
+
+    #[test]
+    fn policy_never_disables_the_leg() {
+        let registry = SamplingSessionRegistry::new();
+        assert!(registry.sampling_allowed());
+        registry.set_sampling_enabled(false);
+        assert!(!registry.sampling_allowed());
+        registry.set_sampling_enabled(true);
+        assert!(registry.sampling_allowed());
     }
 }

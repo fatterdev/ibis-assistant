@@ -1067,6 +1067,38 @@ pub fn is_ticketing_tool(name: &str) -> bool {
     TICKETING_TOOLS.contains(&name)
 }
 
+/// G20 — static tool groups for harness profiles. `ticketing` reuses the
+/// config gate; `settings`/`optimize` are only hidden by a profile. Every
+/// name must exist in `TOOL_SPECS`; groups are disjoint (contract test).
+pub static TOOL_GROUPS: &[(&str, &[&str])] = &[
+    ("ticketing", TICKETING_TOOLS),
+    (
+        "settings",
+        &["settings_get", "settings_apply", "settings_open_ui"],
+    ),
+    ("optimize", &["optimize_knowledge"]),
+];
+
+/// The group a tool belongs to, if any.
+pub fn group_of(name: &str) -> Option<&'static str> {
+    TOOL_GROUPS
+        .iter()
+        .find(|(_, names)| names.contains(&name))
+        .map(|(group, _)| *group)
+}
+
+/// Canonical group name, or `None` for an unknown group.
+pub fn canonical_group(group: &str) -> Option<&'static str> {
+    TOOL_GROUPS
+        .iter()
+        .find(|(name, _)| *name == group)
+        .map(|(name, _)| *name)
+}
+
+pub fn group_exists(group: &str) -> bool {
+    canonical_group(group).is_some()
+}
+
 /// Builds one rmcp [`Tool`] for a spec: reference-shaped schema plus the
 /// F0.2 annotations — the human-readable title (top-level and inside the
 /// annotations) and the explicit `readOnlyHint` — and, for the three memory
@@ -1142,4 +1174,27 @@ pub fn discovery_tools() -> ibis_httpserver::discovery::ToolsProvider {
         tools.sort_by(|a, b| a.name.cmp(&b.name));
         tools
     })
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::*;
+
+    #[test]
+    fn groups_are_disjoint_and_known() {
+        let mut seen = std::collections::HashSet::new();
+        for (group, names) in TOOL_GROUPS {
+            assert!(!names.is_empty(), "group {group} is empty");
+            for name in *names {
+                assert!(spec_of(name).is_some(), "{name} missing from TOOL_SPECS");
+                assert!(seen.insert(*name), "{name} belongs to two groups");
+            }
+        }
+        assert_eq!(group_of("settings_get"), Some("settings"));
+        assert_eq!(group_of("optimize_knowledge"), Some("optimize"));
+        assert_eq!(group_of("ticket_search"), Some("ticketing"));
+        assert_eq!(group_of("memory_search"), None);
+        assert!(group_exists("settings"));
+        assert!(!group_exists("nope"));
+    }
 }

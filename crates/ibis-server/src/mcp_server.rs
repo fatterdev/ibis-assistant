@@ -66,6 +66,12 @@ pub struct IbisServer {
     /// Plugin stdio binding: fires once on the session `initialized`
     /// notification (`AddOnRegisterSession hook).
     plugin_binding_done: std::sync::atomic::AtomicBool,
+    /// G20: last resolved harness profile. `get_tool` has no request context,
+    /// so it uses the profile resolved by the most recent `list_tools`/
+    /// `call_tool` (the same last-caller-wins limitation as sampling).
+    last_profile: std::sync::Mutex<crate::harness::ResolvedHarnessProfile>,
+    /// G20: connections already logged at info (first sighting only).
+    seen_connections: std::sync::Mutex<std::collections::HashSet<u64>>,
 }
 
 /// F0.7 — the MCP App "Ibis Assistant Memory Curator": the `ui://` UI
@@ -94,12 +100,47 @@ pub fn tasks_resource() -> Resource {
 
 impl IbisServer {
     pub fn new(state: Arc<AppState>, with_logging: bool) -> Self {
+        let last_profile = crate::harness::resolve(&state.config().harness, None);
         IbisServer {
             router: crate::registry::build_tool_router(),
             state,
             with_logging,
             plugin_binding_done: std::sync::atomic::AtomicBool::new(false),
+            last_profile: std::sync::Mutex::new(last_profile),
+            seen_connections: std::sync::Mutex::new(std::collections::HashSet::new()),
         }
+    }
+
+    /// G20: resolves the harness profile for this request and stores it for
+    /// the context-less `get_tool`.
+    fn resolve_profile(
+        &self,
+        context: &RequestContext<RoleServer>,
+    ) -> crate::harness::ResolvedHarnessProfile {
+        self.resolve_profile_for_peer(&context.peer)
+    }
+
+    fn resolve_profile_for_peer(
+        &self,
+        peer: &rmcp::service::Peer<RoleServer>,
+    ) -> crate::harness::ResolvedHarnessProfile {
+        let client_name = peer.peer_info().map(|info| info.client_info.name.clone());
+        let harness = self.state.cfg.read().unwrap().harness.clone();
+        let profile = crate::harness::resolve(&harness, client_name.as_deref());
+        let connection = crate::resources::peer_connection_id(peer);
+        if self.seen_connections.lock().unwrap().insert(connection) {
+            tracing::info!(
+                "Harness profile '{}' for connection {connection}",
+                profile.name
+            );
+        } else {
+            tracing::debug!(
+                "Harness profile '{}' for connection {connection}",
+                profile.name
+            );
+        }
+        *self.last_profile.lock().unwrap() = profile.clone();
+        profile
     }
 
     fn guide_resource() -> Resource {
@@ -114,9 +155,12 @@ impl IbisServer {
 
     /// F0.6 dynamic tool discovery: `false` for the config-gated ticketing
     /// group when no provider is registered (unconfigured installs announce
-    /// the core tool set only).
-    fn tool_visible(&self, name: &str) -> bool {
-        !crate::registry::is_ticketing_tool(name) || self.state.ticketing_configured()
+    /// the core tool set only). G20: a harness profile can additionally hide
+    /// its `hidden_tool_groups`.
+    fn tool_visible(&self, name: &str, profile: &crate::harness::ResolvedHarnessProfile) -> bool {
+        let config_visible =
+            !crate::registry::is_ticketing_tool(name) || self.state.ticketing_configured();
+        config_visible && !profile.hides(name)
     }
 }
 
@@ -200,10 +244,9 @@ impl ServerHandler for IbisServer {
         let supports_cache_hints = context
             .protocol_version()
             .is_some_and(|version| version >= ProtocolVersion::V_2026_07_28);
+        let profile = self.resolve_profile(&context);
         let mut tools = self.router.list_all();
-        if !self.state.ticketing_configured() {
-            tools.retain(|tool| !crate::registry::is_ticketing_tool(&tool.name));
-        }
+        tools.retain(|tool| self.tool_visible(&tool.name, &profile));
         Ok(ListToolsResult {
             result_type: Some(ResultType::COMPLETE),
             tools,
@@ -217,9 +260,10 @@ impl ServerHandler for IbisServer {
     /// F0.6: hidden tools answer `tools/get`-style lookups (the Streamable
     /// HTTP `Mcp-Param-*` validation reads this) as absent.
     fn get_tool(&self, name: &str) -> Option<Tool> {
+        let profile = self.last_profile.lock().unwrap().clone();
         self.router
             .get(name)
-            .filter(|tool| self.tool_visible(&tool.name))
+            .filter(|tool| self.tool_visible(&tool.name, &profile))
             .cloned()
     }
 
@@ -232,7 +276,11 @@ impl ServerHandler for IbisServer {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, rmcp::ErrorData> {
-        if !self.tool_visible(&request.name) {
+        let profile = self.resolve_profile(&context);
+        self.state
+            .sampling
+            .set_sampling_enabled(profile.sampling == crate::harness::SamplingPolicy::Auto);
+        if !self.tool_visible(&request.name, &profile) {
             // A hidden tool call is diagnostic gold (stale client list, a
             // caller probing for unconfigured lanes): log it, don't fail
             // silently like the pre-warm 1.0.2 null call did.
@@ -240,14 +288,20 @@ impl ServerHandler for IbisServer {
                 "MCP Tool Rejected: {} (hidden by config — dynamic tool discovery)",
                 request.name
             );
-            return Err(rmcp::ErrorData::invalid_params(
+            let message = if profile.hides(&request.name) {
+                format!(
+                    "tool '{}' is hidden by the '{}' harness profile \
+                     (harness.profiles[].hidden_tool_groups)",
+                    request.name, profile.name
+                )
+            } else {
                 format!(
                     "tool '{}' is not available: ticketing is not configured \
                      (add a provider to config/ticketing_config.json)",
                     request.name
-                ),
-                None,
-            ));
+                )
+            };
+            return Err(rmcp::ErrorData::invalid_params(message, None));
         }
         let tool_name = request.name.clone();
         // F17: the only argument that reaches telemetry is the project name.
@@ -469,6 +523,9 @@ impl ServerHandler for IbisServer {
     }
 
     async fn on_initialized(&self, context: rmcp::service::NotificationContext<RoleServer>) {
+        // G20: resolve the profile at session start so `get_tool` (which has
+        // no request context) already sees the per-host visibility.
+        self.resolve_profile_for_peer(&context.peer);
         // F0.6: the session joins the `notifications/tools/list_changed`
         // broadcast set (fires when the config-gated ticketing visibility
         // flips).

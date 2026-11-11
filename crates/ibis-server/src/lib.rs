@@ -14,6 +14,7 @@ pub mod assembly;
 pub mod collision;
 pub mod consolidation;
 pub mod eval_mode;
+pub mod harness;
 pub mod mcp_server;
 pub mod progress;
 pub mod prompts;

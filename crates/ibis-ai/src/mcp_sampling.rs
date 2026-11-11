@@ -63,6 +63,13 @@ pub trait SamplingTransport: Send + Sync {
     /// True while a sampling-capable MCP client session is attached.
     fn connected(&self) -> bool;
 
+    /// G20 harness policy: `false` when the resolved profile sets
+    /// `sampling: never` (the leg is skipped even if the client declared the
+    /// capability).
+    fn sampling_allowed(&self) -> bool {
+        true
+    }
+
     async fn create_message(&self, request: SamplingRequest) -> Result<SamplingResponse, AiError>;
 }
 
@@ -109,7 +116,7 @@ impl AIProvider for McpSamplingProvider {
     }
 
     async fn is_functional(&self) -> bool {
-        self.transport.connected()
+        self.transport.sampling_allowed() && self.transport.connected()
     }
 
     async fn generate_content(
@@ -153,6 +160,7 @@ mod tests {
 
     struct MockTransport {
         connected: bool,
+        allowed: bool,
         fail_with: Option<String>,
         seen: Mutex<Vec<SamplingRequest>>,
     }
@@ -161,6 +169,7 @@ mod tests {
         fn connected() -> Self {
             MockTransport {
                 connected: true,
+                allowed: true,
                 fail_with: None,
                 seen: Mutex::new(Vec::new()),
             }
@@ -168,6 +177,15 @@ mod tests {
         fn disconnected() -> Self {
             MockTransport {
                 connected: false,
+                allowed: true,
+                fail_with: None,
+                seen: Mutex::new(Vec::new()),
+            }
+        }
+        fn disallowed() -> Self {
+            MockTransport {
+                connected: true,
+                allowed: false,
                 fail_with: None,
                 seen: Mutex::new(Vec::new()),
             }
@@ -178,6 +196,10 @@ mod tests {
     impl SamplingTransport for MockTransport {
         fn connected(&self) -> bool {
             self.connected
+        }
+
+        fn sampling_allowed(&self) -> bool {
+            self.allowed
         }
 
         async fn create_message(
@@ -306,6 +328,12 @@ mod tests {
     #[tokio::test]
     async fn disconnected_transport_is_not_functional() {
         let p = McpSamplingProvider::new(Arc::new(MockTransport::disconnected()));
+        assert!(!p.is_functional().await);
+    }
+
+    #[tokio::test]
+    async fn policy_never_makes_the_leg_disconnected() {
+        let p = McpSamplingProvider::new(Arc::new(MockTransport::disallowed()));
         assert!(!p.is_functional().await);
     }
 

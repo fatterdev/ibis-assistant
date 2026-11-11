@@ -287,6 +287,41 @@ impl Default for TasksConfig {
     }
 }
 
+/// G20 — per-host harness profiles (`harness`). The default profile is the
+/// current behavior; an empty `profiles` list changes nothing.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct HarnessConfig {
+    pub default: HarnessProfile,
+    /// Ordered precedence: the first `match` hit wins.
+    pub profiles: Vec<HarnessProfile>,
+}
+
+/// One harness profile. `match` is a list of case-insensitive substrings on
+/// `clientInfo.name`; `sampling` is `auto` (default) or `never`;
+/// `hidden_tool_groups` is a subset of the server's `TOOL_GROUPS`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct HarnessProfile {
+    #[serde(rename = "match")]
+    pub match_names: Vec<String>,
+    /// Log label; an empty name falls back to the match string / "default".
+    pub name: String,
+    pub sampling: String,
+    pub hidden_tool_groups: Vec<String>,
+}
+
+impl Default for HarnessProfile {
+    fn default() -> Self {
+        HarnessProfile {
+            match_names: Vec::new(),
+            name: String::new(),
+            sampling: "auto".to_string(),
+            hidden_tool_groups: Vec::new(),
+        }
+    }
+}
+
 /// Bounded decisions (`ai.decide`, D11): shadow mode is on by default — the
 /// consolidation computes the typed `is_noise` decision next to the
 /// generative verdict and logs `decide_shadow`, without changing behavior.
@@ -633,6 +668,9 @@ pub struct Config {
     /// F17 — opt-in OpenTelemetry OTLP span export (`telemetry.*`). The
     /// feature `otel` is required for the exporter to be compiled in.
     pub telemetry: ibis_logger::TelemetryConfig,
+    /// G20 — per-host harness profiles (`harness.*`). Default = current
+    /// behavior (no hidden groups, sampling `auto`).
+    pub harness: HarnessConfig,
     /// True if a config file was successfully loaded (not serialized).
     #[serde(skip)]
     pub config_loaded: bool,
@@ -873,6 +911,7 @@ impl Default for Config {
             search: SearchConfig::default(),
             tasks: TasksConfig::default(),
             telemetry: ibis_logger::TelemetryConfig::default(),
+            harness: HarnessConfig::default(),
             bind_address: String::new(),
             runtime_mode: String::new(),
             gemini_keys: Vec::new(),
@@ -1666,6 +1705,27 @@ mod tests {
                 .map(String::as_str),
             Some("secret")
         );
+    }
+
+    /// `harness.*` (G20): default = current behavior; profiles overlay with
+    /// `match`, sampling and hidden groups.
+    #[test]
+    fn harness_config_defaults() {
+        let dflt = default_config();
+        assert!(dflt.harness.profiles.is_empty());
+        assert_eq!(dflt.harness.default.sampling, "auto");
+        assert!(dflt.harness.default.hidden_tool_groups.is_empty());
+
+        let cfg: Config = serde_json::from_str(
+            r#"{"harness":{"default":{"sampling":"never"},"profiles":[
+                {"match":["cursor"],"name":"cursor","sampling":"never","hidden_tool_groups":["settings"]}
+            ]}}"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.harness.default.sampling, "never");
+        assert_eq!(cfg.harness.profiles.len(), 1);
+        assert_eq!(cfg.harness.profiles[0].match_names, vec!["cursor"]);
+        assert_eq!(cfg.harness.profiles[0].hidden_tool_groups, vec!["settings"]);
     }
 
     /// `ai.consolidation` (F4 §B.5): off by default, the file overlays the

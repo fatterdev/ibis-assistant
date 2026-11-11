@@ -100,6 +100,22 @@ impl TestClient {
     async fn connect_with(projects: &[&str], config: ClientConfig) -> TestClient {
         let projects: Vec<String> = projects.iter().map(|s| s.to_string()).collect();
         let state = test_state(&projects).await;
+        Self::connect_state(state, config).await
+    }
+
+    /// Connect with a harness config already installed on the state.
+    async fn connect_with_harness(
+        projects: &[&str],
+        config: ClientConfig,
+        harness: ibis_core::config::HarnessConfig,
+    ) -> TestClient {
+        let projects: Vec<String> = projects.iter().map(|s| s.to_string()).collect();
+        let state = test_state(&projects).await;
+        state.cfg.write().unwrap().harness = harness;
+        Self::connect_state(state, config).await
+    }
+
+    async fn connect_state(state: Arc<AppState>, config: ClientConfig) -> TestClient {
         let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
         let server = tokio::spawn({
             let state = state.clone();
@@ -223,6 +239,123 @@ async fn unconfigured_ticketing_hides_the_ticket_group() {
     assert!(
         message.contains("ticketing_config.json"),
         "the error names the fix: {message}"
+    );
+
+    client.shutdown().await;
+}
+
+/// G20: a harness profile hides its `hidden_tool_groups` from `tools/list`,
+/// rejects the call with an actionable message, and disables the sampling leg.
+#[tokio::test]
+async fn harness_profile_hides_settings_group() {
+    let mut harness = ibis_core::config::HarnessConfig::default();
+    harness.profiles.push(ibis_core::config::HarnessProfile {
+        match_names: vec!["copilot".into()],
+        name: "copilot".into(),
+        sampling: "never".into(),
+        hidden_tool_groups: vec!["settings".into()],
+    });
+    let client = TestClient::connect_with_harness(
+        &[],
+        ClientConfig::new(
+            ClientCapabilities::default(),
+            Implementation::new("copilot-cli", "0"),
+        ),
+        harness,
+    )
+    .await;
+
+    let listed = client
+        .peer()
+        .list_tools(Default::default())
+        .await
+        .expect("tools/list");
+    assert_eq!(
+        listed.tools.len(),
+        58 - TICKETING_TOOLS.len() - 3,
+        "default ticketing gate minus the three settings tools"
+    );
+    for hidden in ["settings_get", "settings_apply", "settings_open_ui"] {
+        assert!(
+            !listed.tools.iter().any(|tool| tool.name.as_ref() == hidden),
+            "{hidden} must be hidden by the profile"
+        );
+    }
+    assert!(
+        listed
+            .tools
+            .iter()
+            .any(|tool| tool.name.as_ref() == "memory_search"),
+        "core tools stay visible"
+    );
+
+    let err = client
+        .service
+        .call_tool(CallToolRequestParams::new("settings_get"))
+        .await
+        .expect_err("hidden settings tool must error");
+    let (code, message) = mcp_error(&err);
+    assert_eq!(code, ErrorCode::INVALID_PARAMS.0);
+    assert!(
+        message.contains("hidden by the 'copilot' harness profile"),
+        "hidden call: {message}"
+    );
+    assert!(
+        message.contains("harness.profiles[].hidden_tool_groups"),
+        "the error names the config key: {message}"
+    );
+    assert!(
+        !client.state.sampling.sampling_enabled(),
+        "sampling=never must disable the sampling leg"
+    );
+
+    client.shutdown().await;
+}
+
+/// G20 §5: a profile hiding `ticketing` wins over the config gate — the group
+/// is hidden once, and the rejection names the profile (not the ticketing
+/// config) when both would hide it.
+#[tokio::test]
+async fn harness_profile_hides_ticketing_even_when_configured() {
+    let mut harness = ibis_core::config::HarnessConfig::default();
+    harness.profiles.push(ibis_core::config::HarnessProfile {
+        match_names: vec!["copilot".into()],
+        name: "copilot".into(),
+        sampling: "auto".into(),
+        hidden_tool_groups: vec!["ticketing".into()],
+    });
+    let client = TestClient::connect_with_harness(
+        &[],
+        ClientConfig::new(
+            ClientCapabilities::default(),
+            Implementation::new("copilot-cli", "0"),
+        ),
+        harness,
+    )
+    .await;
+    let visible =
+        assembly::reload_ticketing_with_config(&client.state, configured_ticketing()).await;
+    assert!(visible, "the config gate opens with a provider");
+
+    let listed = client
+        .peer()
+        .list_tools(Default::default())
+        .await
+        .expect("tools/list");
+    assert!(
+        ticket_names(&listed.tools).is_empty(),
+        "profile-hidden ticketing must stay hidden: {:?}",
+        ticket_names(&listed.tools)
+    );
+    let err = client
+        .service
+        .call_tool(CallToolRequestParams::new("ticket_get_capabilities"))
+        .await
+        .expect_err("profile-hidden ticket tool must error");
+    let (_, message) = mcp_error(&err);
+    assert!(
+        message.contains("hidden by the 'copilot' harness profile"),
+        "profile wins the message: {message}"
     );
 
     client.shutdown().await;
