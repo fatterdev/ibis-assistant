@@ -5,7 +5,7 @@
 //! markers, and writes atomically. There is no read-back: `memory_import`
 //! never sees these files.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -58,6 +58,13 @@ impl ProjectTarget {
         match self {
             ProjectTarget::AgentsMd => "AGENTS.md",
             ProjectTarget::ClaudeMd => "CLAUDE.md",
+        }
+    }
+
+    pub fn cli_name(self) -> &'static str {
+        match self {
+            ProjectTarget::AgentsMd => "agents-md",
+            ProjectTarget::ClaudeMd => "claude-md",
         }
     }
 }
@@ -432,6 +439,108 @@ pub fn merge(
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WriteOutcome {
     pub warnings: Vec<String>,
+}
+
+/// Resolved destination of a `memory project` run.
+#[derive(Debug, Clone)]
+pub struct ResolvedProject {
+    pub path: PathBuf,
+    pub project: String,
+    pub file_name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProjectOptions {
+    pub target: ProjectTarget,
+    pub project: Option<String>,
+    pub path: Option<PathBuf>,
+    pub branch: Option<String>,
+    pub check: bool,
+    pub dry_run: bool,
+}
+
+impl ProjectOptions {
+    /// `--path` defaults to `<cwd>/<target file>`; `--project` defaults to the
+    /// basename of the file's directory.
+    pub fn resolve(&self) -> Result<ResolvedProject, ProjectError> {
+        let cwd = std::env::current_dir().map_err(ProjectError::Io)?;
+        let path = match &self.path {
+            Some(path) => path.clone(),
+            None => cwd.join(self.target.file_name()),
+        };
+        if path.is_dir() {
+            return Err(ProjectError::Usage(format!(
+                "{} is a directory",
+                path.display()
+            )));
+        }
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty() && *parent != Path::new("."))
+            .map(Path::to_path_buf)
+            .unwrap_or(cwd);
+        let raw_project = self
+            .project
+            .clone()
+            .filter(|project| !project.trim().is_empty())
+            .or_else(|| {
+                parent
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+            })
+            .unwrap_or_default();
+        let project = sanitize_project_name(&raw_project);
+        if project.is_empty() {
+            return Err(ProjectError::Usage(
+                "project name is empty; pass --project".to_string(),
+            ));
+        }
+        let file_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| self.target.file_name().to_string());
+        Ok(ResolvedProject {
+            path,
+            project,
+            file_name,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProjectPlan {
+    pub block: String,
+    pub existing: Option<String>,
+    pub merged: MergeOutcome,
+}
+
+/// Parses the export, applies the client-side filters, renders the block and
+/// computes the merged file content (no write).
+pub fn plan(
+    resolved: &ResolvedProject,
+    branch: Option<&str>,
+    export_json: &str,
+) -> Result<ProjectPlan, ProjectError> {
+    let memories = parse_export(export_json)?;
+    let selected = select_memories(&memories, branch);
+    let existing = match std::fs::read_to_string(&resolved.path) {
+        Ok(text) => Some(text),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => return Err(ProjectError::Io(err)),
+    };
+    let eol = detect_eol(existing.as_deref());
+    let block = render_block(&resolved.project, &selected, eol);
+    let merged = merge(
+        existing.as_deref(),
+        &resolved.file_name,
+        &resolved.project,
+        &block,
+    )?;
+    Ok(ProjectPlan {
+        block,
+        existing,
+        merged,
+    })
 }
 
 /// Writes through `<file>.ibis-tmp` in the same directory, then renames.
@@ -955,5 +1064,63 @@ mod tests {
         let path = dir.path().join("AGENTS.md");
         let outcome = write_atomic(&path, "content").unwrap();
         assert!(outcome.warnings.is_empty());
+    }
+
+    #[test]
+    fn project_options_default_to_target_file_and_dir_basename() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("AGENTS.md");
+        let options = ProjectOptions {
+            target: ProjectTarget::AgentsMd,
+            project: None,
+            path: Some(path.clone()),
+            branch: None,
+            check: false,
+            dry_run: false,
+        };
+        let resolved = options.resolve().unwrap();
+        assert_eq!(resolved.path, path);
+        assert_eq!(resolved.file_name, "AGENTS.md");
+        assert_eq!(
+            resolved.project,
+            dir.path().file_name().unwrap().to_string_lossy()
+        );
+        assert_eq!(ProjectTarget::ClaudeMd.file_name(), "CLAUDE.md");
+    }
+
+    #[test]
+    fn project_defaults_to_cwd_for_dot_relative_path() {
+        let options = ProjectOptions {
+            target: ProjectTarget::AgentsMd,
+            project: None,
+            path: Some(PathBuf::from("./AGENTS.md")),
+            branch: None,
+            check: false,
+            dry_run: false,
+        };
+        let resolved = options.resolve().unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        assert_eq!(resolved.project, cwd.file_name().unwrap().to_string_lossy());
+        assert!(resolved.path.ends_with("AGENTS.md"));
+    }
+
+    #[test]
+    fn plan_does_not_write_and_applies_branch_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("AGENTS.md");
+        let resolved = ResolvedProject {
+            path: path.clone(),
+            project: "proj".into(),
+            file_name: "AGENTS.md".into(),
+        };
+        let export = r#"{"count":2,"items":[
+            {"id":"1","kind":"rule","title":"A","content":"a","confidence":1.0,"branch":"main"},
+            {"id":"2","kind":"rule","title":"B","content":"b","confidence":1.0,"branch":"dev"}
+        ]}"#;
+        let plan = plan(&resolved, Some("main"), export).unwrap();
+        assert!(plan.block.contains("- **A**"));
+        assert!(!plan.block.contains("- **B**"));
+        assert!(!path.exists());
+        assert!(plan.merged.changed);
     }
 }

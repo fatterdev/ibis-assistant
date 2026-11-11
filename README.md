@@ -96,6 +96,7 @@ ibis ingest code --path ./path/to/project
 ibis ask "What breaks if Prices changes?" --branch main
 ibis logs analyze --project MyApp --text "ERROR timeout talking to db"
 ibis memory add --project MyApp --kind decision --title "MCP transport" --text "Prefer Streamable HTTP at /mcp"
+ibis memory project --target agents-md --project MyApp   # one-way AGENTS.md projection
 ```
 
 Build from source:
@@ -133,7 +134,7 @@ config/              Reference configurations
 - **Not a SaaS.** No tenancy, no hosted memory service, no signup - keys live in your local `config.json` (ENV is override only).
 - **Not an agent OS.** Ibis does not absorb or rewrite your agents; it feeds them context.
 - **Not a generic memory API.** Memory here is typed, project-scoped, and lives on the code graph - not chat-transcript storage.
-- **Not a SurrealDB replacement or a markdown sync bus.** Surreal *is* the store; markdown projection is optional.
+- **Not a SurrealDB replacement or a markdown sync bus.** Surreal *is* the store; markdown projection is optional and **one-way**: `ibis memory project` owns only the `<!-- ibis:begin memory -->` … `<!-- ibis:end memory -->` region of `AGENTS.md`/`CLAUDE.md`, and nothing is ever imported back.
 - **No blockchain attestation.** Provenance is git, not ledgers.
 
 ## Status

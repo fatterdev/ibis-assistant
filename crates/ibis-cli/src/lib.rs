@@ -7,13 +7,9 @@
 //! ```ignore
 //! // binary dispatch:
 //! match ibis_cli::execute_cli(std::env::args().skip(1), |payload| {
-//!     if let Err(error) = tokio::runtime::Runtime::new()
+//!     tokio::runtime::Runtime::new()
 //!         .expect("cli runtime")
 //!         .block_on(ibis_cli::call_server_tool(payload))
-//!     {
-//!         eprintln!("{error}");
-//!         std::process::exit(1);
-//!     }
 //! }) {
 //!     Ok(()) => {}
 //!     Err(error) => {
@@ -67,6 +63,15 @@ pub enum CliError {
     /// MCP transport/protocol failure (stderr + `os.Exit(1)`).
     #[error("{0}")]
     Transport(String),
+    /// `memory project --check` found a missing/stale block: exit 1.
+    #[error("{message}")]
+    CheckFailed { message: String },
+    /// `memory project` usage/parse error: exit 2.
+    #[error("{message}")]
+    CheckUsage { message: String },
+    /// File I/O failure (exit 1, never a silent success).
+    #[error("{message}")]
+    Io { message: String },
 }
 
 /// The MCP `tools/call` body built by CLI subcommands.

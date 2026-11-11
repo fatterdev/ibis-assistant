@@ -36,10 +36,12 @@
 //! - Empty-string flags are treated as absent (`if *x != ""` pattern).
 
 use std::ffi::OsString;
+use std::path::PathBuf;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use serde_json::{json, Map, Value};
 
+use crate::memory_project::{self, ProjectOptions, ProjectTarget};
 use crate::{CliError, ToolCallPayload};
 
 type Args = Map<String, Value>;
@@ -625,6 +627,27 @@ pub enum MemoryAction {
         #[arg(long)]
         project: Option<String>,
         /// Report the planned note writes without changing the notes ref
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
+    /// Project durable team memory into AGENTS.md / CLAUDE.md (one-way)
+    Project {
+        /// Target file: agents-md | claude-md
+        #[arg(long)]
+        target: String,
+        /// Project name (default: basename of the target file's directory)
+        #[arg(long)]
+        project: Option<String>,
+        /// Destination file (default: <cwd>/<target file>)
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Include rows with this branch (empty branch always included)
+        #[arg(long)]
+        branch: Option<String>,
+        /// Report whether the block is present and up to date (exit 1 if not)
+        #[arg(long)]
+        check: bool,
+        /// Print the rendered block without writing
         #[arg(long = "dry-run")]
         dry_run: bool,
     },
@@ -1373,6 +1396,9 @@ impl MemoryAction {
                 set_str(&mut arguments, "project_name", &project);
                 Ok(ToolCallPayload::new("memory_rebuild_git_notes", arguments))
             }
+            MemoryAction::Project { .. } => Err(CliError::Usage(
+                "memory project is handled by the CLI dispatcher".to_string(),
+            )),
         }
     }
 }
@@ -1407,6 +1433,86 @@ impl OutcomeAction {
     }
 }
 
+/// The `memory project` export request: current team rows, JSON format.
+fn project_export_payload(project: &str) -> ToolCallPayload {
+    let mut arguments = Args::new();
+    if !project.trim().is_empty() {
+        arguments.insert("project_name".to_string(), json!(project));
+    }
+    arguments.insert("status".to_string(), json!("current"));
+    arguments.insert("visibility".to_string(), json!("team"));
+    arguments.insert("format".to_string(), json!("json"));
+    ToolCallPayload::new("memory_export", arguments)
+}
+
+fn project_cli_error(err: memory_project::ProjectError) -> CliError {
+    match err {
+        memory_project::ProjectError::Io(err) => CliError::Io {
+            message: err.to_string(),
+        },
+        other => CliError::CheckUsage {
+            message: other.to_string(),
+        },
+    }
+}
+
+fn run_memory_project<F>(options: ProjectOptions, caller: F) -> Result<(), CliError>
+where
+    F: FnOnce(ToolCallPayload) -> Result<String, CliError>,
+{
+    let resolved = options.resolve().map_err(project_cli_error)?;
+    let export = caller(project_export_payload(&resolved.project))?;
+    let plan = memory_project::plan(&resolved, options.branch.as_deref(), &export)
+        .map_err(project_cli_error)?;
+
+    if options.dry_run {
+        eprintln!("ibis memory project: {}", resolved.path.display());
+        print!("{}", plan.block);
+        return Ok(());
+    }
+    if options.check {
+        if plan.existing.is_none() {
+            return Err(CliError::CheckFailed {
+                message: format!(
+                    "{} is missing an ibis memory block",
+                    resolved.path.display()
+                ),
+            });
+        }
+        if plan.merged.changed {
+            let message = if plan
+                .existing
+                .as_deref()
+                .is_some_and(|text| !text.contains(memory_project::BEGIN_MARKER))
+            {
+                format!(
+                    "{} does not contain an ibis memory block",
+                    resolved.path.display()
+                )
+            } else {
+                format!(
+                    "{} is stale; run `ibis memory project --target {} --project {} --path {}`",
+                    resolved.path.display(),
+                    options.target.cli_name(),
+                    resolved.project,
+                    resolved.path.display()
+                )
+            };
+            return Err(CliError::CheckFailed { message });
+        }
+        println!("{} is up to date", resolved.path.display());
+        return Ok(());
+    }
+
+    let outcome = memory_project::write_atomic(&resolved.path, &plan.merged.content)
+        .map_err(project_cli_error)?;
+    for warning in outcome.warnings {
+        eprintln!("warning: {warning}");
+    }
+    println!("Updated {}", resolved.path.display());
+    Ok(())
+}
+
 /// Dispatch terminal subcommands to MCP tools.
 ///
 /// `args` are the arguments **after the program name** ('s
@@ -1419,12 +1525,13 @@ impl OutcomeAction {
 ///   and exit the process with code 2, mirroring the `flag.ExitOnError`.
 /// - Validation failures return [`CliError::Usage`] with the message text.
 /// - Otherwise the built payload is handed to `caller` (the swappable
-///   `callServerTool` var).
+///   `callServerTool` var); the returned text is printed to stdout so every
+///   existing command keeps its byte-for-byte output.
 pub fn execute_cli<I, T, F>(args: I, caller: F) -> Result<(), CliError>
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
-    F: FnOnce(ToolCallPayload),
+    F: FnOnce(ToolCallPayload) -> Result<String, CliError>,
 {
     let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
     if args.is_empty() {
@@ -1433,9 +1540,47 @@ where
     }
     // clap exits the process on parse errors/help like the flag.ExitOnError.
     let cli = Cli::parse_from(std::iter::once(OsString::from("ibis")).chain(args));
-    let payload = cli.command.tool_call()?;
-    caller(payload);
-    Ok(())
+    match cli.command {
+        Command::Memory {
+            action:
+                MemoryAction::Project {
+                    target,
+                    project,
+                    path,
+                    branch,
+                    check,
+                    dry_run,
+                },
+        } => {
+            let target = ProjectTarget::parse(&target).ok_or_else(|| CliError::CheckUsage {
+                message: format!("unknown --target '{target}'; use agents-md or claude-md"),
+            })?;
+            if check && dry_run {
+                return Err(CliError::CheckUsage {
+                    message: "--check and --dry-run cannot be combined".to_string(),
+                });
+            }
+            run_memory_project(
+                ProjectOptions {
+                    target,
+                    project,
+                    path,
+                    branch,
+                    check,
+                    dry_run,
+                },
+                caller,
+            )
+        }
+        command => {
+            let payload = command.tool_call()?;
+            let text = caller(payload)?;
+            // Ignore broken-pipe errors: `ibis ask … | head` must not panic.
+            use std::io::Write as _;
+            let _ = std::io::stdout().write_all(text.as_bytes());
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1449,8 +1594,13 @@ mod tests {
         let captured: RefCell<Option<ToolCallPayload>> = RefCell::new(None);
         let result = execute_cli(args.iter().copied(), |payload| {
             *captured.borrow_mut() = Some(payload);
+            Ok(String::new())
         });
         result.map(|()| captured.into_inner().expect("caller ran"))
+    }
+
+    fn dispatch_with_export(args: &[&str], export: &str) -> Result<(), CliError> {
+        execute_cli(args.iter().copied(), |_payload| Ok(export.to_string()))
     }
 
     fn payload_of(args: &[&str]) -> ToolCallPayload {
@@ -2127,5 +2277,175 @@ mod tests {
         assert_eq!(p.arguments.len(), 1, "only id expected: {p:?}");
         let p = payload_of(&["memory", "search", "q"]);
         assert_eq!(p.arguments.len(), 1, "only query expected: {p:?}");
+    }
+
+    #[test]
+    fn project_payload_is_export_json() {
+        let p = project_export_payload("proj");
+        assert_eq!(p.name, "memory_export");
+        expect_str(&p, "project_name", "proj");
+        expect_str(&p, "status", "current");
+        expect_str(&p, "visibility", "team");
+        expect_str(&p, "format", "json");
+        assert!(p.arguments.get("kind").is_none());
+    }
+
+    #[test]
+    fn project_dry_run_does_not_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("AGENTS.md");
+        let export = r#"{"count":0,"items":[]}"#;
+        dispatch_with_export(
+            &[
+                "memory",
+                "project",
+                "--target",
+                "agents-md",
+                "--project",
+                "proj",
+                "--path",
+                path.to_str().unwrap(),
+                "--dry-run",
+            ],
+            export,
+        )
+        .unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn project_writes_and_check_exit_codes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("AGENTS.md");
+        let path_arg = path.to_str().unwrap().to_string();
+        let mut args = vec![
+            "memory",
+            "project",
+            "--target",
+            "agents-md",
+            "--project",
+            "proj",
+            "--path",
+            path_arg.as_str(),
+        ];
+        let export = r#"{"count":1,"items":[{"id":"1","kind":"rule","title":"Rule","content":"body","confidence":1.0,"branch":""}]}"#;
+        dispatch_with_export(&args, export).unwrap();
+        assert!(path.exists());
+
+        args.push("--check");
+        dispatch_with_export(&args, export).unwrap();
+
+        let stale = r#"{"count":2,"items":[{"id":"1","kind":"rule","title":"Rule","content":"body","confidence":1.0,"branch":""},{"id":"2","kind":"rule","title":"Second","content":"b","confidence":1.0,"branch":""}]}"#;
+        let before = std::fs::read(&path).unwrap();
+        let err = dispatch_with_export(&args, stale).unwrap_err();
+        assert!(matches!(err, CliError::CheckFailed { .. }));
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "--check must not write"
+        );
+
+        let missing = dir.path().join("CLAUDE.md");
+        let missing_arg = missing.to_str().unwrap().to_string();
+        let err = dispatch_with_export(
+            &[
+                "memory",
+                "project",
+                "--target",
+                "claude-md",
+                "--project",
+                "proj",
+                "--path",
+                missing_arg.as_str(),
+                "--check",
+            ],
+            export,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CliError::CheckFailed { .. }));
+    }
+
+    #[test]
+    fn project_check_parse_error_is_exit_2() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("AGENTS.md");
+        std::fs::write(&path, "<!-- ibis:begin memory -->\n").unwrap();
+        let err = dispatch_with_export(
+            &[
+                "memory",
+                "project",
+                "--target",
+                "agents-md",
+                "--project",
+                "proj",
+                "--path",
+                path.to_str().unwrap(),
+                "--check",
+            ],
+            r#"{"count":0,"items":[]}"#,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CliError::CheckUsage { .. }));
+    }
+
+    #[test]
+    fn project_usage_errors_are_exit_2() {
+        let err = dispatch_with_export(
+            &[
+                "memory",
+                "project",
+                "--target",
+                "bogus",
+                "--project",
+                "proj",
+            ],
+            "{}",
+        )
+        .unwrap_err();
+        assert!(matches!(err, CliError::CheckUsage { .. }));
+        let err = dispatch_with_export(
+            &[
+                "memory",
+                "project",
+                "--target",
+                "agents-md",
+                "--project",
+                "proj",
+                "--check",
+                "--dry-run",
+            ],
+            "{}",
+        )
+        .unwrap_err();
+        assert!(matches!(err, CliError::CheckUsage { .. }));
+    }
+
+    #[test]
+    fn project_branch_filter_through_dispatcher() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("AGENTS.md");
+        let export = r#"{"count":2,"items":[
+            {"id":"1","kind":"rule","title":"Main rule","content":"m","confidence":1.0,"branch":"main"},
+            {"id":"2","kind":"rule","title":"Dev rule","content":"d","confidence":1.0,"branch":"dev"}
+        ]}"#;
+        dispatch_with_export(
+            &[
+                "memory",
+                "project",
+                "--target",
+                "agents-md",
+                "--project",
+                "proj",
+                "--path",
+                path.to_str().unwrap(),
+                "--branch",
+                "MAIN",
+            ],
+            export,
+        )
+        .unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("Main rule"));
+        assert!(!content.contains("Dev rule"));
     }
 }

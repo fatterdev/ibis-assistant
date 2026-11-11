@@ -107,7 +107,7 @@ impl ClientHandler for ProgressPrinter {
 ///
 /// The caller (wave-4 binary) is responsible for printing the returned error
 /// to stderr and exiting 1; this function itself never exits the process.
-pub async fn call_server_tool(payload: ToolCallPayload) -> Result<(), CliError> {
+pub async fn call_server_tool(payload: ToolCallPayload) -> Result<String, CliError> {
     let endpoint = default_mcp_endpoint();
     tokio::select! {
         result = call_mcp_tool(&endpoint, &payload) => result,
@@ -139,12 +139,14 @@ async fn interrupt_signal() {
     }
 }
 
-/// `callMCPTool` — connect, initialize, call the tool, print the result.
+/// `callMCPTool` — connect, initialize, call the tool, return the rendered
+/// content (`printToolContent` into a `String` instead of stdout).
 ///
 /// Errors carry the original messages: "failed to start MCP client: …\nMake sure
 /// the server is running (ibis start or ibis run)." and
-/// "MCP tools/call <tool> failed: …"
-pub async fn call_mcp_tool(endpoint: &str, payload: &ToolCallPayload) -> Result<(), CliError> {
+/// "MCP tools/call <tool> failed: …"; an `isError` result becomes
+/// `"Tool returned an error:\n<text>"`.
+pub async fn call_mcp_tool(endpoint: &str, payload: &ToolCallPayload) -> Result<String, CliError> {
     // the NewStreamableHttpClient + Start + Initialize map to rmcp's
     // initialize-performing serve.
     let service = ProgressPrinter
@@ -165,15 +167,13 @@ pub async fn call_mcp_tool(endpoint: &str, payload: &ToolCallPayload) -> Result<
     };
     // the `defer c.Close`.
     let _ = service.cancel().await;
+    let text = render_tool_content(&result);
     if result.is_error.unwrap_or(false) {
-        eprintln!("Tool returned an error:");
-        let mut stderr = std::io::stderr().lock();
-        print_tool_content(&mut stderr, &result);
-        return Err(CliError::Transport(format!("tool {} failed", payload.name)));
+        return Err(CliError::Transport(format!(
+            "Tool returned an error:\n{text}"
+        )));
     }
-    let mut stdout = std::io::stdout().lock();
-    print_tool_content(&mut stdout, &result);
-    Ok(())
+    Ok(text)
 }
 
 async fn call_tool(
@@ -191,6 +191,14 @@ async fn call_tool(
     service.call_tool(params).await.map_err(|error| {
         CliError::Transport(format!("MCP tools/call {} failed: {error}", payload.name))
     })
+}
+
+/// `printToolContent` into a `String`: the CLI prints the result for normal
+/// commands and the renderer consumes it for `memory project`.
+fn render_tool_content(result: &CallToolResult) -> String {
+    let mut buffer = Vec::new();
+    print_tool_content(&mut buffer, result);
+    String::from_utf8_lossy(&buffer).into_owned()
 }
 
 /// `printToolContent` — text blocks pass through `printMaybeJSON`; other
@@ -271,6 +279,11 @@ mod tests {
             context: RequestContext<RoleServer>,
         ) -> Result<CallToolResponse, rmcp::model::ErrorData> {
             if request.name != "echo_tool" {
+                if request.name == "error_tool" {
+                    return Ok(CallToolResponse::Complete(CallToolResult::error(vec![
+                        ContentBlock::text("boom"),
+                    ])));
+                }
                 // Same shape as rmcp's own router for unknown tools.
                 return Err(rmcp::model::ErrorData::invalid_params(
                     "tool not found",
@@ -332,6 +345,11 @@ mod tests {
         )
         .await;
         assert!(result.is_ok(), "call_mcp_tool failed: {result:?}");
+        let text = result.unwrap();
+        assert!(
+            text.contains("\"ok\": true") && text.contains("\"msg\": \"hi\""),
+            "unexpected rendered text: {text:?}"
+        );
         assert!(
             saw_progress_token.load(Ordering::SeqCst),
             "missing progressToken"
@@ -352,11 +370,42 @@ mod tests {
         server.abort();
     }
 
+    #[tokio::test]
+    async fn call_mcp_tool_error_result_is_transport_error() {
+        let (url, server) = spawn_stub_server(Arc::new(AtomicBool::new(false))).await;
+        let err = call_mcp_tool(&url, &ToolCallPayload::new("error_tool", empty_arguments()))
+            .await
+            .unwrap_err();
+        match err {
+            CliError::Transport(message) => {
+                assert!(
+                    message.starts_with("Tool returned an error:\n"),
+                    "{message}"
+                );
+                assert!(message.contains("boom"), "{message}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        server.abort();
+    }
+
     /// TestDefaultMCPEndpoint: the endpoint path is `/mcp`.
     #[test]
     fn default_mcp_endpoint_contains_mcp_path() {
         let endpoint = default_mcp_endpoint();
         assert!(endpoint.contains("/mcp"), "endpoint {endpoint}");
+    }
+
+    #[test]
+    fn render_tool_content_keeps_plain_text() {
+        let result = CallToolResult::success(vec![ContentBlock::text("plain line")]);
+        assert_eq!(render_tool_content(&result), "plain line\n");
+    }
+
+    #[test]
+    fn render_tool_content_pretty_prints_json_fixture() {
+        let result = CallToolResult::success(vec![ContentBlock::text(r#"{"a":1}"#)]);
+        assert_eq!(render_tool_content(&result), "{\n  \"a\": 1\n}\n");
     }
 
     /// Extra pin for L-A06: a valid config.json port overrides the default.

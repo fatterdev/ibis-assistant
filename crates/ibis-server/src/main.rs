@@ -104,22 +104,33 @@ fn main() {
                 // : delegate to the CLI client.
                 let result = ibis_cli::execute_cli(argv, |payload| {
                     let runtime = tokio::runtime::Runtime::new().expect("cli runtime");
-                    if let Err(error) = runtime.block_on(ibis_cli::call_server_tool(payload)) {
-                        eprintln!("{error}");
-                        std::process::exit(1);
-                    }
+                    runtime.block_on(ibis_cli::call_server_tool(payload))
                 });
-                if let Err(error) = result {
-                    eprintln!("{error}");
-                    std::process::exit(1);
+                match result {
+                    Ok(()) => {}
+                    Err(error) => {
+                        eprintln!("{error}");
+                        std::process::exit(cli_exit_code(&error));
+                    }
                 }
             }
         }
     }
 }
 
-/// `handleService — the daemon/service dispatch seam.
-///
+/// Exit code contract for the delegated CLI: `--check` uses 0/1/2; every
+/// other failure stays on 1 (the pre-existing CLI behavior).
+fn cli_exit_code(error: &ibis_cli::CliError) -> i32 {
+    match error {
+        ibis_cli::CliError::CheckUsage { .. } => 2,
+        ibis_cli::CliError::CheckFailed { .. }
+        | ibis_cli::CliError::Io { .. }
+        | ibis_cli::CliError::Usage(_)
+        | ibis_cli::CliError::Transport(_) => 1,
+    }
+}
+
+/// `handleService — the daemon/service dispatch seam.///
 /// **Wired by lane N-service (daemon/service) — orchestrator replaces.**
 /// Lane N-service owns `install`/`uninstall` (windows-service SCM lifecycle,
 /// F-011 one-pass elevation), `/run` (SCM mode) and `start`/`stop`
@@ -1220,5 +1231,34 @@ mod panic_hook_tests {
         );
         assert!(out.contains("main.rs:"), "location missing:\n{out}");
         assert!(out.contains("backtrace:\n"), "backtrace missing:\n{out}");
+    }
+}
+
+#[cfg(test)]
+mod cli_exit_code_tests {
+    use super::*;
+
+    #[test]
+    fn cli_exit_codes_match_contract() {
+        assert_eq!(
+            cli_exit_code(&ibis_cli::CliError::CheckFailed {
+                message: "x".into()
+            }),
+            1
+        );
+        assert_eq!(
+            cli_exit_code(&ibis_cli::CliError::CheckUsage {
+                message: "x".into()
+            }),
+            2
+        );
+        assert_eq!(
+            cli_exit_code(&ibis_cli::CliError::Io {
+                message: "x".into()
+            }),
+            1
+        );
+        assert_eq!(cli_exit_code(&ibis_cli::CliError::Transport("x".into())), 1);
+        assert_eq!(cli_exit_code(&ibis_cli::CliError::Usage("x".into())), 1);
     }
 }
