@@ -330,6 +330,66 @@ SurrealDB remains the source of truth; projection is regenerable output only. Fu
 
 IDE packaging and shared runtime: [ide_host_and_lm_bridge.md](ide_host_and_lm_bridge.md).
 
+### Durable tasks (E16)
+
+Long `memory_consolidate` passes run under a durable task envelope in SurrealDB (the `task` table). Knobs:
+
+```json
+{
+  "tasks": {
+    "lease_secs": 30,
+    "heartbeat_secs": 10,
+    "max_recoveries": 3,
+    "retention_days": 30
+  }
+}
+```
+
+Clamps live in `TaskPolicy` (lease 10-600s, heartbeat 1-lease/2, recoveries 1-10, retention 1-365 days). A crashed owner is reclaimed after the lease; the pass resumes from the checkpoint and does not re-spend summaries. The tool returns the task id and never double-spawns; task rows are readable via the `ibis://tasks` resources.
+
+### OpenTelemetry (F17, opt-in)
+
+The exporter is compiled only with `--features otel` and is off by default:
+
+```json
+{
+  "telemetry": {
+    "otlp": {
+      "enabled": false,
+      "endpoint": "http://127.0.0.1:4318",
+      "protocol": "http/protobuf",
+      "service_name": "ibis",
+      "sample_ratio": 0.1,
+      "headers": {}
+    }
+  }
+}
+```
+
+Only span names/ids/counts leave the process (`mcp.tool`, `ai.generate`, `ai.embed`, `memory.consolidate`); prompts, memory content, provider error messages and absolute paths are never exported. `headers` can carry collector credentials - keep them out of committed config. Feature off plus `enabled: true` logs one explicit warning; the default build does not link the OTel stack.
+
+### Harness profiles (G20)
+
+Per-host behavior without changing the tool surface:
+
+```json
+{
+  "harness": {
+    "default": { "sampling": "auto", "hidden_tool_groups": [] },
+    "profiles": [
+      {
+        "match": ["copilot"],
+        "name": "copilot",
+        "sampling": "never",
+        "hidden_tool_groups": ["settings"]
+      }
+    ]
+  }
+}
+```
+
+`match` is a case-insensitive substring on `clientInfo.name`; the first profile wins, unknown clients get `default`. Groups: `ticketing`, `settings`, `optimize`. Default = current behavior (no hidden groups, sampling `auto`). Hiding `settings` also hides `settings_open_ui`, which the VS Code "Open Settings" command calls - do not combine that profile with the VSIX. `sampling: never` removes the MCP sampling leg and the chain falls back to lm_bridge/ollama. The per-surface wiring matrix is [harness/profiles.json](../harness/profiles.json).
+
 ## Config sketch
 
 ```json

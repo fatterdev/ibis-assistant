@@ -90,10 +90,31 @@ ibis memory expand <id>
 ibis memory history <id>
 ibis memory bootstrap-git-store [--dry-run]   # render durable claims into .ibis/claims/ (one commit)
 ibis memory rebuild-git-notes [--dry-run]     # rebuild refs/notes/ibis-claims pointers from the claim index
+ibis memory project --target agents-md|claude-md [--project P] [--path F] [--branch B] [--check] [--dry-run]
 ibis optimize   # RAFT; consolidation also via MCP memory_consolidate
 ```
 
 `memory add` without typed flags still maps to `provide_collaborative_memory`. Any typed flag (`--kind`, `--title`, `--visibility`, …) routes to `memory_add`.
+
+## One-way doc projection (G19)
+
+`ibis memory project` renders current team `rule`/`constraint`/`gotcha` rows into an owned marker region of `AGENTS.md` or `CLAUDE.md`:
+
+```markdown
+<!-- ibis:begin memory -->
+<!-- ibis:project: MyApp -->
+## Ibis memory
+...
+<!-- ibis:end memory -->
+```
+
+- Only the region between the markers is owned and rewritten; every byte outside it is untouched.
+- One block per file. A different project name, unbalanced markers or duplicate blocks are refused without writing.
+- Deterministic: `kind` → confidence desc → title → id, 20 per kind / 60 total, no timestamps or hashes. Rendering neutralizes marker injection and collapses content to one line.
+- Atomic write (`<file>.ibis-tmp` + rename), file EOL preserved; a new file uses LF.
+- `--check`: exit 0 = up to date, 1 = missing/stale, 2 = parse/usage. `--dry-run` prints the block and writes nothing.
+- **No read-back**: `memory_import` accepts JSON only; these files are never imported. The "not a markdown sync bus" statement in the README holds.
+- Only `status=current`, `visibility=team` rows reach the file (personal and derived observations are excluded server-side); `--branch` includes empty-branch rows plus the named branch.
 
 ## Git claim store and degraded reads
 

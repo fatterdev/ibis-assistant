@@ -4,6 +4,37 @@ All notable changes to Ibis Assistant are documented here.
 
 ## [Unreleased]
 
+- **feat(tasks): durable consolidation tasks (E16, ddofds)** - `task` table +
+  `DbTaskStore`/`TaskRunner` with atomic claim, lease/heartbeat, `lease_epoch`
+  fencing, per-item/per-scope checkpoints, bounded recovery, requeue on
+  shutdown and boot prune. `memory_consolidate` returns the task id and never
+  double-spawns; `ibis://tasks` / `ibis://tasks/{id}` expose the rows and
+  `notifications/resources/updated` fires on state changes. New `tasks.*`
+  config (lease/heartbeat/recoveries/retention, clamped by `TaskPolicy`).
+  58 tools unchanged.
+- **feat(telemetry): opt-in OpenTelemetry spans (F17, ddofds)** - `otel`
+  Cargo feature (default off), `telemetry.otlp.*` config (endpoint,
+  http/protobuf or gRPC, service name, parent-based ratio, static headers),
+  `TelemetryGuard`/`shutdown_telemetry(5s)` and a `otel-build` CI job. Spans
+  `mcp.tool`, `ai.generate`, `ai.embed`, `memory.consolidate` with a closed
+  attribute whitelist (names/ids/counts only; no prompts, content, provider
+  messages or absolute paths). Default build/config is inert and keeps the
+  pre-F17 `fmt` output byte-identical.
+- **feat(cli): one-way memory projection (G19, ddofds)** - `ibis memory
+  project --target agents-md|claude-md [--project] [--path] [--branch]
+  [--check] [--dry-run]` renders current team rules/constraints/gotchas into
+  the owned `<!-- ibis:begin memory -->` … `<!-- ibis:end memory -->` region.
+  Deterministic ordering/caps, marker-injection sanitization, atomic
+  tmp+rename with EOL preservation, `--check` exit 0/1/2 and no read-back.
+  No new MCP tool (`memory_export` reused).
+- **feat(harness): per-host harness profiles (G20, ddofds)** -
+  `harness/profiles.json` is the committed wiring descriptor (5 surfaces) and
+  `harness_matrix_test` pins `plugin/mcp.json`, `cursor-plugin/mcp.json` and
+  the VSIX defaults to it. New `harness.*` config resolves `clientInfo.name`
+  to an ordered profile (`sampling: auto|never`, `hidden_tool_groups` for
+  `ticketing`/`settings`/`optimize`), enforced by `list_tools`/`get_tool`/
+  `call_tool`; `sampling=never` removes the MCP sampling leg. Default =
+  current behavior, 58 tools unchanged.
 - **feat(memory): observation synthesis, ingest hook and eval gate (C8 steps
   5-6, ddofds)** - the deterministic observation engine now has its opt-in LLM
   stage. `Optimizer::observations_pass` runs at the tail of

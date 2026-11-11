@@ -34,6 +34,22 @@ Notes on what is verified where:
   loop; consolidation is daemon-only (`--consolidate` or
   `ai.consolidation.enabled`).
 
+## Harness profiles (G20)
+
+The wiring matrix above is committed as
+[harness/profiles.json](../harness/profiles.json) (version 1) and pinned by
+`crates/ibis-server/tests/harness_matrix_test.rs`: changing `plugin/mcp.json`,
+`cursor-plugin/mcp.json` or the VSIX defaults without updating the descriptor
+fails CI.
+
+Per-host runtime behavior lives in `config.harness` (server-side): `match` on
+`clientInfo.name`, `sampling: auto|never`, `hidden_tool_groups`
+(`ticketing`, `settings`, `optimize`). Default = no hidden groups, sampling
+`auto`, 58 tools unchanged. Hiding `settings` also hides `settings_open_ui`,
+which the VS Code **Ibis: Open Settings** command calls - do not apply that
+profile to the VSIX. See
+[ai_and_settings.md](ai_and_settings.md#harness-profiles-g20).
+
 ## Team server
 
 One shared runtime per team store ([docs/team_server.md](team_server.md)):

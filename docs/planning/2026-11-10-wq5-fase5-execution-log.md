@@ -160,3 +160,21 @@
 - **Gate:** fmt ok; clippy workspace `-D warnings` ok; build `ibis-server` ok; fixture discovery invariata.
 - **Deviazioni:** policy nel `SamplingSessionRegistry` invece di un nuovo campo `AppState` (nessuna modifica ai literal dei test); `sampling_allowed` sul trait invece di comporre `connected()` (che ora include comunque la policy); `get_tool` usa l'ultimo profilo risolto (limitazione rmcp documentata); `on_initialized` risolve il profilo per chiudere la finestra prima di list/call.
 - **Aperto:** step 10 (docs, CHANGELOG, coda, gate completo finale).
+
+## Step 10 - Docs, CHANGELOG, coda e gate finale (2026-11-11)
+
+- **Docs:** `docs/ai_and_settings.md` (blocchi `tasks.*`, `telemetry.*`, `harness.*`), `docs/ide-integrations.md` (harness profiles + `harness/profiles.json` come fonte dei wiring, caveat VSIX `settings_open_ui`), `docs/memory_layer.md` (proiezione one-way G19, comando, marker, `--check`/`--dry-run`, nessun read-back), `README.md` (esempio `ibis memory project` + frase one-way, step 7), `CHANGELOG.md` `[Unreleased]` (E16/F17/G19/G20), coda WQ-5 → DONE.
+- **Gate finale:** fmt ok; clippy `--workspace --all-targets -- -D warnings` ok; workspace **85 suite, 0 failure**; build `ibis-server` ok; retrieval **21/21** (MRR 0.952 / r@5 0.976 / r@15 1.0); observations **8/8**; live 4.0.0: `live_surreal` 12/12, `live_memory_estate` 13/13, `live_observations` (search) 12/12 + (optimization) 1/1, `live_commit_txn` 2/2, `live_tasks` 5/5; `tool_contract_test` 9/9, `discovery_snapshot_test` 1/1 (fixture invariata); **58 tool invariati**.
+- **F17 finale:** build `--features otel` ok; `ibis-logger --features otel` 17/17; e2e `stdio_framing_with_otel_enabled` + `otel_exporter_receives_tool_span` 2/2; `cargo tree -p ibis-server` senza feature privo di `opentelemetry`/`tonic`.
+- **Nota ambiente:** un run workspace ha fallito con `rustc-LLVM out of memory` durante il link del binario sotto pressione; il rerun con `CARGO_BUILD_JOBS=2` è verde. Il flaky pre-esistente `ibis-ingest-logs::tailer::tests::restart_before_retry_does_not_skip` è stato visto una volta e verde al rerun (già documentato nello step 4).
+- **Follow-up dichiarati (non bloccanti):** test live diretto `read_parsed`/notifica task, test loop-level lease-lost, budget residuo observations, asserzione proiezione; `get_tool` usa l'ultimo profilo risolto (rmcp non passa il contesto); il prefisso span nell'output `fmt` compare solo con OTel attivo; la finestra non atomica di `persist_consolidation` resta invariata.
+
+## Handoff 2026-11-11 — chiusura fase 5
+
+- **Stato:** step 10/10 — **WQ-5 fase 5 DONE** (E16, F17, G19, G20).
+- **Ultimo commit:** `docs(planning): close WQ-5 phase 5` (questo commit; codice: `02491c4` G20, `77f5313` G19, `41cdc01` F17, `90bf10e` E16).
+- **Gate:** fmt ok · clippy ok · workspace **85 suite, 0 failure** · retrieval **21/21** (MRR 0.952 / r@5 0.976 / r@15 1.0) · observations **8/8** · live 4.0.0 ok (12/13/12+1/2/5) · contract 58 invariati.
+- **Fatto:** E16 task store durevole + superfici; F17 OTel opt-in con span/whitelist/shutdown/CI; G19 renderer + `ibis memory project` one-way con `--check`/`--dry-run`; G20 `harness/profiles.json` + profili runtime/TOOL_GROUPS/sampling; docs, CHANGELOG, coda.
+- **Aperto:** solo follow-up dichiarati sopra; nessun blocco, nessuna decisione richiesta.
+- **Prossimo comando:** nessuno (fase chiusa). Per riprendere: `git log --oneline -n 20` e `git status --short`.
+- **Decisioni richieste:** nessuna.
