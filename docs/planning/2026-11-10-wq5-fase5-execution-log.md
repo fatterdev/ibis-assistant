@@ -128,3 +128,14 @@
 - **Gate:** fmt ok; clippy workspace `-D warnings` ok; workspace **84 suite, 0 failure**.
 - **Deviazioni:** `one line` = prima frase del content collassato (fallback all'intero content senza terminatori); `WriteOutcome.warnings` per il warning permessi (stampato dal comando in step 7); `render_block` non applica il filtro branch (il chiamante usa `select_memories`).
 - **Aperto:** step 7 (comando `memory project`, seam `execute_cli`/`call_server_tool`, README).
+
+## Step 7 - G19 comando e seam (2026-11-11)
+
+- **Commit:** `77f5313` `feat(cli): memory project command and text-returning tool seam (G19 ddofds)`.
+- **Comando:** `ibis memory project --target agents-md|claude-md [--project] [--path] [--branch] [--check] [--dry-run]`; default path `<cwd>/<target>`, default project basename della directory del file (incluso `./AGENTS.md`); target sconosciuto o `--check`+`--dry-run` → exit 2; `--check` 0 aggiornato / 1 mancante o stantio / 2 parsing-uso, nessuna scrittura; `--dry-run` blocco su stdout + header su stderr, nessuna scrittura.
+- **Seam:** `call_mcp_tool`/`call_server_tool` restituiscono `Result<String, CliError>`; `execute_cli` prende un caller che ritorna testo, stampa per i comandi normali (parità, broken pipe ignorato) e intercetta `memory project`; `main.rs` mappa 0/1/2 con `cli_exit_code`; un risultato `isError` diventa `Transport("Tool returned an error:\n…")`.
+- **Contenuto:** solo `memory_export` (status `current`, visibility `team`, format `json`, project; nessun `kind`), filtro branch client-side, nessun read-back; README aggiornato con la precisazione one-way e l'esempio.
+- **Test:** ibis-cli 65 (payload export, default path/project, branch, dry-run senza scrittura, write+check 0/1/2 con byte invariati, marker rotti → 2, usage → 2, seam text, fixture JSON, `is_error`); ibis-server `cli_exit_code` 1; workspace **84 suite, 0 failure**.
+- **Gate:** fmt ok; clippy workspace `-D warnings` ok; build `ibis-server` ok; `ibis memory project --help` verificato.
+- **Deviazioni:** `CliError` guadagna `CheckFailed`/`CheckUsage`/`Io` (mappati in `main`); il seam cambia firma (unico consumatore il binario); `--target` validato manualmente (niente `value_parser` clap, così l'exit 2 resta testabile senza `process::exit`); renderer come step 6.
+- **Aperto:** step 8 (G20).

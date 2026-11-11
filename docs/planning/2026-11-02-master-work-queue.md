@@ -711,8 +711,10 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   whitelist di attributi, gating `otel_active` (default inerte), exporter
   verificato da collector e2e. G19 step 6 completo (`2073f73` + `e0c8c77`):
   renderer deterministico, merge a marker, scrittura atomica, 33 test.
-  Prossimo passo: G19 step 7 (comando `ibis memory project`, seam
-  `execute_cli`/`call_server_tool`, README).
+  G19 step 7 completo (`77f5313`): comando `ibis memory project`, seam
+  testo-ritornante, `--check` 0/1/2, `--dry-run`, README one-way.
+  Prossimo passo: G20 step 8 (`harness/profiles.json` + test di conformità
+  dei manifest).
 
 ### WQ-6 — Track B
 - Nessun sub-fase iniziata: piano integrato in [PLAN.md §9-bis](./PLAN.md)
