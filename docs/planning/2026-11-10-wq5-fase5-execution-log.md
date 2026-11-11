@@ -85,3 +85,23 @@
 - **Aperto:** F17 step 4 (feature `otel`, `TelemetryConfig`, registry, `shutdown_telemetry`, CI `otel-build`), poi step 5 span. Follow-up E16: test live diretto `read_parsed`/`resource_updated_fires_on_state_change`, test loop-level lease-lost, budget residuo observations, proiezione.
 - **Prossimo comando:** aprire la spec F17 §4.1 (righe 555-617) e implementare feature+config; verifica rapida `cargo test -p ibis-logger`.
 - **Decisioni richieste:** nessuna.
+
+## Ripresa 2026-11-11 — pre-flight
+
+- **HEAD:** `3f70975` `docs(planning): handoff E16 completion`; branch `main`; worktree pulito.
+- **Ambiente:** `cargo 1.98.1`; `surreal 4.0.0` già in ascolto su `ws://127.0.0.1:38000` (sidecar in-memory, root/root, `--allow-all`, PID 35908).
+- **Stato:** E16 completo (step 1-3). Riparto dallo **step 4 (F17)**: feature `otel` default off, `TelemetryConfig`, composizione registry, `shutdown_telemetry`, CI `otel-build`.
+- **Piano:** step 4 → 5 (span) → 6 → 7 (G19) → 8 → 9 (G20) → 10 (docs, CHANGELOG, coda) → gate completo + live gate.
+- **Vincoli:** nessun nuovo tool MCP (58), A1 invariato, `otel` default off e stdio intatto, live su SurrealDB 4.0.0.
+
+## Step 4 - F17 feature, config e shutdown (2026-11-11)
+
+- **Commit:** `ac20039` `feat(telemetry): opt-in OTLP exporter, config and shutdown (F17 ddofds)`.
+- **Feature:** `ibis-logger` `otel` (default off) con `opentelemetry` 0.33.1, `opentelemetry_sdk` 0.33.1 (`rt-tokio`), `opentelemetry-otlp` 0.33.1 (`http-proto`, `reqwest-client`, `reqwest-rustls`, `grpc-tonic`), `tracing-opentelemetry` 0.34.0, `tonic` 0.14 (solo tipi metadata). `ibis-server` espone la pass-through `otel = ["ibis-logger/otel"]`.
+- **Config:** `TelemetryConfig`/`OtlpConfig` vivono in `ibis-logger` (fonte unica, embedded in `ibis_core::Config.telemetry`): `enabled=false`, endpoint loopback `4318`, `http/protobuf`, `ibis`, ratio 0.1, headers `{}`. Normalizzazione con warn: protocollo ignoto → default, ratio clampata [0,1] (NaN → default), endpoint vuoto → default, service name trim/cap 64. `Debug` redige i valori degli header.
+- **Subscriber:** registry + `LevelFilter` + fmt layer identico (ansi/target off, sink invariato); layer OTLP opzionale con filtro `meta.is_span()` (gli eventi dentro gli span non diventano OTel events → nessun contenuto in telemetria); `init` passa da 3 a 4 parametri (unico call-site `main.rs`); feature off + config on → warn una volta dopo l'installazione; `shutdown_telemetry(5s)` in `main` prima della chiusura del DB.
+- **Test:** `ibis-logger` 13/13 default e 17/17 `--features otel` (config defaults/overlay, protocol fallback, ratio clamp, endpoint/service name, fmt shape, in-memory exporter, sampled-out, span events filtrati, build di entrambi i transport, flush batch allo shutdown); `ibis-core` test `telemetry_config_defaults`.
+- **Gate:** fmt ok; clippy workspace `-D warnings` ok; clippy logger `--features otel` ok; workspace **84 suite, 0 failure**; build `ibis-server` e `ibis-server --features otel` ok; `cargo tree -p ibis-server` senza feature non contiene `opentelemetry`/`tonic`.
+- **Deviazioni:** `TelemetryConfig` in `ibis-logger` + nuova dipendenza `ibis-core → ibis-logger` (evita la dipendenza inversa del logger da ibis-core); feature `otel` include `tonic` e i feature `reqwest-client`/`reqwest-rustls`/`internal-logs` oltre ai due della spec (metadata gRPC, client async, errori OTel su tracing); `shutdown_with_timeout` invece di `shutdown`; aggiunti al job CI `live_tasks` (E16 era assente) e clippy OTel.
+- **Flaky osservato:** un run workspace ha visto fallire `ibis-ingest-logs::tailer::tests::restart_before_retry_does_not_skip`; il singolo test e il run workspace successivo sono verdi (test pre-esistente timing-sensitive, non toccato).
+- **Aperto:** step 5 (span `mcp.tool`/`ai.generate`/`ai.embed`/`memory.consolidate` + whitelist). `fmt_output_is_unchanged` verifica la forma (ansi/target off), non un byte-diff con timestamp.
