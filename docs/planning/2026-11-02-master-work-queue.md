@@ -706,9 +706,11 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   `f9b00d5` store/runner/checkpoint, `90bf10e` tool/risorse/notifiche; gate
   completo e live 4.0.0 verdi). F17 step 4 completo (`ac20039`): feature
   `otel` default off, `telemetry.otlp.*`, composizione registry,
-  `shutdown_telemetry`, CI `otel-build`. Prossimo passo: F17 step 5 (span
-  `mcp.tool`/`ai.generate`/`ai.embed`/`memory.consolidate`, whitelist
-  attributi, in-memory exporter).
+  `shutdown_telemetry`, CI `otel-build`. F17 step 5 completo (`41cdc01`):
+  span `mcp.tool`/`ai.generate`/`ai.embed`/`memory.consolidate` con
+  whitelist di attributi, gating `otel_active` (default inerte), exporter
+  verificato da collector e2e. Prossimo passo: G19 step 6 (renderer +
+  merge marker + scrittura atomica + `--check`/`--dry-run`).
 
 ### WQ-6 — Track B
 - Nessun sub-fase iniziata: piano integrato in [PLAN.md §9-bis](./PLAN.md)
