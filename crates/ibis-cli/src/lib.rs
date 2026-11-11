@@ -47,6 +47,7 @@
 
 pub mod client;
 pub mod mcp;
+pub mod memory_project;
 
 pub use client::{execute_cli, Cli, Command};
 pub use mcp::{call_mcp_tool, call_server_tool, default_mcp_endpoint};
