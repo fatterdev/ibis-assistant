@@ -709,8 +709,10 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   `shutdown_telemetry`, CI `otel-build`. F17 step 5 completo (`41cdc01`):
   span `mcp.tool`/`ai.generate`/`ai.embed`/`memory.consolidate` con
   whitelist di attributi, gating `otel_active` (default inerte), exporter
-  verificato da collector e2e. Prossimo passo: G19 step 6 (renderer +
-  merge marker + scrittura atomica + `--check`/`--dry-run`).
+  verificato da collector e2e. G19 step 6 completo (`2073f73` + `e0c8c77`):
+  renderer deterministico, merge a marker, scrittura atomica, 33 test.
+  Prossimo passo: G19 step 7 (comando `ibis memory project`, seam
+  `execute_cli`/`call_server_tool`, README).
 
 ### WQ-6 — Track B
 - Nessun sub-fase iniziata: piano integrato in [PLAN.md §9-bis](./PLAN.md)

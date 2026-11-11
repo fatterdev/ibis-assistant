@@ -116,3 +116,15 @@
 - **Gate:** fmt ok; clippy workspace `-D warnings` ok; clippy `ibis-server`/`ibis-logger` `--features otel` ok; build default e feature ok; `cargo tree -p ibis-server` senza feature senza `opentelemetry`/`tonic`.
 - **Deviazioni:** gating `otel_active` (necessario per mantenere byte-identico l'output `fmt` di default); `reqwest-blocking-client` invece di `reqwest-client` (vincolo del BatchSpanProcessor); `memory.consolidate` anche sul path tool via `execute_project`, non solo nel runner; `<unknown>` come valore bounded per nomi tool fuori registry (59° valore cardinalità); test attributi con Layer capture custom invece di `opentelemetry_sdk::testing` (evita metrics/logs nel build opt-in); e2e collector come prova reale dell'exporter.
 - **Aperto:** step 6 (G19).
+
+## Step 6 - G19 renderer e merge (2026-11-11)
+
+- **Commit:** `2073f73` `feat(cli): deterministic memory projection renderer and merge (G19 ddofds)` + `e0c8c77` hardening (merge/project marker).
+- **Modulo:** `crates/ibis-cli/src/memory_project.rs` (client-side, nessuna dipendenza da `ibis-search`): target `agents-md`/`claude-md`, parse del payload `memory_export` (`{"count","items"}`), filtro `rule`/`constraint`/`gotcha` + branch opzionale (righe vuote incluse, confronto case-insensitive Unicode), ordinamento kind → confidence desc → title lowercase → id, cap 20/kind e 60 totali, righe con titolo e contenuto vuoti scartate.
+- **Rendering:** header fisso + intro, sezioni solo se non vuote, riga `- **title** — first sentence` con title cap 120 e one-line cap 200 + `…`, fallback titolo alla prima riga del content, sanitizzazione marker (`<!--`/`-->` neutralizzati), control/CR/LF/tab → spazio, whitespace collassato; EOL dal file (LF per un file nuovo); blocco vuoto esplicito.
+- **Merge:** matrice completa (append con una sola riga vuota e newline finale, replace esatta della regione marker, rifiuto progetto diverso con messaggio esatto, marker sbilanciati, blocchi multipli, project marker fuori regione); idempotenza; byte fuori regione preservati (incluso file senza newline finale); nome progetto sanitizzato (niente marker injection).
+- **Scrittura:** tmp `<file>.ibis-tmp` nella stessa directory + rename, copia permessi best-effort con warning, cleanup su errore, rifiuto directory.
+- **Test:** 33 unit (`render_*`, `merge_*`, `write_atomic_*`, `parse_export`, `select_memories`), inclusi tie-break confidence/title/id, cap 120/200, prima frase, CRLF, marker injection, messaggi di rifiuto esatti.
+- **Gate:** fmt ok; clippy workspace `-D warnings` ok; workspace **84 suite, 0 failure**.
+- **Deviazioni:** `one line` = prima frase del content collassato (fallback all'intero content senza terminatori); `WriteOutcome.warnings` per il warning permessi (stampato dal comando in step 7); `render_block` non applica il filtro branch (il chiamante usa `select_memories`).
+- **Aperto:** step 7 (comando `memory project`, seam `execute_cli`/`call_server_tool`, README).
