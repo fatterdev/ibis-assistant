@@ -713,8 +713,11 @@ Nota di riconciliazione: PLAN.md aveva `…R3/R4 → F3 → D1..D3 → R6`; l'F4
   renderer deterministico, merge a marker, scrittura atomica, 33 test.
   G19 step 7 completo (`77f5313`): comando `ibis memory project`, seam
   testo-ritornante, `--check` 0/1/2, `--dry-run`, README one-way.
-  Prossimo passo: G20 step 8 (`harness/profiles.json` + test di conformità
-  dei manifest).
+  G20 step 8 completo (`363f6de`): `harness/profiles.json` + conformità
+  manifest; step 9 completo (`02491c4`): config `harness.*`, risoluzione
+  `clientInfo`, `TOOL_GROUPS`, sampling policy. Prossimo passo: step 10
+  (docs `ai_and_settings.md`/`ide-integrations.md`/`memory_layer.md`,
+  CHANGELOG, coda) e gate completo/live finale.
 
 ### WQ-6 — Track B
 - Nessun sub-fase iniziata: piano integrato in [PLAN.md §9-bis](./PLAN.md)

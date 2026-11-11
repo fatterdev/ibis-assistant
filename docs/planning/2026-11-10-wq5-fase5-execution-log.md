@@ -139,3 +139,24 @@
 - **Gate:** fmt ok; clippy workspace `-D warnings` ok; build `ibis-server` ok; `ibis memory project --help` verificato.
 - **Deviazioni:** `CliError` guadagna `CheckFailed`/`CheckUsage`/`Io` (mappati in `main`); il seam cambia firma (unico consumatore il binario); `--target` validato manualmente (niente `value_parser` clap, così l'exit 2 resta testabile senza `process::exit`); renderer come step 6.
 - **Aperto:** step 8 (G20).
+
+## Step 8 - G20 descrittore e conformità manifest (2026-11-11)
+
+- **Commit:** `363f6de` `feat(harness): committed profiles descriptor and manifest conformity tests (G20 ddofds)`.
+- **Descrittore:** `harness/profiles.json` v1 con 5 superfici (vscode, cursor, copilot-plugin, claude-desktop, cli): connessione (auto/attach_url, stdio command/args/env, bridge, loopback), attore, manifest.
+- **Test:** `crates/ibis-server/tests/harness_matrix_test.rs` — JSON valido/id unici, superfici attese, `plugin/mcp.json` (type stdio) e `cursor-plugin/mcp.json` (senza type) confrontati con il descrittore, default VSIX (`ibis.runtime.mode=auto`, `mcpUrl` = attach_url, enum auto/spawn/attach).
+- **Gate:** fmt ok; clippy workspace ok; workspace **85 suite, 0 failure** (nuova suite inclusa).
+- **Aperto:** step 9 (profili runtime).
+
+## Step 9 - G20 profili runtime, gruppi e sampling (2026-11-11)
+
+- **Commit:** `02491c4` `feat(harness): runtime profiles, tool groups and sampling policy (G20 ddofds)`.
+- **Config:** `harness.default` + `harness.profiles` (`match`, `name`, `sampling`, `hidden_tool_groups`), default = `auto`/nessun gruppo/lista vuota; overlay parziale con `#[serde(default)]`.
+- **Risoluzione:** `harness::resolve` pura, primo match vince, substring case-insensitive su `clientInfo.name` normalizzato, `None`/sconosciuto → default; sampling ignoto → `auto` + warn una volta; gruppo ignoto → ignorato + warn una volta; label fallback.
+- **TOOL_GROUPS:** `ticketing` (riusa `TICKETING_TOOLS`), `settings` (3 tool), `optimize` (1); `group_of`/`canonical_group`; test di disgiunzione e presenza in `TOOL_SPECS`.
+- **Enforcement:** `list_tools` filtra i gruppi nascosti; `call_tool` rifiuta con messaggio actionable (nome profilo + `harness.profiles[].hidden_tool_groups`); il gate ticketing resta invariato; `get_tool` usa l'ultimo profilo risolto (nessun `RequestContext` in rmcp) e `on_initialized` lo risolve subito; `get_info` invariato.
+- **Sampling:** `SamplingTransport::sampling_allowed` (default true); `SamplingSessionRegistry` con flag condiviso; `McpSamplingProvider::is_functional` = allowed && connected; `connected()` include la policy (`settings_get.sampling_available` coerente); policy aggiornata solo in `call_tool` (sessione certa).
+- **Test:** harness 8 (matrice, first match, unknown sampling/group, default, normalizzazione, hidden groups, ticketing), registry 1 (gruppi), sampling registry 1, `ibis-ai` mcp_sampling 7 (+ `policy_never...`), `tools_discovery` 6 (settings nascosti in list/call, ticketing configurato + profilo, gate default 40/58); workspace **85 suite, 0 failure**.
+- **Gate:** fmt ok; clippy workspace `-D warnings` ok; build `ibis-server` ok; fixture discovery invariata.
+- **Deviazioni:** policy nel `SamplingSessionRegistry` invece di un nuovo campo `AppState` (nessuna modifica ai literal dei test); `sampling_allowed` sul trait invece di comporre `connected()` (che ora include comunque la policy); `get_tool` usa l'ultimo profilo risolto (limitazione rmcp documentata); `on_initialized` risolve il profilo per chiudere la finestra prima di list/call.
+- **Aperto:** step 10 (docs, CHANGELOG, coda, gate completo finale).
