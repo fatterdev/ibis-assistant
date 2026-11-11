@@ -182,7 +182,7 @@ Review olistica finale (tre revisori read-only: F17, G19, G20+E16) — verdetti:
 ## Handoff 2026-11-11 — chiusura fase 5
 
 - **Stato:** step 10/10 — **WQ-5 fase 5 DONE** (E16, F17, G19, G20).
-- **Ultimo commit:** `e713747` `docs: close WQ-5 phase 5 (E16, F17, G19, G20)` (codice: `02491c4` G20, `77f5313` G19, `41cdc01` F17, `90bf10e` E16).
+- **Ultimo commit:** `8224109` `fix: address final review findings (F17 blocker, G19 edges, G20 sampling)` (codice fase: `02491c4` G20, `77f5313` G19, `41cdc01` F17, `90bf10e` E16; chiusura docs `e713747`).
 - **Gate:** fmt ok · clippy ok · workspace **85 suite, 0 failure** · retrieval **21/21** (MRR 0.952 / r@5 0.976 / r@15 1.0) · observations **8/8** · live 4.0.0 ok (12/13/12+1/2/5) · contract 58 invariati.
 - **Fatto:** E16 task store durevole + superfici; F17 OTel opt-in con span/whitelist/shutdown/CI; G19 renderer + `ibis memory project` one-way con `--check`/`--dry-run`; G20 `harness/profiles.json` + profili runtime/TOOL_GROUPS/sampling; docs, CHANGELOG, coda.
 - **Aperto:** solo follow-up dichiarati sopra; nessun blocco, nessuna decisione richiesta.
