@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "surfaces": [
+    {
+      "id": "vscode",
+      "connection": {
+        "default": "auto",
+        "attach_url": "http://127.0.0.1:3030/mcp"
+      },
+      "actor": "header+argument",
+      "manifest": "vscode-extension/package.json"
+    },
+    {
+      "id": "cursor",
+      "connection": {
+        "default": "stdio",
+        "stdio": {
+          "command": "ibis",
+          "args": ["-mode", "stdio", "-runtime-mode", "plugin"],
+          "env": {
+            "RUNTIME_MODE": "plugin"
+          }
+        }
+      },
+      "actor": "argument",
+      "manifest": "cursor-plugin/mcp.json"
+    },
+    {
+      "id": "copilot-plugin",
+      "connection": {
+        "default": "stdio",
+        "stdio": {
+          "command": "ibis",
+          "args": ["-mode", "stdio", "-runtime-mode", "plugin"],
+          "env": {
+            "RUNTIME_MODE": "plugin"
+          }
+        }
+      },
+      "actor": "argument",
+      "manifest": "plugin/mcp.json"
+    },
+    {
+      "id": "claude-desktop",
+      "connection": {
+        "default": "bridge",
+        "bridge": "mcp-bridge -url <endpoint>"
+      },
+      "actor": "argument"
+    },
+    {
+      "id": "cli",
+      "connection": {
+        "default": "loopback"
+      },
+      "actor": "env+argument"
+    }
+  ]
+}
