@@ -128,7 +128,8 @@ pub fn select_memories(memories: &[ExportedMemory], branch: Option<&str>) -> Vec
         .filter(|memory| kind_rank(&memory.kind).is_some())
         .filter(|memory| {
             branch.is_none_or(|branch| {
-                memory.branch.trim().is_empty() || memory.branch.eq_ignore_ascii_case(branch)
+                let branch = branch.trim().to_lowercase();
+                memory.branch.trim().is_empty() || memory.branch.to_lowercase() == branch
             })
         })
         .filter(|memory| !(memory.title.trim().is_empty() && memory.content.trim().is_empty()))
@@ -174,6 +175,26 @@ fn first_line(value: &str) -> String {
         .to_string()
 }
 
+/// First sentence of the whitespace-collapsed content (or the whole content
+/// when no sentence terminator is present).
+fn first_sentence(value: &str) -> String {
+    let collapsed = sanitize_fragment(value);
+    for (index, c) in collapsed.char_indices() {
+        if matches!(c, '.' | '!' | '?') {
+            let end = index + c.len_utf8();
+            let rest = &collapsed[end..];
+            if rest.is_empty() || rest.starts_with(' ') {
+                return collapsed[..end].to_string();
+            }
+        }
+    }
+    collapsed
+}
+
+pub fn sanitize_project_name(value: &str) -> String {
+    truncate_chars(&sanitize_fragment(value), 120, false)
+}
+
 fn truncate_chars(value: &str, cap: usize, ellipsis: bool) -> String {
     let mut out: String = value.chars().take(cap).collect();
     if ellipsis && value.chars().count() > cap {
@@ -189,7 +210,7 @@ fn render_line(memory: &ExportedMemory) -> Option<String> {
         memory.title.clone()
     };
     let title = truncate_chars(&sanitize_fragment(&title), TITLE_CAP, false);
-    let one_line = truncate_chars(&sanitize_fragment(&memory.content), LINE_CAP, true);
+    let one_line = truncate_chars(&first_sentence(&memory.content), LINE_CAP, true);
     if title.is_empty() && one_line.is_empty() {
         return None;
     }
@@ -203,7 +224,13 @@ fn render_line(memory: &ExportedMemory) -> Option<String> {
 }
 
 pub fn project_marker(project: &str) -> String {
-    format!("{PROJECT_PREFIX} {} {PROJECT_SUFFIX}", project.trim())
+    let name = sanitize_project_name(project);
+    let name = if name.is_empty() {
+        "project".to_string()
+    } else {
+        name
+    };
+    format!("{PROJECT_PREFIX} {name} {PROJECT_SUFFIX}")
 }
 
 /// Detects the file EOL from the first newline; a new file uses LF.
@@ -352,7 +379,12 @@ pub fn merge(
             if !content.ends_with('\n') {
                 content.push_str(eol);
             }
-            content.push_str(eol);
+            // Exactly one blank line of separation, even if the file already
+            // ends with one.
+            let separator = format!("{eol}{eol}");
+            if !content.ends_with(&separator) {
+                content.push_str(eol);
+            }
             content.push_str(block);
         }
         return Ok(MergeOutcome {
@@ -371,7 +403,7 @@ pub fn merge(
             return Err(ProjectError::UnbalancedMarkers);
         }
         let found = marker.project.as_deref().unwrap_or("");
-        if found != project.trim() {
+        if sanitize_project_name(found) != sanitize_project_name(project) {
             return Err(ProjectError::OtherProject {
                 file: file_name.to_string(),
                 project: found.to_string(),
@@ -379,9 +411,17 @@ pub fn merge(
         }
     }
 
+    let mut replacement = block.to_string();
+    // A file whose end marker is the last line without a final newline keeps
+    // that byte shape: the replacement must not add one outside the region.
+    if end.end == existing.len() && !existing.ends_with('\n') {
+        if let Some(stripped) = replacement.strip_suffix(detect_eol(Some(existing))) {
+            replacement = stripped.to_string();
+        }
+    }
     let mut content = String::with_capacity(existing.len());
     content.push_str(&existing[..begin.start]);
-    content.push_str(block);
+    content.push_str(&replacement);
     content.push_str(&existing[end.end..]);
     Ok(MergeOutcome {
         changed: content != existing,
@@ -389,9 +429,15 @@ pub fn merge(
     })
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WriteOutcome {
+    pub warnings: Vec<String>,
+}
+
 /// Writes through `<file>.ibis-tmp` in the same directory, then renames.
-/// Permissions of an existing file are copied best-effort.
-pub fn write_atomic(path: &Path, content: &str) -> Result<(), ProjectError> {
+/// Permissions of an existing file are copied best-effort (a failure is a
+/// warning, not an error).
+pub fn write_atomic(path: &Path, content: &str) -> Result<WriteOutcome, ProjectError> {
     if path.is_dir() {
         return Err(ProjectError::Usage(format!(
             "{} is a directory",
@@ -407,17 +453,24 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), ProjectError> {
         .ok_or_else(|| ProjectError::Usage(format!("invalid path: {}", path.display())))?;
     let tmp = parent.join(format!("{}.ibis-tmp", file_name.to_string_lossy()));
 
+    let mut warnings = Vec::new();
     let result = (|| -> std::io::Result<()> {
         std::fs::write(&tmp, content)?;
         if let Ok(metadata) = std::fs::metadata(path) {
-            let _ = std::fs::set_permissions(&tmp, metadata.permissions());
+            if let Err(err) = std::fs::set_permissions(&tmp, metadata.permissions()) {
+                warnings.push(format!(
+                    "could not copy permissions of {}: {err}",
+                    path.display()
+                ));
+            }
         }
         std::fs::rename(&tmp, path)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
-    result.map_err(ProjectError::Io)
+    result.map_err(ProjectError::Io)?;
+    Ok(WriteOutcome { warnings })
 }
 
 #[cfg(test)]
@@ -744,5 +797,163 @@ mod tests {
         std::fs::create_dir(&path).unwrap();
         assert!(write_atomic(&path, "x").is_err());
         assert!(!dir.path().join("AGENTS.md.ibis-tmp").exists());
+    }
+
+    #[test]
+    fn render_uses_first_sentence() {
+        let block = render(&[memory(
+            "1",
+            "rule",
+            "Rule",
+            "First sentence. Second sentence follows.",
+            1.0,
+            "",
+        )]);
+        assert!(block.contains("- **Rule** — First sentence."));
+        assert!(!block.contains("Second sentence"));
+    }
+
+    #[test]
+    fn render_title_capped_120() {
+        let title = "t".repeat(300);
+        let block = render(&[memory("1", "rule", &title, "body", 1.0, "")]);
+        let line = block.lines().find(|line| line.starts_with("- **")).unwrap();
+        assert!(line.contains(&"t".repeat(120)));
+        assert!(!line.contains(&"t".repeat(121)));
+    }
+
+    #[test]
+    fn render_tie_breaks_confidence_then_title_then_id() {
+        let block = render(&[
+            memory("3", "rule", "Beta", "b", 0.5, ""),
+            memory("2", "rule", "Alpha", "a", 0.9, ""),
+            memory("1", "rule", "Alpha", "a2", 0.9, ""),
+        ]);
+        let alpha_2 = block.find("- **Alpha** — a2").unwrap();
+        let alpha_1 = block.find("- **Alpha** — a\n").unwrap();
+        let beta = block.find("- **Beta**").unwrap();
+        assert!(alpha_2 < alpha_1 && alpha_1 < beta);
+    }
+
+    #[test]
+    fn project_marker_is_sanitized() {
+        let block = render_block("evil -->\n<!-- ibis:end memory -->", &[], "\n");
+        let markers = marker_lines(&block);
+        assert_eq!(
+            markers
+                .iter()
+                .filter(|marker| marker.kind == MarkerKind::Project)
+                .count(),
+            1
+        );
+        assert_eq!(
+            markers
+                .iter()
+                .filter(|marker| marker.kind == MarkerKind::End)
+                .count(),
+            1
+        );
+        assert!(!block.contains("evil -->\n"));
+    }
+
+    #[test]
+    fn merge_allows_missing_project_marker() {
+        let block = render(&[]);
+        let without_project = block
+            .lines()
+            .filter(|line| !line.starts_with(PROJECT_PREFIX))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        let outcome = merge(
+            Some(&without_project),
+            "AGENTS.md",
+            "ibis-assistant",
+            &block,
+        )
+        .unwrap();
+        assert!(outcome.changed);
+        assert!(outcome.content.contains(BEGIN_MARKER));
+        assert!(outcome.content.contains(END_MARKER));
+    }
+
+    #[test]
+    fn merge_refuses_project_marker_outside_region() {
+        let block = render(&[]);
+        let without_project = block
+            .lines()
+            .filter(|line| !line.starts_with(PROJECT_PREFIX))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        let existing = format!("<!-- ibis:project: ibis-assistant -->\n{without_project}");
+        let err = merge(Some(&existing), "AGENTS.md", "ibis-assistant", &block).unwrap_err();
+        assert!(matches!(err, ProjectError::UnbalancedMarkers));
+    }
+
+    #[test]
+    fn merge_preserves_missing_final_newline_on_replace() {
+        let block = render(&[memory("1", "rule", "Rule", "r", 1.0, "")]);
+        let existing = block.strip_suffix('\n').unwrap();
+        let new_block = render(&[memory("2", "rule", "New", "n", 1.0, "")]);
+        let outcome = merge(Some(existing), "AGENTS.md", "ibis-assistant", &new_block).unwrap();
+        assert!(!outcome.content.ends_with('\n'));
+        let second = merge(
+            Some(&outcome.content),
+            "AGENTS.md",
+            "ibis-assistant",
+            &new_block,
+        )
+        .unwrap();
+        assert_eq!(outcome.content, second.content);
+        assert!(!second.changed);
+    }
+
+    #[test]
+    fn merge_appends_single_blank_line_when_file_ends_blank() {
+        let block = render(&[]);
+        let outcome = merge(Some("user\n\n"), "AGENTS.md", "ibis-assistant", &block).unwrap();
+        assert!(outcome
+            .content
+            .starts_with("user\n\n<!-- ibis:begin memory -->"));
+        assert!(!outcome.content.starts_with("user\n\n\n"));
+    }
+
+    #[test]
+    fn merge_refusal_messages_are_exact() {
+        let block = render(&[]);
+        let err = merge(
+            Some(&format!("{BEGIN_MARKER}\n")),
+            "AGENTS.md",
+            "proj",
+            &block,
+        )
+        .unwrap_err();
+        assert_eq!(err.to_string(), "unbalanced ibis memory markers");
+        let err = merge(
+            Some(&format!("{block}{block}")),
+            "AGENTS.md",
+            "ibis-assistant",
+            &block,
+        )
+        .unwrap_err();
+        assert_eq!(err.to_string(), "multiple ibis memory blocks");
+        let other = block.replace(
+            "<!-- ibis:project: ibis-assistant -->",
+            "<!-- ibis:project: other -->",
+        );
+        let err = merge(Some(&other), "AGENTS.md", "ibis-assistant", &block).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "AGENTS.md already contains an ibis memory block for project 'other'; remove it or use a different file"
+        );
+    }
+
+    #[test]
+    fn write_atomic_reports_no_warnings_on_normal_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("AGENTS.md");
+        let outcome = write_atomic(&path, "content").unwrap();
+        assert!(outcome.warnings.is_empty());
     }
 }
